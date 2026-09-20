@@ -101,8 +101,14 @@ byte limits while disabling DuckDB extension loading and external access.
 
 Search and inspection responses are bounded. Sensitive files, generated
 directories, oversized content, and symlink escapes are excluded by default.
-Search root filters accept either an indexed root or an existing parent scope
-that contains indexed roots. Structured-query roots remain exact allowlist entries.
+Default-excluded directories are `.git`, `.hg`, `.svn`, `.awi-index`,
+`node_modules`, `target`, `__pycache__`, `.pytest_cache`, `.mypy_cache`,
+`.ruff_cache`, `.ipynb_checkpoints`, `.venv`, `.idea`, `.vscode`, and `.cache`,
+alongside `.gitignore` and `.awiignore` rules. The `watch` producer applies the
+same exclusions to filesystem events, so churn in those directories never wakes
+a reconcile. Search root filters accept either an indexed root or an existing
+parent scope that contains indexed roots. Structured-query roots remain exact
+allowlist entries.
 
 MCP audit logging is optional. When enabled, AWI writes private (`0600`) JSONL
 records containing bounded and credential-redacted arguments, duration, outcome,

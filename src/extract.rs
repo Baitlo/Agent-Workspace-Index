@@ -163,6 +163,8 @@ pub(crate) fn is_default_excluded(path: &Path) -> bool {
             value.to_str(),
             Some(
                 ".git"
+                    | ".hg"
+                    | ".svn"
                     | ".awi-index"
                     | "node_modules"
                     | "target"
@@ -170,7 +172,11 @@ pub(crate) fn is_default_excluded(path: &Path) -> bool {
                     | ".pytest_cache"
                     | ".mypy_cache"
                     | ".ruff_cache"
+                    | ".ipynb_checkpoints"
                     | ".venv"
+                    | ".idea"
+                    | ".vscode"
+                    | ".cache"
             )
         )
     })
@@ -276,5 +282,36 @@ mod tests {
                 .iter()
                 .any(|symbol| symbol.name == "helper" && symbol.kind == "call")
         );
+    }
+
+    #[test]
+    fn excludes_vcs_cache_and_build_directories() {
+        for path in [
+            "repo/.git/objects/ab/cd",
+            "repo/.hg/store",
+            "repo/.svn/entries",
+            "repo/node_modules/pkg/index.js",
+            "repo/target/debug/build.rs",
+            "repo/__pycache__/mod.pyc",
+            "repo/.pytest_cache/v/cache",
+            "repo/.mypy_cache/3.11/x.json",
+            "repo/.ruff_cache/content",
+            "repo/.ipynb_checkpoints/nb-checkpoint.ipynb",
+            "repo/.venv/bin/python",
+            "repo/.idea/workspace.xml",
+            "repo/.vscode/settings.json",
+            "repo/.cache/blob",
+            "repo/.awi-index/catalog.sqlite3",
+        ] {
+            assert!(
+                is_default_excluded(Path::new(path)),
+                "expected {path} to be excluded"
+            );
+        }
+        // Ordinary source and data are not excluded.
+        assert!(!is_default_excluded(Path::new("repo/src/main.rs")));
+        assert!(!is_default_excluded(Path::new("repo/data/metrics.csv")));
+        // A substring match must not trigger: "targets" is not "target".
+        assert!(!is_default_excluded(Path::new("repo/targets/list.txt")));
     }
 }

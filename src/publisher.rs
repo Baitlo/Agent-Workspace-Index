@@ -9,6 +9,7 @@ use notify::{RecommendedWatcher, RecursiveMode, Watcher};
 use serde::Serialize;
 
 use crate::WorkspaceIndex;
+use crate::extract::is_default_excluded;
 use crate::model::IndexOptions;
 use crate::snapshot::prune_generations;
 
@@ -225,17 +226,25 @@ fn run_cycle(workspace: &mut WorkspaceIndex, roots: &[PathBuf], config: &Publish
 }
 
 /// Start a recursive watcher over the local roots. Returns the event receiver
-/// and the watcher handle, which must be kept alive for events to flow.
+/// and the watcher handle, which must be kept alive for events to flow. Events
+/// whose every path lies under a default-excluded directory (`.git`, caches,
+/// build output, and similar) are dropped so churn there cannot wake the
+/// reconcile loop.
 fn start_watcher(local_roots: &[PathBuf]) -> Result<(Receiver<()>, Option<RecommendedWatcher>)> {
     if local_roots.is_empty() {
         return Ok((channel().1, None));
     }
     let (sender, receiver) = channel();
     let mut watcher = notify::recommended_watcher(move |result: notify::Result<notify::Event>| {
-        // Collapse every event into a unit tick; the loop reconciles all roots
-        // regardless of which path changed, so event details are unneeded.
-        if result.is_ok() {
-            let _ = sender.send(());
+        // Collapse into a unit tick, but ignore events confined to excluded
+        // paths so VCS/cache/build noise does not drive reconciles. An event
+        // with no paths (rare) is treated as relevant to be safe.
+        if let Ok(event) = result {
+            let relevant =
+                event.paths.is_empty() || event.paths.iter().any(|path| !is_default_excluded(path));
+            if relevant {
+                let _ = sender.send(());
+            }
         }
     })
     .context("create filesystem watcher")?;
