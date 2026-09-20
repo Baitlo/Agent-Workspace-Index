@@ -131,6 +131,46 @@ const START_TIMEOUT: Duration = Duration::from_secs(5);
 const STOP_TIMEOUT: Duration = Duration::from_secs(5);
 
 #[test]
+fn prune_generation_history_bounds_repeated_reconciles() {
+    let fixture = tempdir().unwrap();
+    let root = fixture.path().join("workspace");
+    let index_dir = fixture.path().join("index");
+    fs::create_dir_all(&root).unwrap();
+    fs::write(root.join("lib.rs"), "pub fn f() -> usize { 1 }\n").unwrap();
+
+    let mut workspace = WorkspaceIndex::open(&index_dir).unwrap();
+    // Reconcile many times with no content change: each appends a generation
+    // bookkeeping row even though nothing is published.
+    for _ in 0..12 {
+        workspace
+            .index_root(&root, &IndexOptions::default())
+            .unwrap();
+    }
+    let latest = workspace.status().unwrap().completed_generation.unwrap();
+    // Pruning keeps rows at or above the latest completed generation and drops
+    // the rest, so the table cannot grow without bound.
+    let removed = workspace.prune_generation_history().unwrap();
+    assert!(
+        removed >= 11,
+        "expected to prune stale rows, removed {removed}"
+    );
+    // The latest completed generation is unchanged and still searchable.
+    assert_eq!(
+        workspace.status().unwrap().completed_generation,
+        Some(latest)
+    );
+    assert!(
+        workspace
+            .search("f", 5)
+            .unwrap()
+            .iter()
+            .any(|hit| hit.path.ends_with("lib.rs"))
+    );
+    // Pruning again is a no-op now that only current rows remain.
+    assert_eq!(workspace.prune_generation_history().unwrap(), 0);
+}
+
+#[test]
 fn daemon_serves_cli_requests_and_stops_cleanly() {
     let fixture = tempdir().unwrap();
     let root = fixture.path().join("daemon-workspace");

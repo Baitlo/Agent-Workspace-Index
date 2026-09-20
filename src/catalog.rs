@@ -409,6 +409,18 @@ impl Catalog {
             .context("read latest completed generation")
     }
 
+    /// Delete generation bookkeeping rows strictly older than `keep_from`,
+    /// retaining every row at or above it. Safe because file lookups compare
+    /// generation numbers directly and never join the generations table; the
+    /// only consumer of this table is the latest-completed watermark. Returns
+    /// the number of rows removed.
+    pub(crate) fn prune_generation_rows(&mut self, keep_from: i64) -> Result<usize> {
+        let removed = self
+            .connection
+            .execute("DELETE FROM generations WHERE id < ?1", params![keep_from])?;
+        Ok(removed)
+    }
+
     pub(crate) fn checkpoint(&self) -> Result<()> {
         self.connection
             .execute_batch("PRAGMA wal_checkpoint(TRUNCATE);")

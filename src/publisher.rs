@@ -123,6 +123,10 @@ pub fn publish_once(
         cycle.generation = Some(manifest.generation);
         cycle.pruned = prune_generations(&config.publish_dir, config.retain)?;
     }
+    // Reconciling every cycle appends generation rows even when nothing
+    // changed; trim the bookkeeping so background filesystem noise cannot grow
+    // the catalog without bound.
+    let _ = workspace.prune_generation_history();
     Ok(cycle)
 }
 
@@ -169,21 +173,38 @@ pub fn watch(index_dir: &Path, roots: &[PathBuf], config: &PublisherConfig) -> R
 
     // Reconcile once at startup so a fresh publication exists immediately.
     run_cycle(&mut workspace, &resolved, config);
+    let mut last_cycle = Instant::now();
 
     loop {
         // Block until either a filesystem event arrives or the periodic tick
-        // fires. Events trigger a debounced reconcile; the timeout is the safety
-        // net that keeps remote roots fresh.
-        match events.recv_timeout(config.interval) {
-            Ok(_) => drain_debounced(&events, config.debounce),
-            Err(RecvTimeoutError::Timeout) => {}
-            Err(RecvTimeoutError::Disconnected) => {
-                // Watcher thread gone: fall back to a plain periodic sleep so
-                // the producer keeps covering every root.
-                thread::sleep(config.interval);
+        // fires. An event reconciles only the local roots it can pertain to;
+        // the timeout reconciles every root and is the sole trigger for remote
+        // (NFS-style) roots, which have no reliable events.
+        let cycle_roots: &[PathBuf] = match events.recv_timeout(config.interval) {
+            Ok(_) => {
+                drain_debounced(&events, config.debounce);
+                // Enforce a minimum spacing between event-driven reconciles so
+                // continuous background filesystem noise (editors, VCS, build
+                // tools) cannot spin the loop. The debounce window is that floor.
+                let since = last_cycle.elapsed();
+                if since < config.debounce {
+                    thread::sleep(config.debounce - since);
+                    drain_debounced(&events, Duration::ZERO);
+                }
+                &local
             }
+            Err(RecvTimeoutError::Timeout) => &resolved,
+            Err(RecvTimeoutError::Disconnected) => {
+                // Watcher thread gone: fall back to a plain periodic sleep and
+                // keep covering every root on the timeout cadence.
+                thread::sleep(config.interval);
+                &resolved
+            }
+        };
+        if !cycle_roots.is_empty() {
+            run_cycle(&mut workspace, cycle_roots, config);
+            last_cycle = Instant::now();
         }
-        run_cycle(&mut workspace, &resolved, config);
     }
 }
 

@@ -247,6 +247,17 @@ impl WorkspaceIndex {
             .collect())
     }
 
+    /// Delete generation bookkeeping rows older than the latest completed
+    /// generation so repeated reconciles cannot grow the catalog without
+    /// bound. Returns the number of rows removed.
+    pub fn prune_generation_history(&mut self) -> Result<usize> {
+        let _writer_lock = acquire_writer_lock(&self.index_dir)?;
+        let Some(latest) = self.catalog.latest_completed_generation()? else {
+            return Ok(0);
+        };
+        self.catalog.prune_generation_rows(latest)
+    }
+
     pub fn query(&self, request: &QueryRequest) -> Result<QueryResult> {
         let registered_roots = self.catalog.roots()?;
         for root in &request.roots {
