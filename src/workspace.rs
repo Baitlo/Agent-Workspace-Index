@@ -236,6 +236,17 @@ impl WorkspaceIndex {
         self.catalog.status()
     }
 
+    /// Canonical roots currently registered in the catalog, newest-nested
+    /// first. Used by the producer to reconcile everything already indexed.
+    pub fn indexed_roots(&self) -> Result<Vec<PathBuf>> {
+        Ok(self
+            .catalog
+            .roots()?
+            .into_iter()
+            .map(|(_, root)| root)
+            .collect())
+    }
+
     pub fn query(&self, request: &QueryRequest) -> Result<QueryResult> {
         let registered_roots = self.catalog.roots()?;
         for root in &request.roots {

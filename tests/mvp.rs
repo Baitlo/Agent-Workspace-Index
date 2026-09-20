@@ -301,6 +301,191 @@ fn daemon_atomically_switches_published_snapshots() {
     wait_until_stopped(&mut daemon);
 }
 
+#[test]
+fn watch_producer_auto_publishes_and_reader_follows() {
+    let fixture = tempdir().unwrap();
+    let root = fixture.path().join("workspace");
+    let writer_index = fixture.path().join("writer-index");
+    let publish_dir = fixture.path().join("published");
+    let runtime_index = fixture.path().join("runtime-index");
+    let socket = fixture.path().join("watch.sock");
+    let source = root.join("service.rs");
+    fs::create_dir_all(&root).unwrap();
+    fs::write(&source, "pub fn watch_version_one() -> usize { 1 }\n").unwrap();
+
+    // Seed one indexed root so `watch` can default to catalog roots.
+    {
+        let mut workspace = WorkspaceIndex::open(&writer_index).unwrap();
+        workspace
+            .index_root(&root, &IndexOptions::default())
+            .unwrap();
+    }
+
+    // Start the persistent producer: reconcile + auto-publish on change.
+    let producer = Command::new(env!("CARGO_BIN_EXE_awi"))
+        .args(["--index-dir", path(&writer_index)])
+        .arg("watch")
+        .args([
+            "--publish-dir",
+            path(&publish_dir),
+            "--interval-ms",
+            "50",
+            "--retain",
+            "1",
+        ])
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn()
+        .unwrap();
+    let mut producer = ChildGuard::new(producer);
+
+    wait_for_pointer(&publish_dir, &mut producer);
+
+    // Start the snapshot-following reader and confirm it sees the first version.
+    let reader = Command::new(env!("CARGO_BIN_EXE_awi"))
+        .args([
+            "--index-dir",
+            path(&runtime_index),
+            "--socket",
+            path(&socket),
+        ])
+        .arg("serve")
+        .args([
+            "--snapshot-source",
+            path(&publish_dir),
+            "--snapshot-poll-ms",
+            "0",
+        ])
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn()
+        .unwrap();
+    let mut reader = ChildGuard::new(reader);
+    wait_until_ready(&mut reader, &runtime_index, &socket);
+    wait_for_hits(&runtime_index, &socket, "watch_version_one", &mut reader);
+
+    // Change the source; the producer republishes and the reader auto-switches.
+    fs::write(&source, "pub fn watch_version_two() -> usize { 2 }\n").unwrap();
+    wait_for_hits(&runtime_index, &socket, "watch_version_two", &mut reader);
+    let stale = run_json(
+        &runtime_index,
+        &socket,
+        &["search", "watch_version_one", "--json"],
+    );
+    assert!(stale.as_array().unwrap().is_empty());
+
+    run_json(&runtime_index, &socket, &["stop", "--json"]);
+    wait_until_stopped(&mut reader);
+    producer.child.kill().unwrap();
+    producer.child.wait().unwrap();
+    producer.reaped = true;
+}
+
+#[test]
+fn watch_producer_reacts_to_local_edits_before_periodic_tick() {
+    let fixture = tempdir().unwrap();
+    let root = fixture.path().join("workspace");
+    let writer_index = fixture.path().join("writer-index");
+    let publish_dir = fixture.path().join("published");
+    let source = root.join("service.rs");
+    fs::create_dir_all(&root).unwrap();
+    fs::write(&source, "pub fn realtime_version_one() -> usize { 1 }\n").unwrap();
+
+    {
+        let mut workspace = WorkspaceIndex::open(&writer_index).unwrap();
+        workspace
+            .index_root(&root, &IndexOptions::default())
+            .unwrap();
+    }
+
+    // A very long interval means any timely republish must come from the
+    // real-time filesystem watcher, not the periodic safety-net tick.
+    let producer = Command::new(env!("CARGO_BIN_EXE_awi"))
+        .args(["--index-dir", path(&writer_index)])
+        .arg("watch")
+        .args([
+            "--publish-dir",
+            path(&publish_dir),
+            "--interval-ms",
+            "600000",
+            "--debounce-ms",
+            "50",
+            "--retain",
+            "2",
+        ])
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn()
+        .unwrap();
+    let mut producer = ChildGuard::new(producer);
+    wait_for_pointer(&publish_dir, &mut producer);
+    let first = read_pointer_generation(&publish_dir);
+
+    // Edit a local-disk file; the watcher should drive a new publish quickly,
+    // well within the START_TIMEOUT and far below the 600s interval.
+    fs::write(&source, "pub fn realtime_version_two() -> usize { 2 }\n").unwrap();
+    let deadline = Instant::now() + START_TIMEOUT;
+    loop {
+        if let Some(status) = producer.child.try_wait().unwrap() {
+            panic!("AWI producer exited before reacting: {status}");
+        }
+        if read_pointer_generation(&publish_dir) > first {
+            break;
+        }
+        assert!(
+            Instant::now() < deadline,
+            "real-time watcher did not republish within {START_TIMEOUT:?}"
+        );
+        thread::sleep(Duration::from_millis(20));
+    }
+
+    producer.child.kill().unwrap();
+    producer.child.wait().unwrap();
+    producer.reaped = true;
+}
+
+fn read_pointer_generation(publish_dir: &Path) -> i64 {
+    let pointer = publish_dir.join("current.json");
+    let value: Value = serde_json::from_slice(&fs::read(&pointer).unwrap()).unwrap();
+    value["generation"].as_i64().unwrap()
+}
+
+fn wait_for_pointer(publish_dir: &Path, producer: &mut ChildGuard) {
+    let deadline = Instant::now() + START_TIMEOUT;
+    let pointer = publish_dir.join("current.json");
+    loop {
+        if let Some(status) = producer.child.try_wait().unwrap() {
+            panic!("AWI producer exited before publishing: {status}");
+        }
+        if pointer.exists() {
+            return;
+        }
+        assert!(
+            Instant::now() < deadline,
+            "producer did not publish a snapshot within {START_TIMEOUT:?}"
+        );
+        thread::sleep(Duration::from_millis(20));
+    }
+}
+
+fn wait_for_hits(index_dir: &Path, socket: &Path, query: &str, reader: &mut ChildGuard) {
+    let deadline = Instant::now() + START_TIMEOUT;
+    loop {
+        if let Some(status) = reader.child.try_wait().unwrap() {
+            panic!("AWI reader exited before serving {query}: {status}");
+        }
+        let hits = run_json(index_dir, socket, &["search", query, "--json"]);
+        if hits.as_array().is_some_and(|hits| !hits.is_empty()) {
+            return;
+        }
+        assert!(
+            Instant::now() < deadline,
+            "reader did not observe {query} within {START_TIMEOUT:?}"
+        );
+        thread::sleep(Duration::from_millis(20));
+    }
+}
+
 fn path(value: &Path) -> &str {
     value.to_str().unwrap()
 }

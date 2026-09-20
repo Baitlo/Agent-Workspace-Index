@@ -56,6 +56,38 @@ awi --index-dir /tmp/awi-reader serve \
   --snapshot-source /shared/awi-publication
 ```
 
+### Automatic Update Chain
+
+To keep the shared publication current without manual reconciles, run the
+persistent producer alongside the reader. The producer reconciles roots and
+publishes a new immutable snapshot only when content changed; the
+snapshot-following reader atomically switches to each new generation on its next
+request. This closes the loop end to end: edit a file, and the reader reflects
+it automatically.
+
+Local-disk roots are watched in real time (inotify), so edits publish within the
+debounce window. Remote roots (NFS and similar, detected via `/proc/mounts`) and
+a periodic safety-net tick every `--interval-ms` drive the rest, because
+filesystem events are not reliable for remote writes. If the watcher cannot
+start, the producer degrades cleanly to pure periodic reconcile.
+
+```bash
+# Producer: watch local roots live, reconcile every root at most every 5s,
+# coalesce edit bursts over 500ms, auto-publish on change, retain 3 generations.
+awi --index-dir /tmp/awi-writer watch \
+  --publish-dir /shared/awi-publication \
+  --interval-ms 5000 --debounce-ms 500 --retain 3
+
+# Reader: follow the publication and auto-activate new generations.
+awi --index-dir /tmp/awi-reader serve \
+  --snapshot-source /shared/awi-publication
+```
+
+`watch` defaults to every root already registered in the catalog; pass
+`--root <path>` one or more times to restrict the set. Retention pruning removes
+older generations after each publish and never deletes the generation the
+pointer currently references, so the shared directory cannot grow without bound.
+
 For Codex, `scripts/awi-mcp-snapshot-wrapper.sh` starts or reuses one local
 snapshot daemon before launching the stdio adapter. Configure
 `AWI_SNAPSHOT_SOURCE` and `AWI_MCP_AUDIT_LOG`, then register the wrapper as a

@@ -173,6 +173,61 @@ pub(crate) fn read_pointer(publish_dir: &Path) -> Result<SnapshotPointer> {
     .with_context(|| format!("decode snapshot pointer {}", path.display()))
 }
 
+/// Retain only the newest `keep` published generations, always preserving the
+/// generation the pointer currently references. Returns the removed generation
+/// numbers. `keep` is clamped to at least one so an active snapshot is never
+/// deleted.
+pub(crate) fn prune_generations(publish_dir: &Path, keep: usize) -> Result<Vec<i64>> {
+    let keep = keep.max(1);
+    let active = read_pointer(publish_dir)?.generation;
+    let generations_dir = publish_dir.join("generations");
+    let mut generations = Vec::new();
+    let entries = match fs::read_dir(&generations_dir) {
+        Ok(entries) => entries,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
+        Err(error) => {
+            return Err(error).with_context(|| {
+                format!("list snapshot generations {}", generations_dir.display())
+            });
+        }
+    };
+    for entry in entries {
+        let entry = entry?;
+        if !entry.file_type()?.is_dir() {
+            continue;
+        }
+        let name = entry.file_name();
+        let Some(name) = name.to_str() else {
+            continue;
+        };
+        // Skip staging directories such as ".generation-*.tmp-<pid>".
+        let Some(number) = name.strip_prefix("generation-") else {
+            continue;
+        };
+        if let Ok(generation) = number.parse::<i64>() {
+            generations.push((generation, entry.path()));
+        }
+    }
+    generations.sort_by_key(|(generation, _)| std::cmp::Reverse(*generation));
+
+    let mut removed = Vec::new();
+    let mut retained = 0usize;
+    for (generation, path) in generations {
+        if generation == active || retained < keep {
+            retained += 1;
+            continue;
+        }
+        make_writable(&path)?;
+        fs::remove_dir_all(&path)
+            .with_context(|| format!("remove stale snapshot generation {}", path.display()))?;
+        removed.push(generation);
+    }
+    if !removed.is_empty() {
+        sync_directory(&generations_dir)?;
+    }
+    Ok(removed)
+}
+
 pub(crate) fn verify_snapshot(path: &Path) -> Result<SnapshotManifest> {
     let manifest_path = path.join("manifest.json");
     let manifest: SnapshotManifest = serde_json::from_slice(
@@ -396,5 +451,47 @@ mod tests {
             fs::read(activated.path.join("catalog.sqlite3")).unwrap(),
             b"catalog"
         );
+    }
+
+    #[test]
+    fn prune_retains_newest_and_active_generations() {
+        let fixture = tempdir().unwrap();
+        let index = fixture.path().join("index");
+        let publish_dir = fixture.path().join("publish");
+        fs::create_dir_all(index.join("tantivy")).unwrap();
+        fs::write(index.join("catalog.sqlite3"), b"catalog").unwrap();
+        fs::write(index.join("tantivy/meta.json"), b"index").unwrap();
+
+        for generation in 1..=4 {
+            publish(&index, &publish_dir, generation).unwrap();
+        }
+        // Pointer currently references generation 4 (the latest publish).
+        let removed = prune_generations(&publish_dir, 2).unwrap();
+        assert_eq!(removed, vec![2, 1]);
+
+        let generations_dir = publish_dir.join("generations");
+        assert!(
+            generations_dir
+                .join("generation-00000000000000000004")
+                .exists()
+        );
+        assert!(
+            generations_dir
+                .join("generation-00000000000000000003")
+                .exists()
+        );
+        assert!(
+            !generations_dir
+                .join("generation-00000000000000000002")
+                .exists()
+        );
+        assert!(
+            !generations_dir
+                .join("generation-00000000000000000001")
+                .exists()
+        );
+
+        // Pruning is idempotent once the retention target is met.
+        assert!(prune_generations(&publish_dir, 2).unwrap().is_empty());
     }
 }

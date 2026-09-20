@@ -12,6 +12,7 @@ clap = { version = "4.6", features = ["derive", "env"] }
 duckdb = { version = "1.10505.0", features = ["bundled", "json", "parquet"] }
 fs4 = "0.13"
 ignore = "0.4"
+notify = "8"
 rayon = "1.12"
 regex = "1.13"
 rmcp = { version = "3.4", default-features = false, features = ["macros", "server", "transport-io"] }

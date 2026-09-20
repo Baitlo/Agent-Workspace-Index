@@ -6,8 +6,8 @@ use awi::benchmark::{evaluate as evaluate_retrieval, load_gold};
 use awi::daemon::{default_socket_path, serve_with_snapshots, try_request};
 use awi::protocol::Request;
 use awi::{
-    IndexOptions, IndexReport, IndexStatus, InspectResult, NotifyReport, QueryInput, QueryRequest,
-    QueryResult, SearchHit, WorkspaceIndex,
+    IndexOptions, IndexReport, IndexStatus, InspectResult, NotifyReport, PublisherConfig,
+    QueryInput, QueryRequest, QueryResult, SearchHit, WorkspaceIndex, watch as watch_publisher,
 };
 use clap::{Parser, Subcommand};
 use serde::Serialize;
@@ -63,6 +63,38 @@ enum Command {
 
         #[arg(long)]
         json: bool,
+    },
+
+    /// Continuously reconcile roots and auto-publish immutable snapshots on change.
+    Watch {
+        /// Roots to reconcile. Defaults to every root already in the catalog.
+        #[arg(long = "root")]
+        roots: Vec<PathBuf>,
+
+        /// Shared publication directory that snapshot-mode readers follow.
+        #[arg(long, env = "AWI_SNAPSHOT_SOURCE")]
+        publish_dir: PathBuf,
+
+        /// Delay between reconcile cycles in milliseconds.
+        #[arg(long, default_value_t = 5_000)]
+        interval_ms: u64,
+
+        /// Quiet period after a filesystem event before reconciling, in milliseconds.
+        #[arg(long, default_value_t = 500)]
+        debounce_ms: u64,
+
+        /// Published generations to retain, including the active one.
+        #[arg(long, default_value_t = 3)]
+        retain: usize,
+
+        #[arg(long, default_value_t = 4)]
+        max_content_mib: u64,
+
+        #[arg(long, default_value_t = 256)]
+        max_profile_mib: u64,
+
+        #[arg(long, default_value_t = 15)]
+        duckdb_timeout_seconds: u64,
     },
 
     /// Index explicitly changed or deleted files beneath known roots.
@@ -281,6 +313,29 @@ fn main() -> Result<()> {
                     );
                 }
             }
+        }
+        Command::Watch {
+            roots,
+            publish_dir,
+            interval_ms,
+            debounce_ms,
+            retain,
+            max_content_mib,
+            max_profile_mib,
+            duckdb_timeout_seconds,
+        } => {
+            let config = PublisherConfig {
+                publish_dir,
+                interval: Duration::from_millis(interval_ms),
+                debounce: Duration::from_millis(debounce_ms),
+                retain,
+                options: IndexOptions {
+                    max_content_bytes: mib(max_content_mib),
+                    max_profile_bytes: mib(max_profile_mib),
+                    duckdb_timeout_seconds,
+                },
+            };
+            watch_publisher(&cli.index_dir, &roots, &config)?;
         }
         Command::Notify {
             paths,
