@@ -4,6 +4,7 @@ pub mod daemon;
 mod data;
 mod extract;
 pub mod mcp;
+mod mcp_audit;
 mod model;
 pub mod protocol;
 mod search;

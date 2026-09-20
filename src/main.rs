@@ -182,7 +182,11 @@ enum Command {
     },
 
     /// Serve workspace_search, workspace_inspect, and workspace_query over MCP stdio.
-    Mcp,
+    Mcp {
+        /// Append bounded JSONL records for actual MCP tool calls.
+        #[arg(long, env = "AWI_MCP_AUDIT_LOG")]
+        audit_log: Option<PathBuf>,
+    },
 }
 
 fn main() -> Result<()> {
@@ -492,7 +496,9 @@ fn main() -> Result<()> {
                 println!("AWI daemon stopped");
             }
         }
-        Command::Mcp => awi::mcp::serve_stdio(cli.index_dir, socket)?,
+        Command::Mcp { audit_log } => {
+            awi::mcp::serve_stdio(cli.index_dir, socket, audit_log)?;
+        }
     }
 
     Ok(())

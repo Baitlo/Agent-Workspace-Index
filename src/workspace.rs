@@ -138,16 +138,19 @@ impl WorkspaceIndex {
         for root in roots {
             let canonical = fs::canonicalize(root)
                 .with_context(|| format!("resolve search root {}", root.display()))?;
-            if !registered_roots
-                .iter()
-                .any(|(_, registered)| registered == &canonical)
-            {
+            let mut matched = false;
+            for (_, registered) in &registered_roots {
+                if registered == &canonical || registered.starts_with(&canonical) {
+                    root_filter.insert(registered.to_string_lossy().into_owned());
+                    matched = true;
+                }
+            }
+            if !matched {
                 anyhow::bail!(
-                    "search root {} is not an indexed workspace root",
+                    "search root {} does not contain an indexed workspace root",
                     canonical.display()
                 );
             }
-            root_filter.insert(canonical.to_string_lossy().into_owned());
         }
         let kind_filter = kinds
             .iter()

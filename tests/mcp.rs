@@ -1,5 +1,6 @@
 use std::fs;
 use std::io::{BufRead, BufReader, Write};
+use std::os::unix::fs::PermissionsExt;
 use std::path::Path;
 use std::process::{Child, ChildStdin, Command, Stdio};
 use std::sync::mpsc::{self, Receiver};
@@ -19,6 +20,7 @@ fn mcp_stdio_exposes_search_inspect_and_query() {
     let root = fixture.path().join("workspace");
     let index_dir = fixture.path().join("index");
     let socket = fixture.path().join("missing-daemon.sock");
+    let audit_log = fixture.path().join("mcp-calls.jsonl");
     let source = root.join("service.rs");
     let metrics = root.join("metrics.csv");
     fs::create_dir_all(&root).unwrap();
@@ -38,7 +40,7 @@ fn mcp_stdio_exposes_search_inspect_and_query() {
         assert_eq!(report.failed, 0);
     }
 
-    let mut mcp = McpProcess::spawn(&index_dir, &socket);
+    let mut mcp = McpProcess::spawn(&index_dir, &socket, &audit_log);
     let initialized = mcp.request(
         1,
         "initialize",
@@ -108,6 +110,26 @@ fn mcp_stdio_exposes_search_inspect_and_query() {
     assert!(
         hits.iter()
             .any(|hit| hit["path"].as_str().unwrap().ends_with("service.rs"))
+    );
+
+    let parent_scoped = mcp.request(
+        30,
+        "tools/call",
+        json!({
+            "name": "workspace_search",
+            "arguments": {
+                "query": "mcp_search_target",
+                "limit": 5,
+                "roots": [fixture.path()]
+            }
+        }),
+    );
+    assert_eq!(
+        parent_scoped["result"]["structuredContent"]["hits"]
+            .as_array()
+            .unwrap()
+            .len(),
+        1
     );
 
     let inspected = mcp.request(
@@ -204,6 +226,37 @@ fn mcp_stdio_exposes_search_inspect_and_query() {
     assert_eq!(invalid["error"]["code"], -32602);
 
     mcp.close();
+
+    let records = fs::read_to_string(&audit_log)
+        .unwrap()
+        .lines()
+        .map(|line| serde_json::from_str::<Value>(line).unwrap())
+        .collect::<Vec<_>>();
+    assert_eq!(records.len(), 6);
+    assert_eq!(records[0]["tool"], "workspace_search");
+    assert_eq!(records[0]["status"], "ok");
+    assert_eq!(records[0]["result_count_kind"], "hits");
+    assert_eq!(records[0]["result_count"], 1);
+    assert_eq!(records[1]["tool"], "workspace_search");
+    assert_eq!(records[1]["status"], "ok");
+    assert_eq!(
+        records[1]["arguments"]["roots"][0].as_str(),
+        fixture.path().to_str()
+    );
+    assert_eq!(records[2]["tool"], "workspace_inspect");
+    assert_eq!(records[2]["status"], "ok");
+    assert_eq!(records[3]["tool"], "workspace_query");
+    assert_eq!(records[3]["status"], "ok");
+    assert_eq!(records[3]["result_count_kind"], "rows");
+    assert_eq!(records[3]["result_count"], 1);
+    assert_eq!(records[4]["status"], "tool_error");
+    assert_eq!(records[4]["error_code"], "query_failed");
+    assert_eq!(records[5]["status"], "protocol_error");
+    assert_eq!(records[5]["error_code"], "-32602");
+    assert_eq!(
+        fs::metadata(&audit_log).unwrap().permissions().mode() & 0o777,
+        0o600
+    );
 }
 
 struct McpProcess {
@@ -215,10 +268,11 @@ struct McpProcess {
 }
 
 impl McpProcess {
-    fn spawn(index_dir: &Path, socket: &Path) -> Self {
+    fn spawn(index_dir: &Path, socket: &Path, audit_log: &Path) -> Self {
         let mut child = Command::new(env!("CARGO_BIN_EXE_awi"))
             .args(["--index-dir", path(index_dir), "--socket", path(socket)])
             .arg("mcp")
+            .args(["--audit-log", path(audit_log)])
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::inherit())

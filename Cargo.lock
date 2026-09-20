@@ -335,6 +335,7 @@ dependencies = [
  "fs4",
  "ignore",
  "rayon",
+ "regex",
  "rmcp",
  "rusqlite",
  "serde",

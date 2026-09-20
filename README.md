@@ -39,6 +39,10 @@ awi --index-dir /tmp/my-awi-index inspect /path/to/file --json
 
 # Start the MCP stdio adapter.
 awi --index-dir /tmp/my-awi-index mcp
+
+# Persist actual MCP tool calls for later retrieval analysis.
+awi --index-dir /tmp/my-awi-index mcp \
+  --audit-log /shared/awi/runtime/calls.jsonl
 ```
 
 For NFS-backed workspaces, build mutable indexes on local storage and publish
@@ -52,6 +56,11 @@ awi --index-dir /tmp/awi-reader serve \
   --snapshot-source /shared/awi-publication
 ```
 
+For Codex, `scripts/awi-mcp-snapshot-wrapper.sh` starts or reuses one local
+snapshot daemon before launching the stdio adapter. Configure
+`AWI_SNAPSHOT_SOURCE` and `AWI_MCP_AUDIT_LOG`, then register the wrapper as a
+global MCP server.
+
 ## Safety
 
 `workspace_query` accepts only one read-only `SELECT` or `WITH` statement over
@@ -60,6 +69,13 @@ byte limits while disabling DuckDB extension loading and external access.
 
 Search and inspection responses are bounded. Sensitive files, generated
 directories, oversized content, and symlink escapes are excluded by default.
+Search root filters accept either an indexed root or an existing parent scope
+that contains indexed roots. Structured-query roots remain exact allowlist entries.
+
+MCP audit logging is optional. When enabled, AWI writes private (`0600`) JSONL
+records containing bounded and credential-redacted arguments, duration, outcome,
+response bytes, and hit/row counts. The active log rotates at 64 MiB and retains
+one previous file.
 
 ## Evaluation
 

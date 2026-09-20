@@ -1,4 +1,5 @@
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
 use anyhow::{Context, Result};
 use rmcp::{
@@ -11,6 +12,7 @@ use serde::Deserialize;
 use serde_json::{Value, json};
 
 use crate::daemon::try_request;
+use crate::mcp_audit::{McpAuditLogger, McpAuditSpan};
 use crate::protocol::Request;
 use crate::{InspectResult, QueryInput, QueryRequest, QueryResult, SearchHit, WorkspaceIndex};
 
@@ -43,7 +45,8 @@ pub struct WorkspaceSearchRequest {
     /// Maximum number of ranked results. Defaults to 10 and cannot exceed 50.
     #[schemars(range(min = 1, max = 50))]
     pub limit: Option<usize>,
-    /// Optional indexed roots to search. Values must exactly match registered roots.
+    /// Optional search scopes. A registered root or an existing parent directory
+    /// containing one or more registered roots is accepted.
     pub roots: Option<Vec<PathBuf>>,
     /// Optional file kinds. Use source for code; text for SQL/Markdown/logs;
     /// semi_structured for .json; tabular for .csv/.tsv/.jsonl/.ndjson/.parquet.
@@ -103,6 +106,7 @@ pub struct WorkspaceQueryRequest {
 pub struct AwiMcpServer {
     index_dir: PathBuf,
     socket_path: PathBuf,
+    audit_logger: Option<Arc<McpAuditLogger>>,
     tool_router: ToolRouter<Self>,
 }
 
@@ -111,8 +115,29 @@ impl AwiMcpServer {
         Self {
             index_dir,
             socket_path,
+            audit_logger: None,
             tool_router: Self::tool_router(),
         }
+    }
+
+    fn with_audit_log(
+        index_dir: PathBuf,
+        socket_path: PathBuf,
+        audit_log: Option<&Path>,
+    ) -> Result<Self> {
+        let audit_logger = audit_log.map(McpAuditLogger::open).transpose()?;
+        Ok(Self {
+            index_dir,
+            socket_path,
+            audit_logger,
+            tool_router: Self::tool_router(),
+        })
+    }
+
+    fn audit_span(&self, tool: &'static str, arguments: Value) -> Option<McpAuditSpan> {
+        self.audit_logger
+            .as_ref()
+            .map(|logger| logger.span(tool, arguments))
     }
 
     async fn execute(&self, request: Request) -> Result<Value> {
@@ -143,23 +168,42 @@ impl AwiMcpServer {
         &self,
         Parameters(arguments): Parameters<WorkspaceSearchRequest>,
     ) -> Result<CallToolResult, McpError> {
+        let audit = self.audit_span(
+            "workspace_search",
+            json!({
+                "query": &arguments.query,
+                "limit": arguments.limit,
+                "roots": &arguments.roots,
+                "kinds": &arguments.kinds,
+                "path_prefix": &arguments.path_prefix
+            }),
+        );
         let query = arguments.query.trim();
         if query.is_empty() {
-            return Err(McpError::invalid_params("query must not be empty", None));
+            return audited(
+                audit,
+                Err(McpError::invalid_params("query must not be empty", None)),
+            );
         }
         if query.chars().count() > MAX_QUERY_CHARS {
-            return Err(McpError::invalid_params(
-                format!("query cannot exceed {MAX_QUERY_CHARS} characters"),
-                None,
-            ));
+            return audited(
+                audit,
+                Err(McpError::invalid_params(
+                    format!("query cannot exceed {MAX_QUERY_CHARS} characters"),
+                    None,
+                )),
+            );
         }
 
         let limit = arguments.limit.unwrap_or(DEFAULT_SEARCH_LIMIT);
         if !(1..=MAX_SEARCH_LIMIT).contains(&limit) {
-            return Err(McpError::invalid_params(
-                format!("limit must be between 1 and {MAX_SEARCH_LIMIT}"),
-                None,
-            ));
+            return audited(
+                audit,
+                Err(McpError::invalid_params(
+                    format!("limit must be between 1 and {MAX_SEARCH_LIMIT}"),
+                    None,
+                )),
+            );
         }
 
         let value = match self
@@ -173,21 +217,31 @@ impl AwiMcpServer {
             .await
         {
             Ok(value) => value,
-            Err(error) => return Ok(tool_error("search_failed", &error)),
+            Err(error) => {
+                return audited(audit, Ok(tool_error("search_failed", &error)));
+            }
         };
         let mut hits: Vec<SearchHit> = match serde_json::from_value(value) {
             Ok(hits) => hits,
-            Err(error) => return Ok(tool_error("invalid_search_response", &error.into())),
+            Err(error) => {
+                return audited(
+                    audit,
+                    Ok(tool_error("invalid_search_response", &error.into())),
+                );
+            }
         };
         let mut previews_truncated = false;
         for hit in &mut hits {
             previews_truncated |= truncate_chars(&mut hit.preview, MAX_PREVIEW_CHARS);
         }
 
-        Ok(bounded_result(json!({
-            "hits": hits,
-            "previews_truncated": previews_truncated
-        })))
+        audited(
+            audit,
+            Ok(bounded_result(json!({
+                "hits": hits,
+                "previews_truncated": previews_truncated
+            }))),
+        )
     }
 
     /// Inspect metadata, symbols, schema, and a bounded line-numbered text excerpt.
@@ -207,33 +261,55 @@ impl AwiMcpServer {
         &self,
         Parameters(arguments): Parameters<WorkspaceInspectRequest>,
     ) -> Result<CallToolResult, McpError> {
+        let audit = self.audit_span(
+            "workspace_inspect",
+            json!({
+                "path": &arguments.path,
+                "max_symbols": arguments.max_symbols,
+                "start_line": arguments.start_line,
+                "max_lines": arguments.max_lines,
+                "max_chars": arguments.max_chars
+            }),
+        );
         let max_symbols = arguments.max_symbols.unwrap_or(DEFAULT_SYMBOL_LIMIT);
         if !(1..=MAX_SYMBOL_LIMIT).contains(&max_symbols) {
-            return Err(McpError::invalid_params(
-                format!("max_symbols must be between 1 and {MAX_SYMBOL_LIMIT}"),
-                None,
-            ));
+            return audited(
+                audit,
+                Err(McpError::invalid_params(
+                    format!("max_symbols must be between 1 and {MAX_SYMBOL_LIMIT}"),
+                    None,
+                )),
+            );
         }
         let start_line = arguments.start_line.unwrap_or(1);
         if start_line == 0 {
-            return Err(McpError::invalid_params(
-                "start_line must be positive",
-                None,
-            ));
+            return audited(
+                audit,
+                Err(McpError::invalid_params(
+                    "start_line must be positive",
+                    None,
+                )),
+            );
         }
         let max_lines = arguments.max_lines.unwrap_or(DEFAULT_INSPECT_LINES);
         if !(1..=MAX_INSPECT_LINES).contains(&max_lines) {
-            return Err(McpError::invalid_params(
-                format!("max_lines must be between 1 and {MAX_INSPECT_LINES}"),
-                None,
-            ));
+            return audited(
+                audit,
+                Err(McpError::invalid_params(
+                    format!("max_lines must be between 1 and {MAX_INSPECT_LINES}"),
+                    None,
+                )),
+            );
         }
         let max_chars = arguments.max_chars.unwrap_or(DEFAULT_INSPECT_CHARS);
         if !(1..=MAX_INSPECT_CHARS).contains(&max_chars) {
-            return Err(McpError::invalid_params(
-                format!("max_chars must be between 1 and {MAX_INSPECT_CHARS}"),
-                None,
-            ));
+            return audited(
+                audit,
+                Err(McpError::invalid_params(
+                    format!("max_chars must be between 1 and {MAX_INSPECT_CHARS}"),
+                    None,
+                )),
+            );
         }
 
         let value = match self
@@ -246,11 +322,18 @@ impl AwiMcpServer {
             .await
         {
             Ok(value) => value,
-            Err(error) => return Ok(tool_error("inspect_failed", &error)),
+            Err(error) => {
+                return audited(audit, Ok(tool_error("inspect_failed", &error)));
+            }
         };
         let mut result: InspectResult = match serde_json::from_value(value) {
             Ok(result) => result,
-            Err(error) => return Ok(tool_error("invalid_inspect_response", &error.into())),
+            Err(error) => {
+                return audited(
+                    audit,
+                    Ok(tool_error("invalid_inspect_response", &error.into())),
+                );
+            }
         };
         let total_symbols = result.symbols.len();
         result.symbols.truncate(max_symbols);
@@ -282,19 +365,22 @@ impl AwiMcpServer {
             dataset.columns.truncate(retained);
         }
 
-        Ok(bounded_result(json!({
-            "file": result.file,
-            "symbols": result.symbols,
-            "dataset": result.dataset,
-            "content": result.content,
-            "coverage": {
-                "total_symbols": total_symbols,
-                "symbols_truncated": total_symbols > max_symbols,
-                "total_dataset_columns": total_columns,
-                "dataset_columns_truncated": total_columns > MAX_DATASET_COLUMNS,
-                "dataset_schema_truncated": dataset_schema_truncated
-            }
-        })))
+        audited(
+            audit,
+            Ok(bounded_result(json!({
+                "file": result.file,
+                "symbols": result.symbols,
+                "dataset": result.dataset,
+                "content": result.content,
+                "coverage": {
+                    "total_symbols": total_symbols,
+                    "symbols_truncated": total_symbols > max_symbols,
+                    "total_dataset_columns": total_columns,
+                    "dataset_columns_truncated": total_columns > MAX_DATASET_COLUMNS,
+                    "dataset_schema_truncated": dataset_schema_truncated
+                }
+            }))),
+        )
     }
 
     /// Execute bounded read-only DuckDB SQL over explicitly allowed structured files.
@@ -312,26 +398,48 @@ impl AwiMcpServer {
         &self,
         Parameters(arguments): Parameters<WorkspaceQueryRequest>,
     ) -> Result<CallToolResult, McpError> {
+        let audit = self.audit_span(
+            "workspace_query",
+            json!({
+                "sql": &arguments.sql,
+                "roots": &arguments.roots,
+                "inputs": &arguments.inputs.iter().map(|input| {
+                    json!({"path": &input.path, "alias": &input.alias})
+                }).collect::<Vec<_>>(),
+                "max_rows": arguments.max_rows,
+                "max_bytes": arguments.max_bytes,
+                "timeout_ms": arguments.timeout_ms
+            }),
+        );
         let max_rows = arguments.max_rows.unwrap_or(DEFAULT_QUERY_ROWS);
         if !(1..=MAX_MCP_QUERY_ROWS).contains(&max_rows) {
-            return Err(McpError::invalid_params(
-                format!("max_rows must be between 1 and {MAX_MCP_QUERY_ROWS}"),
-                None,
-            ));
+            return audited(
+                audit,
+                Err(McpError::invalid_params(
+                    format!("max_rows must be between 1 and {MAX_MCP_QUERY_ROWS}"),
+                    None,
+                )),
+            );
         }
         let max_bytes = arguments.max_bytes.unwrap_or(DEFAULT_QUERY_BYTES);
         if !(1_024..=MAX_STRUCTURED_RESPONSE_BYTES).contains(&max_bytes) {
-            return Err(McpError::invalid_params(
-                format!("max_bytes must be between 1024 and {MAX_STRUCTURED_RESPONSE_BYTES}"),
-                None,
-            ));
+            return audited(
+                audit,
+                Err(McpError::invalid_params(
+                    format!("max_bytes must be between 1024 and {MAX_STRUCTURED_RESPONSE_BYTES}"),
+                    None,
+                )),
+            );
         }
         let timeout_ms = arguments.timeout_ms.unwrap_or(DEFAULT_QUERY_TIMEOUT_MS);
         if !(1..=MAX_QUERY_TIMEOUT_MS).contains(&timeout_ms) {
-            return Err(McpError::invalid_params(
-                format!("timeout_ms must be between 1 and {MAX_QUERY_TIMEOUT_MS}"),
-                None,
-            ));
+            return audited(
+                audit,
+                Err(McpError::invalid_params(
+                    format!("timeout_ms must be between 1 and {MAX_QUERY_TIMEOUT_MS}"),
+                    None,
+                )),
+            );
         }
 
         let request = QueryRequest {
@@ -351,13 +459,20 @@ impl AwiMcpServer {
         };
         let value = match self.execute(Request::Query { request }).await {
             Ok(value) => value,
-            Err(error) => return Ok(tool_error("query_failed", &error)),
+            Err(error) => {
+                return audited(audit, Ok(tool_error("query_failed", &error)));
+            }
         };
         let result: QueryResult = match serde_json::from_value(value) {
             Ok(result) => result,
-            Err(error) => return Ok(tool_error("invalid_query_response", &error.into())),
+            Err(error) => {
+                return audited(
+                    audit,
+                    Ok(tool_error("invalid_query_response", &error.into())),
+                );
+            }
         };
-        Ok(bounded_result(json!(result)))
+        audited(audit, Ok(bounded_result(json!(result))))
     }
 }
 
@@ -380,13 +495,17 @@ impl ServerHandler for AwiMcpServer {
     }
 }
 
-pub fn serve_stdio(index_dir: PathBuf, socket_path: PathBuf) -> Result<()> {
+pub fn serve_stdio(
+    index_dir: PathBuf,
+    socket_path: PathBuf,
+    audit_log: Option<PathBuf>,
+) -> Result<()> {
     let runtime = tokio::runtime::Builder::new_current_thread()
         .enable_all()
         .build()
         .context("build AWI MCP runtime")?;
     runtime.block_on(async move {
-        let service = AwiMcpServer::new(index_dir, socket_path)
+        let service = AwiMcpServer::with_audit_log(index_dir, socket_path, audit_log.as_deref())?
             .serve(rmcp::transport::stdio())
             .await
             .context("start AWI MCP stdio service")?;
@@ -396,6 +515,16 @@ pub fn serve_stdio(index_dir: PathBuf, socket_path: PathBuf) -> Result<()> {
             .context("run AWI MCP stdio service")
             .map(|_| ())
     })
+}
+
+fn audited(
+    audit: Option<McpAuditSpan>,
+    result: Result<CallToolResult, McpError>,
+) -> Result<CallToolResult, McpError> {
+    if let Some(audit) = audit {
+        audit.finish(&result);
+    }
+    result
 }
 
 fn execute_request(index_dir: &Path, socket_path: &Path, request: Request) -> Result<Value> {
