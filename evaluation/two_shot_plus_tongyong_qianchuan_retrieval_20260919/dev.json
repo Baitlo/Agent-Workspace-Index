@@ -1,0 +1,143 @@
+{
+  "name": "two_shot_plus_tongyong_qianchuan_retrieval_20260919_dev",
+  "asset_family": "qianchuan_distill",
+  "split": "dev",
+  "review_status": "candidate_pending_dual_review",
+  "reviewers": [],
+  "corpus_roots": [
+    "/home/tiger/Projects/Bona/Qianchuan102_data_process",
+    "/home/tiger/Projects/Bona/qianchuan_distill",
+    "/mnt/bn/baiweikang/qianchuan_distill/workspace_assets/evaluation/tongyong_v3bench_delivered_pair_posterior_pool_v1_20260817",
+    "/mnt/bn/baiweikang/qianchuan_distill/workspace_assets/datasets/legacy_four_model_inputs"
+  ],
+  "cases": [
+    {
+      "id": "code-001",
+      "category": "code",
+      "query": "qwen_direct anchor tasks three V4.8Bench models",
+      "relevant_paths": ["Qianchuan102_data_process/build_two_shot_three_models_anchor_qwen_20260917.py"],
+      "baseline_tool_calls": 2,
+      "evidence": "Module docstring states that it finalizes assets and builds qwen_direct anchor tasks for three V4.8Bench models."
+    },
+    {
+      "id": "code-002",
+      "category": "code",
+      "query": "stream build tongyong V6 DeepSeek ranker teacher requests",
+      "relevant_paths": ["Qianchuan102_data_process/build_tongyong_v6_teacher_full.py"],
+      "baseline_tool_calls": 2,
+      "evidence": "Module docstring and make_record identify the Tongyong V6 DeepSeek ranker teacher request builder."
+    },
+    {
+      "id": "code-003",
+      "category": "code",
+      "query": "validate delivered pair posterior pool read parquet HDFS",
+      "relevant_paths": ["Qianchuan102_data_process/analyze_tongyong_v3bench_delivered_pair_posterior_pool_v1.py"],
+      "baseline_tool_calls": 2,
+      "evidence": "The analyzer validates the delivered-pair pool and reads HDFS Parquet parts through pyarrow."
+    },
+    {
+      "id": "code-004",
+      "category": "code",
+      "query": "rank five V4.8Bench ziti history Davidson BT",
+      "relevant_paths": ["Qianchuan102_data_process/eval_two_shot_v48bench_three_models_anchor_qwen_ziti_20260918.py"],
+      "baseline_tool_calls": 2,
+      "evidence": "Module docstring defines the Ziti History five-model Anchor-Elo and Davidson BT experiment."
+    },
+    {
+      "id": "sql-001",
+      "category": "sql",
+      "query": "two_shot V4.8 targeted posterior refresh qc102 product_id semi join",
+      "relevant_paths": ["Qianchuan102_data_process/sql/qianchuan_sql_koujing4/two_shot_v48_posterior_refresh_20260917/qc102_aigc.sql"],
+      "baseline_tool_calls": 2,
+      "evidence": "SQL header records the QC102 product_id semi-join used by the targeted posterior refresh."
+    },
+    {
+      "id": "sql-002",
+      "category": "sql",
+      "query": "two_shot V4.8 targeted posterior refresh ubx stid_v2",
+      "relevant_paths": ["Qianchuan102_data_process/sql/qianchuan_sql_koujing4/two_shot_v48_posterior_refresh_20260917/ubx_ziti.sql"],
+      "baseline_tool_calls": 2,
+      "evidence": "SQL header records the UBX stid_v2 semi-join used by the targeted posterior refresh."
+    },
+    {
+      "id": "sql-003",
+      "category": "sql",
+      "query": "Tongyong V3Bench delivered pair posterior pool generated_mid",
+      "relevant_paths": ["Qianchuan102_data_process/sql/tongyong/tongyong_v3bench_delivered_pair_posterior_pool_v1.sql"],
+      "baseline_tool_calls": 2,
+      "evidence": "SQL header documents the origin-mid to generated-mid to delivery-stat chain."
+    },
+    {
+      "id": "sql-004",
+      "category": "sql",
+      "query": "tongyong training show_count 500 play_count 500 28 days semi join",
+      "relevant_paths": ["Qianchuan102_data_process/sql/tongyong/tongyong_train_v2_show500_play500_28d_optimized.sql"],
+      "baseline_tool_calls": 2,
+      "evidence": "SQL header lists the 500/500 thresholds, 28-day window, and semi-join optimization."
+    },
+    {
+      "id": "result-001",
+      "category": "experiment_result",
+      "query": "v47 multi output audit capped uncapped retention",
+      "relevant_paths": ["Qianchuan102_data_process/logs/v47_multi_output_audit_current.json"],
+      "baseline_tool_calls": 2,
+      "evidence": "JSON result contains capped, uncapped, retention, scene, and status fields."
+    },
+    {
+      "id": "result-002",
+      "category": "experiment_result",
+      "query": "five service ezreal smoke three scene corrected business valid schema valid",
+      "relevant_paths": ["Qianchuan102_data_process/merlin_deploy/ezreal_smoke_5services_20260914/three_scene_summary.corrected.json"],
+      "baseline_tool_calls": 2,
+      "evidence": "Corrected summary contains service, request, HTTP, JSON closure, schema, and business-valid counters."
+    },
+    {
+      "id": "result-003",
+      "category": "experiment_result",
+      "query": "tongyong delivered pair posterior pool covered_spus new_vs_old_ratio",
+      "relevant_paths": ["workspace_assets/evaluation/tongyong_v3bench_delivered_pair_posterior_pool_v1_20260817/tongyong_v3bench_delivered_pair_posterior_pool_v1_summary.json"],
+      "baseline_tool_calls": 2,
+      "evidence": "Canonical NFS summary contains covered_spus, pair_rows, old-v3 overlap, and ratio fields."
+    },
+    {
+      "id": "result-004",
+      "category": "experiment_result",
+      "query": "strict positive koujing34 sparse graph scene density median",
+      "relevant_paths": ["workspace_assets/evaluation/tongyong_v3bench_delivered_pair_posterior_pool_v1_20260817/koujing34_strict_positive/tongyong_v3bench_strict_positive_koujing34_sparse_graph_scene_summary.tsv"],
+      "baseline_tool_calls": 2,
+      "evidence": "Canonical TSV reports scene-level sparse-graph counts and density medians for 14d and 60d windows."
+    },
+    {
+      "id": "dataset-001",
+      "category": "dataset_query",
+      "query": "annotation label_type selected_by pool_rank sample_bucket",
+      "relevant_paths": ["qianchuan_distill/human_annotation_sample_v2/human_annotation_sample_250_enriched_flat.jsonl"],
+      "baseline_tool_calls": 2,
+      "evidence": "The JSONL schema contains label_type, selected_by, pool_rank, and sample_bucket."
+    },
+    {
+      "id": "dataset-002",
+      "category": "dataset_query",
+      "query": "judge300 qc102 composition_performance front_sample back_sample",
+      "relevant_paths": ["qianchuan_distill/scripts/4model_inference_inputs/judge300_qc102.jsonl"],
+      "baseline_tool_calls": 2,
+      "evidence": "QC102 judge input schema contains composition_performance, front_sample, and back_sample."
+    },
+    {
+      "id": "dataset-003",
+      "category": "dataset_query",
+      "query": "judge300 ubx composition_performance front_sample back_sample",
+      "relevant_paths": ["workspace_assets/datasets/legacy_four_model_inputs/judge300_ubx.jsonl"],
+      "baseline_tool_calls": 2,
+      "evidence": "Canonical NFS UBX judge input has the same structured sample fields under the legacy four-model namespace."
+    },
+    {
+      "id": "dataset-004",
+      "category": "dataset_query",
+      "query": "two shot v48bench ezreal raw results completion_tokens json_closed warmup",
+      "relevant_paths": ["Qianchuan102_data_process/merlin_deploy/ezreal_smoke_5services_20260914/two_shot_v48bench_ezreal_psm_smoke3_20260915/raw_results_two_shot.jsonl"],
+      "baseline_tool_calls": 2,
+      "evidence": "Raw inference result schema contains completion_tokens, json_closed, validation, warmup, and service fields."
+    }
+  ]
+}

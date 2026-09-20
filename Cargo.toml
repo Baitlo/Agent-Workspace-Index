@@ -1,0 +1,29 @@
+[package]
+name = "awi"
+version = "0.1.0"
+edition = "2024"
+description = "Agent Workspace Index for unified code and data retrieval"
+license = "MIT"
+
+[dependencies]
+anyhow = "1.0"
+blake3 = "1.8"
+clap = { version = "4.6", features = ["derive", "env"] }
+duckdb = { version = "1.10505.0", features = ["bundled", "json", "parquet"] }
+fs4 = "0.13"
+ignore = "0.4"
+rayon = "1.12"
+rmcp = { version = "3.4", default-features = false, features = ["macros", "server", "transport-io"] }
+rusqlite = { version = "0.40", features = ["bundled"] }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+sqlparser = { version = "0.63", features = ["visitor"] }
+tantivy = "0.26"
+tokio = { version = "1", features = ["rt"] }
+tree-sitter = "0.27"
+tree-sitter-go = "0.25"
+tree-sitter-python = "0.25"
+tree-sitter-rust = "0.24"
+
+[dev-dependencies]
+tempfile = "3.27"

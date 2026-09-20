@@ -1,0 +1,82 @@
+{
+  "experiment": "two_shot_plus_tongyong_agent_ab_20260920_dev",
+  "asset_family": "two_shot_plus_tongyong",
+  "split": "dev",
+  "review_status": "candidate_pending_dual_review",
+  "model": "llmbox-gpt-5.6-sol",
+  "repetitions": 2,
+  "task_count": 12,
+  "completed_runs": 48,
+  "arms": {
+    "baseline": {
+      "runs": 24,
+      "correct": 23,
+      "accuracy": 0.9583333333333334,
+      "policy_violations": 0,
+      "timeouts": 0,
+      "total_wall_seconds": 543.2022454589605,
+      "mean_wall_seconds": 22.633426894123357,
+      "median_wall_seconds": 19.677044555544853,
+      "p95_wall_seconds": 46.84953486174345,
+      "total_agent_tool_calls": 106,
+      "mean_agent_tool_calls": 4.416666666666667,
+      "total_search_calls": 56,
+      "mean_search_calls": 2.3333333333333335,
+      "total_inspection_calls": 91,
+      "mean_inspection_calls": 3.7916666666666665,
+      "input_tokens": 3455081,
+      "cached_input_tokens": 2745344,
+      "output_tokens": 24843
+    },
+    "awi": {
+      "runs": 24,
+      "correct": 24,
+      "accuracy": 1.0,
+      "policy_violations": 0,
+      "timeouts": 0,
+      "total_wall_seconds": 297.4379269480705,
+      "mean_wall_seconds": 12.393246956169605,
+      "median_wall_seconds": 11.64832779020071,
+      "p95_wall_seconds": 17.851335041224957,
+      "total_agent_tool_calls": 32,
+      "mean_agent_tool_calls": 1.3333333333333333,
+      "total_search_calls": 24,
+      "mean_search_calls": 1.0,
+      "total_inspection_calls": 8,
+      "mean_inspection_calls": 0.3333333333333333,
+      "input_tokens": 1266638,
+      "cached_input_tokens": 886784,
+      "output_tokens": 11873
+    }
+  },
+  "paired": {
+    "complete_pairs": 24,
+    "both_correct_pairs": 23,
+    "agent_tool_call_reduction": 0.6836734693877551,
+    "search_call_reduction": 0.54,
+    "wall_time_reduction": 0.4129302966172389,
+    "median_agent_tool_call_delta": 3,
+    "median_search_call_delta": 1,
+    "median_wall_seconds_delta": 8.049641624093056,
+    "awi_wall_time_wins": 21,
+    "baseline_wall_time_wins": 2,
+    "ties": 0,
+    "wall_delta_mean_95pct_bootstrap_ci": [
+      5.54881480206614,
+      12.255935099785743
+    ],
+    "tool_call_delta_mean_95pct_bootstrap_ci": [
+      2.217391304347826,
+      3.652173913043478
+    ]
+  },
+  "disk": {
+    "sandbox_root": "/tmp/two_shot_plus_tongyong_agent_ab_20260920-full-v7",
+    "output_dir": "/mnt/bn/baiweikang/qianchuan_distill/awi/agent_eval/two_shot_plus_tongyong_agent_ab_20260920/full-v7",
+    "tmp_free_bytes": 2722879209472,
+    "system_free_bytes": 7670333440,
+    "sandbox_bytes": 166192610
+  },
+  "tasks_sha256": "a0843dee20c351a9f69e622afa827bb525547cf69659629fa5cb09bba27eaf05",
+  "generated_at_unix_seconds": 1789846454.8508937
+}

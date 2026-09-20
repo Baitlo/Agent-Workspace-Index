@@ -1,0 +1,32 @@
+{
+  "worker_id": "4288907",
+  "elapsed_seconds": 26,
+  "max_rss_kib": 509896,
+  "snapshot_bytes": 14916222,
+  "status": {
+    "completed_generation": 4,
+    "running_generations": 0,
+    "failed_generations": 0,
+    "active_files": 1278,
+    "deleted_files": 0,
+    "symbols": 12284,
+    "datasets": 309,
+    "failures": 0
+  },
+  "retrieval": {
+    "recall_at_10": 1,
+    "mrr": 0.6533730158730159,
+    "ndcg_at_10": 0.7359599070683135,
+    "p50_ms": 3.423606,
+    "p95_ms": 6.828037999999999,
+    "stale_result_rate": 0,
+    "gate": {
+      "review_approved": false,
+      "recall_at_10_passed": true,
+      "p95_passed": true,
+      "stale_rate_passed": true,
+      "tool_call_reduction_passed": true,
+      "release_passed": false
+    }
+  }
+}

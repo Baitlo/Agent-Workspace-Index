@@ -1,0 +1,21 @@
+{
+  "schema_version": 1,
+  "status": "candidate_pending_dual_review",
+  "final_run": "full-v7",
+  "worker_id": "4288907",
+  "model": "llmbox-gpt-5.6-sol",
+  "protocol_version": 3,
+  "repetitions": 2,
+  "task_count": 12,
+  "runner_sha256": "fd81d0bf86ed5c2c04c7cc91eb21c875d39b7b075ab03b3d86f379b49658466a",
+  "tasks_sha256": "a0843dee20c351a9f69e622afa827bb525547cf69659629fa5cb09bba27eaf05",
+  "awi_binary_sha256": "a5a43d364b0eb31145a5c7fbc18b364147f05838345ee0fce8fa3a2518a765e6",
+  "snapshot_pointer_sha256": "90716cef67a410c310da49e46a35fee01d62015a11acd47b4337cba087c8fe82",
+  "artifacts": {
+    "final_summary_sha256": "9ad682b8d5a0145790ce0c982f709844646bb4a8e1258eed541ccc034996c0f4",
+    "final_category_arms_sha256": "8ca15c85c8a2a32cb850f3fca3f77d983668076b098c76fc9cb747bb32585584",
+    "final_category_paired_sha256": "1892c491c32852217a664fb30b25b3385ae36132d388f373bbb18f091676cdcb"
+  },
+  "shared_raw_results": "/mnt/bn/baiweikang/qianchuan_distill/awi/agent_eval/two_shot_plus_tongyong_agent_ab_20260920/full-v7",
+  "immutable_snapshot": "/mnt/bn/baiweikang/qianchuan_distill/awi/publications/two_shot_plus_tongyong_qianchuan_retrieval_20260919/candidate-v3"
+}

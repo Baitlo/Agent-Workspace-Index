@@ -1,0 +1,39 @@
+{
+  "worker_id": "4288907",
+  "host": "dc05-p1a-t606-n016",
+  "elapsed_seconds": 20.184744156897068,
+  "max_rss_kib": 188448,
+  "index_bytes": 20755324,
+  "catalog_bytes": 2691072,
+  "tantivy_bytes": 18060156,
+  "publication_bytes": 13847842,
+  "status": {
+    "completed_generation": 4,
+    "running_generations": 0,
+    "failed_generations": 0,
+    "active_files": 1278,
+    "deleted_files": 0,
+    "symbols": 12284,
+    "datasets": 309,
+    "failures": 0
+  },
+  "benchmark": {
+    "recall_at_10": 1,
+    "mrr": 0.6526785714285714,
+    "ndcg_at_10": 0.7352120839841826,
+    "p95_ms": 5.603465,
+    "stale_result_rate": 0,
+    "tool_call_reduction": 0.5,
+    "gate": {
+      "review_approved": false,
+      "recall_at_10_passed": true,
+      "p95_passed": true,
+      "stale_rate_passed": true,
+      "tool_call_reduction_passed": true,
+      "release_passed": false
+    }
+  },
+  "corpus_bytes": 774771149,
+  "index_to_corpus_ratio": 0.026788974,
+  "index_bytes_per_active_file": 16240.473
+}

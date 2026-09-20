@@ -1,0 +1,535 @@
+use std::path::PathBuf;
+use std::time::Duration;
+
+use anyhow::{Context, Result};
+use awi::benchmark::{evaluate as evaluate_retrieval, load_gold};
+use awi::daemon::{default_socket_path, serve_with_snapshots, try_request};
+use awi::protocol::Request;
+use awi::{
+    IndexOptions, IndexReport, IndexStatus, InspectResult, NotifyReport, QueryInput, QueryRequest,
+    QueryResult, SearchHit, WorkspaceIndex,
+};
+use clap::{Parser, Subcommand};
+use serde::Serialize;
+use serde::de::DeserializeOwned;
+
+#[derive(Debug, Parser)]
+#[command(name = "awi", version, about = "Agent Workspace Index")]
+struct Cli {
+    #[arg(long, env = "AWI_INDEX_DIR", default_value = ".awi-index")]
+    index_dir: PathBuf,
+
+    #[arg(long, env = "AWI_SOCKET", global = true)]
+    socket: Option<PathBuf>,
+
+    #[command(subcommand)]
+    command: Command,
+}
+
+#[derive(Debug, Subcommand)]
+enum Command {
+    /// Incrementally index one workspace root.
+    Index {
+        root: PathBuf,
+
+        #[arg(long, default_value_t = 4)]
+        max_content_mib: u64,
+
+        #[arg(long, default_value_t = 256)]
+        max_profile_mib: u64,
+
+        #[arg(long, default_value_t = 15)]
+        duckdb_timeout_seconds: u64,
+
+        #[arg(long)]
+        json: bool,
+    },
+
+    /// Reconcile one root by performing a complete incremental scan.
+    Reconcile {
+        root: PathBuf,
+
+        #[arg(long)]
+        publish_dir: Option<PathBuf>,
+
+        #[arg(long, default_value_t = 4)]
+        max_content_mib: u64,
+
+        #[arg(long, default_value_t = 256)]
+        max_profile_mib: u64,
+
+        #[arg(long, default_value_t = 15)]
+        duckdb_timeout_seconds: u64,
+
+        #[arg(long)]
+        json: bool,
+    },
+
+    /// Index explicitly changed or deleted files beneath known roots.
+    Notify {
+        #[arg(required = true)]
+        paths: Vec<PathBuf>,
+
+        #[arg(long, default_value_t = 4)]
+        max_content_mib: u64,
+
+        #[arg(long, default_value_t = 256)]
+        max_profile_mib: u64,
+
+        #[arg(long, default_value_t = 15)]
+        duckdb_timeout_seconds: u64,
+
+        #[arg(long)]
+        json: bool,
+    },
+
+    /// Search paths, text, symbols, and dataset schemas.
+    Search {
+        query: String,
+
+        #[arg(long, default_value_t = 10)]
+        limit: usize,
+
+        #[arg(long = "root")]
+        roots: Vec<PathBuf>,
+
+        #[arg(long = "kind")]
+        kinds: Vec<String>,
+
+        #[arg(long)]
+        path_prefix: Option<String>,
+
+        #[arg(long)]
+        json: bool,
+    },
+
+    /// Inspect one indexed path.
+    Inspect {
+        path: PathBuf,
+
+        #[arg(long, default_value_t = 1)]
+        line_start: usize,
+
+        #[arg(long, default_value_t = 120)]
+        max_lines: usize,
+
+        #[arg(long, default_value_t = 32 * 1024)]
+        max_chars: usize,
+
+        #[arg(long)]
+        json: bool,
+    },
+
+    /// Run bounded read-only SQL over explicit structured files.
+    Query {
+        #[arg(long)]
+        sql: String,
+
+        #[arg(long = "root", required = true)]
+        roots: Vec<PathBuf>,
+
+        #[arg(long = "file", required = true)]
+        files: Vec<PathBuf>,
+
+        #[arg(long, default_value_t = 100)]
+        max_rows: usize,
+
+        #[arg(long, default_value_t = 1024 * 1024)]
+        max_bytes: usize,
+
+        #[arg(long, default_value_t = 10_000)]
+        timeout_ms: u64,
+    },
+
+    /// Evaluate retrieval quality and latency against a reviewed gold set.
+    Benchmark {
+        #[arg(long)]
+        gold: PathBuf,
+
+        #[arg(long)]
+        output: Option<PathBuf>,
+
+        #[arg(long)]
+        allow_draft: bool,
+    },
+
+    /// Show catalog and generation health.
+    Status {
+        #[arg(long)]
+        json: bool,
+    },
+
+    /// Run the persistent local AWI daemon.
+    Serve {
+        /// Shared snapshot publication directory to follow.
+        #[arg(long, env = "AWI_SNAPSHOT_SOURCE")]
+        snapshot_source: Option<PathBuf>,
+
+        #[arg(long, default_value_t = 5_000)]
+        snapshot_poll_ms: u64,
+    },
+
+    /// Check whether the AWI daemon is reachable.
+    Ping {
+        #[arg(long)]
+        json: bool,
+    },
+
+    /// Stop the AWI daemon cleanly.
+    Stop {
+        #[arg(long)]
+        json: bool,
+    },
+
+    /// Serve workspace_search, workspace_inspect, and workspace_query over MCP stdio.
+    Mcp,
+}
+
+fn main() -> Result<()> {
+    let cli = Cli::parse();
+    let socket = cli
+        .socket
+        .unwrap_or_else(|| default_socket_path(&cli.index_dir));
+
+    match cli.command {
+        Command::Index {
+            root,
+            max_content_mib,
+            max_profile_mib,
+            duckdb_timeout_seconds,
+            json,
+        } => {
+            let options = IndexOptions {
+                max_content_bytes: mib(max_content_mib),
+                max_profile_bytes: mib(max_profile_mib),
+                duckdb_timeout_seconds,
+            };
+            let request = Request::Index {
+                root: root.clone(),
+                options: options.clone(),
+            };
+            let report: IndexReport =
+                execute(&cli.index_dir, &socket, &request, move |workspace| {
+                    workspace.index_root(root, &options)
+                })?;
+            if json {
+                print_json(&report)?;
+            } else {
+                println!(
+                    "generation={} discovered={} indexed={} unchanged={} deleted={} metadata_only={} failed={}",
+                    report.generation,
+                    report.discovered,
+                    report.indexed,
+                    report.unchanged,
+                    report.deleted,
+                    report.metadata_only,
+                    report.failed
+                );
+            }
+        }
+        Command::Reconcile {
+            root,
+            publish_dir,
+            max_content_mib,
+            max_profile_mib,
+            duckdb_timeout_seconds,
+            json,
+        } => {
+            let options = IndexOptions {
+                max_content_bytes: mib(max_content_mib),
+                max_profile_bytes: mib(max_profile_mib),
+                duckdb_timeout_seconds,
+            };
+            let request = Request::Index {
+                root: root.clone(),
+                options: options.clone(),
+            };
+            let report: IndexReport =
+                execute(&cli.index_dir, &socket, &request, move |workspace| {
+                    workspace.index_root(root, &options)
+                })?;
+            let snapshot = if let Some(publish_dir) = publish_dir {
+                Some(WorkspaceIndex::open(&cli.index_dir)?.publish_snapshot(&publish_dir)?)
+            } else {
+                None
+            };
+            if json {
+                print_json(&serde_json::json!({
+                    "report": report,
+                    "snapshot": snapshot
+                }))?;
+            } else {
+                println!(
+                    "generation={} discovered={} indexed={} unchanged={} deleted={} metadata_only={} failed={}",
+                    report.generation,
+                    report.discovered,
+                    report.indexed,
+                    report.unchanged,
+                    report.deleted,
+                    report.metadata_only,
+                    report.failed
+                );
+                if let Some(snapshot) = snapshot {
+                    println!(
+                        "published_generation={} files={}",
+                        snapshot.generation,
+                        snapshot.files.len()
+                    );
+                }
+            }
+        }
+        Command::Notify {
+            paths,
+            max_content_mib,
+            max_profile_mib,
+            duckdb_timeout_seconds,
+            json,
+        } => {
+            let options = IndexOptions {
+                max_content_bytes: mib(max_content_mib),
+                max_profile_bytes: mib(max_profile_mib),
+                duckdb_timeout_seconds,
+            };
+            let request = Request::Notify {
+                paths: paths.clone(),
+                options: options.clone(),
+            };
+            let report: NotifyReport =
+                execute(&cli.index_dir, &socket, &request, move |workspace| {
+                    workspace.notify_paths(&paths, &options)
+                })?;
+            if json {
+                print_json(&report)?;
+            } else {
+                println!(
+                    "requested={} roots={} indexed={} unchanged={} deleted={} failed={}",
+                    report.requested,
+                    report.roots.len(),
+                    report.roots.iter().map(|item| item.indexed).sum::<u64>(),
+                    report.roots.iter().map(|item| item.unchanged).sum::<u64>(),
+                    report.roots.iter().map(|item| item.deleted).sum::<u64>(),
+                    report.roots.iter().map(|item| item.failed).sum::<u64>()
+                );
+            }
+        }
+        Command::Search {
+            query,
+            limit,
+            roots,
+            kinds,
+            path_prefix,
+            json,
+        } => {
+            let request = Request::Search {
+                query: query.clone(),
+                limit,
+                roots: roots.clone(),
+                kinds: kinds.clone(),
+                path_prefix: path_prefix.clone(),
+            };
+            let hits: Vec<SearchHit> =
+                execute(&cli.index_dir, &socket, &request, move |workspace| {
+                    workspace.search_filtered(&query, limit, &roots, &kinds, path_prefix.as_deref())
+                })?;
+            if json {
+                print_json(&hits)?;
+            } else {
+                for hit in hits {
+                    println!(
+                        "{:.6}\t{}\t{}\t{}",
+                        hit.score,
+                        hit.matched_lanes.join(","),
+                        hit.kind.as_str(),
+                        hit.path
+                    );
+                    if !hit.preview.is_empty() {
+                        println!("  {}", single_line(&hit.preview));
+                    }
+                }
+            }
+        }
+        Command::Inspect {
+            path,
+            line_start,
+            max_lines,
+            max_chars,
+            json,
+        } => {
+            let request = Request::Inspect {
+                path: path.clone(),
+                start_line: line_start,
+                max_lines,
+                max_chars,
+            };
+            let result: InspectResult =
+                execute(&cli.index_dir, &socket, &request, move |workspace| {
+                    workspace.inspect_excerpt(path, line_start, max_lines, max_chars)
+                })?;
+            if json {
+                print_json(&result)?;
+            } else {
+                println!("path: {}", result.file.absolute_path);
+                println!("kind: {}", result.file.kind.as_str());
+                println!("size_bytes: {}", result.file.size_bytes);
+                println!("generation: {}", result.file.generation);
+                println!("extraction_status: {}", result.file.extraction_status);
+                if let Some(dataset) = result.dataset {
+                    println!("dataset_status: {}", dataset.status);
+                    for column in dataset.columns {
+                        println!("column: {}\t{}", column.name, column.data_type);
+                    }
+                }
+                for symbol in result.symbols {
+                    println!(
+                        "symbol: {}\t{}\t{}:{}-{}",
+                        symbol.kind,
+                        symbol.name,
+                        result.file.relative_path,
+                        symbol.line_start,
+                        symbol.line_end
+                    );
+                }
+                if let Some(content) = result.content {
+                    print!("{}", content.text);
+                }
+            }
+        }
+        Command::Query {
+            sql,
+            roots,
+            files,
+            max_rows,
+            max_bytes,
+            timeout_ms,
+        } => {
+            let query = QueryRequest {
+                sql,
+                roots,
+                inputs: files
+                    .into_iter()
+                    .enumerate()
+                    .map(|(index, path)| QueryInput {
+                        path,
+                        alias: Some(format!("data_{index}")),
+                    })
+                    .collect(),
+                max_rows,
+                max_bytes,
+                timeout_ms,
+            };
+            let request = Request::Query {
+                request: query.clone(),
+            };
+            let result: QueryResult =
+                execute(&cli.index_dir, &socket, &request, move |workspace| {
+                    workspace.query(&query)
+                })?;
+            print_json(&result)?;
+        }
+        Command::Benchmark {
+            gold,
+            output,
+            allow_draft,
+        } => {
+            let gold = load_gold(&gold, allow_draft)?;
+            let workspace = WorkspaceIndex::open(&cli.index_dir)
+                .with_context(|| format!("open AWI index {}", cli.index_dir.display()))?;
+            let report = evaluate_retrieval(&workspace, &gold)?;
+            if let Some(output) = output {
+                if let Some(parent) = output.parent() {
+                    std::fs::create_dir_all(parent)?;
+                }
+                std::fs::write(&output, serde_json::to_vec_pretty(&report)?)
+                    .with_context(|| format!("write benchmark report {}", output.display()))?;
+            }
+            print_json(&report)?;
+        }
+        Command::Status { json } => {
+            let status: IndexStatus =
+                execute(&cli.index_dir, &socket, &Request::Status, |workspace| {
+                    workspace.status()
+                })?;
+            if json {
+                print_json(&status)?;
+            } else {
+                println!(
+                    "completed_generation={:?} running={} failed={} active_files={} deleted_files={} symbols={} datasets={} failures={}",
+                    status.completed_generation,
+                    status.running_generations,
+                    status.failed_generations,
+                    status.active_files,
+                    status.deleted_files,
+                    status.symbols,
+                    status.datasets,
+                    status.failures
+                );
+            }
+        }
+        Command::Serve {
+            snapshot_source,
+            snapshot_poll_ms,
+        } => serve_with_snapshots(
+            &cli.index_dir,
+            &socket,
+            snapshot_source.as_deref(),
+            Duration::from_millis(snapshot_poll_ms),
+        )?,
+        Command::Ping { json } => {
+            let response = try_request(&socket, &Request::Ping)?
+                .with_context(|| format!("AWI daemon is not running at {}", socket.display()))?;
+            if json {
+                print_json(&response)?;
+            } else {
+                println!("AWI daemon ready at {}", socket.display());
+            }
+        }
+        Command::Stop { json } => {
+            let response = try_request(&socket, &Request::Shutdown)?
+                .with_context(|| format!("AWI daemon is not running at {}", socket.display()))?;
+            if json {
+                print_json(&response)?;
+            } else {
+                println!("AWI daemon stopped");
+            }
+        }
+        Command::Mcp => awi::mcp::serve_stdio(cli.index_dir, socket)?,
+    }
+
+    Ok(())
+}
+
+fn execute<T>(
+    index_dir: &std::path::Path,
+    socket: &std::path::Path,
+    request: &Request,
+    local: impl FnOnce(&mut WorkspaceIndex) -> Result<T>,
+) -> Result<T>
+where
+    T: Serialize + DeserializeOwned,
+{
+    if let Some(value) = try_request(socket, request)? {
+        return serde_json::from_value(value).context("decode AWI daemon result");
+    }
+    let mut workspace = WorkspaceIndex::open(index_dir)
+        .with_context(|| format!("open AWI index {}", index_dir.display()))?;
+    local(&mut workspace)
+}
+
+fn mib(value: u64) -> u64 {
+    value.saturating_mul(1024 * 1024)
+}
+
+fn print_json(value: &impl Serialize) -> Result<()> {
+    println!("{}", serde_json::to_string_pretty(value)?);
+    Ok(())
+}
+
+fn single_line(value: &str) -> String {
+    value
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ")
+        .chars()
+        .take(240)
+        .collect()
+}
