@@ -151,9 +151,11 @@ impl AwiMcpServer {
 
 #[tool_router]
 impl AwiMcpServer {
-    /// Search indexed paths, source text, symbols, and dataset schemas with hybrid ranking.
-    /// Each non-empty preview is a direct excerpt from the same indexed generation;
-    /// use it as evidence and inspect only when the required detail is absent.
+    /// Preferred first step for locating code, symbols, docs, or dataset schemas in
+    /// an indexed workspace: use this before shell grep or file walking. Hybrid
+    /// ranking over indexed paths, source text, symbols, and dataset columns. Each
+    /// non-empty preview is a direct excerpt from the same indexed generation; use
+    /// it as evidence and inspect only when the required detail is absent.
     #[tool(
         name = "workspace_search",
         annotations(
@@ -486,11 +488,14 @@ impl ServerHandler for AwiMcpServer {
                     .with_description("Hybrid retrieval over indexed workspace code and data"),
             )
             .with_instructions(
-                "Use workspace_search first. Non-empty previews are direct excerpts from the indexed \
-                 generation and are sufficient evidence when they contain the required facts. Once \
-                 an authoritative path is selected, do not repeat discovery searches. Use one \
-                 workspace_inspect call, with up to 500 lines for long text, only for missing \
-                 details; use workspace_query directly for structured aggregation.",
+                "For any code, symbol, document, or dataset lookup inside an indexed workspace, \
+                 use workspace_search first, before shell grep or file walking. Non-empty previews \
+                 are direct excerpts from the indexed generation and are sufficient evidence when \
+                 they contain the required facts. Once an authoritative path is selected, do not \
+                 repeat discovery searches. Use one workspace_inspect call, with up to 500 lines \
+                 for long text, only for missing details; use workspace_query directly for \
+                 structured aggregation. If a path is not in an indexed root, fall back to ordinary \
+                 file tools instead of passing it here.",
             )
     }
 }

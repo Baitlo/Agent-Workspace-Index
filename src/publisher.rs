@@ -5,7 +5,7 @@ use std::thread;
 use std::time::{Duration, Instant};
 
 use anyhow::{Context, Result};
-use notify::{RecommendedWatcher, RecursiveMode, Watcher};
+use notify::{EventKind, RecommendedWatcher, RecursiveMode, Watcher};
 use serde::Serialize;
 
 use crate::WorkspaceIndex;
@@ -236,10 +236,18 @@ fn start_watcher(local_roots: &[PathBuf]) -> Result<(Receiver<()>, Option<Recomm
     }
     let (sender, receiver) = channel();
     let mut watcher = notify::recommended_watcher(move |result: notify::Result<notify::Event>| {
-        // Collapse into a unit tick, but ignore events confined to excluded
-        // paths so VCS/cache/build noise does not drive reconciles. An event
-        // with no paths (rare) is treated as relevant to be safe.
+        // Wake only on content-changing events. Reconcile reads every file each
+        // cycle, which itself emits access/open/close events under the watched
+        // roots; reacting to those would self-trigger an endless reconcile loop.
+        // Also drop events confined to excluded paths (VCS/cache/build churn).
         if let Ok(event) = result {
+            let content_change = matches!(
+                event.kind,
+                EventKind::Create(_) | EventKind::Modify(_) | EventKind::Remove(_)
+            );
+            if !content_change {
+                return;
+            }
             let relevant =
                 event.paths.is_empty() || event.paths.iter().any(|path| !is_default_excluded(path));
             if relevant {
