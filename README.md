@@ -1,8 +1,9 @@
-# AWI
+# AWI: Agent Workspace Index
 
-AWI (Agent Workspace Index) is a local-first retrieval layer for coding agents.
-It indexes source code, SQL, documents, logs, JSON/JSONL, CSV/TSV, and Parquet
-through one bounded CLI and MCP surface.
+AWI is a local-first AI code search, repository search, and structured-data
+retrieval layer for coding agents. It indexes source code, SQL, documents, logs,
+JSON/JSONL, CSV/TSV, and Parquet through one bounded CLI and Model Context
+Protocol (MCP) surface.
 
 ## Capabilities
 
@@ -13,6 +14,28 @@ through one bounded CLI and MCP surface.
 - NFS-safe `notify` and `reconcile` update paths.
 - Immutable generation snapshots with atomic daemon activation.
 - MCP tools: `workspace_search`, `workspace_inspect`, and `workspace_query`.
+
+## Agent-assisted Install
+
+Give your coding agent the
+[recommended installation prompt](docs/agent-install-prompt.md), or run the
+installer from an AWI checkout:
+
+```bash
+bash scripts/install.sh --workspace /absolute/path/to/your/repository
+```
+
+The first run builds and installs `awi`, creates a local index outside the
+workspace, detects installed Agent clients, and registers the AWI MCP server
+with each supported client. The operation is idempotent. Rust and Cargo are
+required when building from source.
+
+If Pi is detected, the installer also installs the pinned
+`pi-mcp-adapter@2.34.0`, because Pi intentionally has no built-in MCP client.
+This is a third-party Pi package; pass `--skip-pi-adapter` to review or install
+it separately, or set `AWI_PI_MCP_ADAPTER_SPEC` to select another reviewed
+version. Run `scripts/install.sh --help` for custom binary, index, and client
+options.
 
 ## Build And Test
 
@@ -109,22 +132,33 @@ awi integrate --project-root /path/to/workspace --dry-run --json
 awi integrate --project-root /path/to/workspace
 
 # Restrict the operation to selected clients.
-awi integrate --client codex,gemini,trae,zcode,kimi \
+awi integrate --client codex,gemini,trae,zcode,kimi,opencode,pi \
   --project-root /path/to/workspace
 ```
 
 The command is idempotent and reports one status per client:
 `configured`, `already_configured`, `would_configure`, `needs_attention`,
 `not_installed`, `unsupported`, or `failed`. It currently uses the official MCP
-CLI for Codex, Gemini, and Claude Code. For TraeCode, it atomically merges
-`<project>/.trae/mcp.json`, which is shared by TraeCode IDE and TraeCode CLI;
-project-level MCP must be enabled once in TraeCode settings. It also writes the
-native user-level configurations for Zcode (`~/.zcode/cli/config.json` at
-`mcp.servers`) and Kimi Code (`$KIMI_CODE_HOME/mcp.json`, falling back to
-`~/.kimi-code/mcp.json`); packaging AWI as a client-specific plugin is optional,
-not required. New Zcode and Kimi Code sessions load these entries automatically.
-Gemini workspaces marked untrusted are reported as `needs_attention` because
-Gemini suppresses all MCP servers until the user explicitly trusts the workspace.
+CLI for Codex, Gemini, and Claude Code, and native JSON configuration for the
+other clients:
+
+| Client | Registration target |
+|---|---|
+| [GitHub Copilot CLI](https://docs.github.com/en/copilot/how-tos/copilot-cli/customize-copilot/add-mcp-servers) | `~/.copilot/mcp-config.json` |
+| TraeCode | `<project>/.trae/mcp.json` |
+| Zcode | `~/.zcode/cli/config.json` at `mcp.servers` |
+| Kimi Code | `$KIMI_CODE_HOME/mcp.json`, defaulting to `~/.kimi-code/mcp.json` |
+| [OpenCode](https://opencode.ai/docs/en/mcp-servers/) | `$OPENCODE_CONFIG`, or `${XDG_CONFIG_HOME:-~/.config}/opencode/opencode.json` |
+| [Pi](https://github.com/badlogic/pi-mono/tree/main/packages/coding-agent) | `$PI_CODING_AGENT_DIR/mcp.json` through [`pi-mcp-adapter`](https://pi.dev/packages/pi-mcp-adapter) |
+| [Cursor](https://cursor.com/help/customization/mcp) | `~/.cursor/mcp.json` |
+| [Windsurf](https://docs.windsurf.com/windsurf/cascade/mcp) | `~/.codeium/windsurf/mcp_config.json` |
+
+Plugins are optional packaging for clients with native MCP support. Pi is the
+exception: its core deliberately omits MCP, so an extension is required. New
+sessions load the generated user-level entries automatically. TraeCode
+project-level MCP must be enabled once in settings. Gemini workspaces marked
+untrusted are reported as `needs_attention` because Gemini suppresses all MCP
+servers until the user explicitly trusts the workspace.
 
 By default, AWI registers the current binary as
 `awi --index-dir <absolute-path> mcp`, which is self-contained for a local

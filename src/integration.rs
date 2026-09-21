@@ -19,9 +19,14 @@ pub enum IntegrationClient {
     Codex,
     Gemini,
     Claude,
+    Copilot,
     Trae,
     Zcode,
     Kimi,
+    OpenCode,
+    Pi,
+    Cursor,
+    Windsurf,
 }
 
 impl IntegrationClient {
@@ -31,9 +36,14 @@ impl IntegrationClient {
             Self::Codex => "codex",
             Self::Gemini => "gemini",
             Self::Claude => "claude",
+            Self::Copilot => "copilot",
             Self::Trae => "trae",
             Self::Zcode => "zcode",
             Self::Kimi => "kimi",
+            Self::OpenCode => "opencode",
+            Self::Pi => "pi",
+            Self::Cursor => "cursor",
+            Self::Windsurf => "windsurf",
         }
     }
 }
@@ -47,12 +57,17 @@ impl FromStr for IntegrationClient {
             "codex" => Ok(Self::Codex),
             "gemini" => Ok(Self::Gemini),
             "claude" | "claude-code" => Ok(Self::Claude),
+            "copilot" | "github-copilot" | "github-copilot-cli" => Ok(Self::Copilot),
             "trae" | "traecode" | "trae-code" | "traecli" => Ok(Self::Trae),
             "zcode" => Ok(Self::Zcode),
             "kimi" | "kimi-code" => Ok(Self::Kimi),
+            "opencode" | "open-code" => Ok(Self::OpenCode),
+            "pi" | "pi-coding-agent" => Ok(Self::Pi),
+            "cursor" | "cursor-agent" => Ok(Self::Cursor),
+            "windsurf" | "windsurf-cascade" => Ok(Self::Windsurf),
             other => anyhow::bail!(
                 "unsupported integration client {other:?}; expected all, codex, gemini, \
-                 claude, trae, zcode, or kimi"
+                 claude, copilot, trae, zcode, kimi, opencode, pi, cursor, or windsurf"
             ),
         }
     }
@@ -161,11 +176,16 @@ pub fn integrate(options: &IntegrationOptions) -> Result<IntegrationReport> {
                 integrate_gemini(&options.project_root, &options.server, options.dry_run)
             }
             IntegrationClient::Claude => integrate_claude(&options.server, options.dry_run),
+            IntegrationClient::Copilot => integrate_copilot(&options.server, options.dry_run),
             IntegrationClient::Trae => {
                 integrate_trae(&options.project_root, &options.server, options.dry_run)
             }
             IntegrationClient::Zcode => integrate_zcode(&options.server, options.dry_run),
             IntegrationClient::Kimi => integrate_kimi(&options.server, options.dry_run),
+            IntegrationClient::OpenCode => integrate_opencode(&options.server, options.dry_run),
+            IntegrationClient::Pi => integrate_pi(&options.server, options.dry_run),
+            IntegrationClient::Cursor => integrate_cursor(&options.server, options.dry_run),
+            IntegrationClient::Windsurf => integrate_windsurf(&options.server, options.dry_run),
             IntegrationClient::All => unreachable!("all is expanded before integration"),
         };
         results.push(result);
@@ -210,9 +230,14 @@ fn expand_clients(clients: &[IntegrationClient]) -> Vec<IntegrationClient> {
             IntegrationClient::Codex,
             IntegrationClient::Gemini,
             IntegrationClient::Claude,
+            IntegrationClient::Copilot,
             IntegrationClient::Trae,
             IntegrationClient::Zcode,
             IntegrationClient::Kimi,
+            IntegrationClient::OpenCode,
+            IntegrationClient::Pi,
+            IntegrationClient::Cursor,
+            IntegrationClient::Windsurf,
         ];
     }
     let mut output = Vec::new();
@@ -433,6 +458,22 @@ fn integrate_claude(server: &McpServerSpec, dry_run: bool) -> ClientIntegration 
     }
 }
 
+fn integrate_copilot(server: &McpServerSpec, dry_run: bool) -> ClientIntegration {
+    let client = IntegrationClient::Copilot;
+    let path = home_path(".copilot/mcp-config.json");
+    integrate_json_config(
+        client,
+        is_installed(&["copilot"], std::slice::from_ref(&path)),
+        path,
+        "/mcpServers/awi",
+        server,
+        dry_run,
+        merge_copilot_mcp,
+        copilot_server_matches,
+        "native user-scope MCP entry added; Copilot CLI can load it immediately",
+    )
+}
+
 fn integrate_trae(project_root: &Path, server: &McpServerSpec, dry_run: bool) -> ClientIntegration {
     let client = IntegrationClient::Trae;
     let installed = is_installed(
@@ -568,6 +609,147 @@ fn integrate_kimi(server: &McpServerSpec, dry_run: bool) -> ClientIntegration {
     )
 }
 
+fn integrate_opencode(server: &McpServerSpec, dry_run: bool) -> ClientIntegration {
+    let client = IntegrationClient::OpenCode;
+    let path = opencode_config_path();
+    let installed = is_installed(
+        &["opencode"],
+        &[path.clone(), xdg_config_home().join("opencode")],
+    );
+    integrate_json_config(
+        client,
+        installed,
+        path,
+        "/mcp/awi",
+        server,
+        dry_run,
+        merge_opencode_mcp,
+        opencode_server_matches,
+        "native global MCP entry added; restart OpenCode or start a new session",
+    )
+}
+
+fn integrate_pi(server: &McpServerSpec, dry_run: bool) -> ClientIntegration {
+    let client = IntegrationClient::Pi;
+    let home = pi_agent_home_path();
+    let executable = find_executable("pi");
+    let installed = executable.is_some() || home.exists();
+    if !installed {
+        return not_installed(client);
+    }
+    let adapter_installed = pi_mcp_adapter_installed(executable.as_deref(), &home);
+    let mut result = integrate_json_config(
+        client,
+        true,
+        home.join("mcp.json"),
+        "/mcpServers/awi",
+        server,
+        dry_run,
+        merge_pi_mcp,
+        pi_server_matches,
+        "Pi MCP adapter config added; restart Pi to load AWI",
+    );
+    if !adapter_installed && result.status != IntegrationStatus::Failed {
+        result.status = if dry_run {
+            IntegrationStatus::WouldConfigure
+        } else {
+            IntegrationStatus::NeedsAttention
+        };
+        result.detail = if dry_run {
+            "would merge the Pi MCP config; Pi also requires `pi install \
+             npm:pi-mcp-adapter`"
+                .to_owned()
+        } else {
+            "MCP config is ready, but Pi core has no native MCP client; run `pi install \
+             npm:pi-mcp-adapter`, then restart Pi"
+                .to_owned()
+        };
+    }
+    result
+}
+
+fn integrate_cursor(server: &McpServerSpec, dry_run: bool) -> ClientIntegration {
+    let client = IntegrationClient::Cursor;
+    let path = home_path(".cursor/mcp.json");
+    integrate_json_config(
+        client,
+        is_installed(&["cursor", "cursor-agent"], &[home_path(".cursor")]),
+        path,
+        "/mcpServers/awi",
+        server,
+        dry_run,
+        merge_json_mcp,
+        json_server_matches,
+        "native global MCP entry added; restart Cursor or start a new Agent session",
+    )
+}
+
+fn integrate_windsurf(server: &McpServerSpec, dry_run: bool) -> ClientIntegration {
+    let client = IntegrationClient::Windsurf;
+    let path = home_path(".codeium/windsurf/mcp_config.json");
+    integrate_json_config(
+        client,
+        is_installed(&["windsurf"], &[home_path(".codeium/windsurf")]),
+        path,
+        "/mcpServers/awi",
+        server,
+        dry_run,
+        merge_json_mcp,
+        json_server_matches,
+        "native global MCP entry added; refresh MCP servers in Windsurf",
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+fn integrate_json_config(
+    client: IntegrationClient,
+    installed: bool,
+    path: PathBuf,
+    pointer: &str,
+    server: &McpServerSpec,
+    dry_run: bool,
+    merge: fn(Value, &McpServerSpec) -> Result<Value>,
+    matches: fn(Option<&Value>, &McpServerSpec) -> bool,
+    configured_detail: &str,
+) -> ClientIntegration {
+    if !installed {
+        return not_installed(client);
+    }
+    let existing = match read_optional_json(&path) {
+        Ok(value) => value,
+        Err(error) => return failed(client, error),
+    };
+    if matches(existing.pointer(pointer), server) {
+        return success(
+            client,
+            IntegrationStatus::AlreadyConfigured,
+            "native MCP entry already matches",
+            Some(path),
+        );
+    }
+    if dry_run {
+        return success(
+            client,
+            IntegrationStatus::WouldConfigure,
+            "would merge a native MCP entry",
+            Some(path),
+        );
+    }
+    let merged = match merge(existing, server) {
+        Ok(value) => value,
+        Err(error) => return failed(client, error),
+    };
+    if let Err(error) = write_json_atomic(&path, &merged) {
+        return failed(client, error);
+    }
+    success(
+        client,
+        IntegrationStatus::Configured,
+        configured_detail,
+        Some(path),
+    )
+}
+
 fn merge_zcode_mcp(mut root: Value, server: &McpServerSpec) -> Result<Value> {
     if !root.is_object() {
         anyhow::bail!("Zcode config root must be a JSON object");
@@ -594,6 +776,84 @@ fn merge_zcode_mcp(mut root: Value, server: &McpServerSpec) -> Result<Value> {
             "env": {},
             "enabled": true,
             "timeoutMs": MCP_TIMEOUT_MS
+        }),
+    );
+    Ok(root)
+}
+
+fn merge_opencode_mcp(mut root: Value, server: &McpServerSpec) -> Result<Value> {
+    if !root.is_object() {
+        anyhow::bail!("OpenCode config root must be a JSON object");
+    }
+    let mcp = root
+        .as_object_mut()
+        .expect("checked above")
+        .entry("mcp")
+        .or_insert_with(|| json!({}));
+    if !mcp.is_object() {
+        anyhow::bail!("OpenCode mcp config must be a JSON object");
+    }
+    let mut command = Vec::with_capacity(server.args.len() + 1);
+    command.push(server.command.to_string_lossy().into_owned());
+    command.extend(server.args.iter().cloned());
+    mcp.as_object_mut().expect("checked above").insert(
+        SERVER_NAME.to_owned(),
+        json!({
+            "type": "local",
+            "command": command,
+            "enabled": true,
+            "timeout": MCP_TIMEOUT_MS
+        }),
+    );
+    Ok(root)
+}
+
+fn merge_pi_mcp(mut root: Value, server: &McpServerSpec) -> Result<Value> {
+    if !root.is_object() {
+        anyhow::bail!("Pi MCP config root must be a JSON object");
+    }
+    let servers = root
+        .as_object_mut()
+        .expect("checked above")
+        .entry("mcpServers")
+        .or_insert_with(|| json!({}));
+    if !servers.is_object() {
+        anyhow::bail!("Pi mcpServers must be a JSON object");
+    }
+    servers.as_object_mut().expect("checked above").insert(
+        SERVER_NAME.to_owned(),
+        json!({
+            "transport": "stdio",
+            "command": server.command,
+            "args": server.args,
+            "env": {},
+            "lifecycle": "eager"
+        }),
+    );
+    Ok(root)
+}
+
+fn merge_copilot_mcp(mut root: Value, server: &McpServerSpec) -> Result<Value> {
+    if !root.is_object() {
+        anyhow::bail!("GitHub Copilot MCP config root must be a JSON object");
+    }
+    let servers = root
+        .as_object_mut()
+        .expect("checked above")
+        .entry("mcpServers")
+        .or_insert_with(|| json!({}));
+    if !servers.is_object() {
+        anyhow::bail!("GitHub Copilot mcpServers must be a JSON object");
+    }
+    servers.as_object_mut().expect("checked above").insert(
+        SERVER_NAME.to_owned(),
+        json!({
+            "type": "local",
+            "command": server.command,
+            "args": server.args,
+            "env": {},
+            "tools": ["*"],
+            "timeout": MCP_TIMEOUT_MS
         }),
     );
     Ok(root)
@@ -698,6 +958,43 @@ fn kimi_server_matches(value: Option<&Value>, server: &McpServerSpec) -> bool {
                 value.get("transport").and_then(Value::as_str),
                 None | Some("stdio")
             ) && value.get("enabled").and_then(Value::as_bool) != Some(false)
+        })
+}
+
+fn copilot_server_matches(value: Option<&Value>, server: &McpServerSpec) -> bool {
+    json_server_matches(value, server)
+        && value.is_some_and(|value| {
+            matches!(
+                value.get("type").and_then(Value::as_str),
+                None | Some("local") | Some("stdio")
+            ) && value.get("enabled").and_then(Value::as_bool) != Some(false)
+        })
+}
+
+fn opencode_server_matches(value: Option<&Value>, server: &McpServerSpec) -> bool {
+    let Some(value) = value else {
+        return false;
+    };
+    let command = value
+        .get("command")
+        .and_then(Value::as_array)
+        .map(|values| values.iter().filter_map(Value::as_str).collect::<Vec<_>>())
+        .unwrap_or_default();
+    let mut expected = Vec::with_capacity(server.args.len() + 1);
+    expected.push(server.command.to_string_lossy().into_owned());
+    expected.extend(server.args.iter().cloned());
+    value.get("type").and_then(Value::as_str) == Some("local")
+        && command == expected.iter().map(String::as_str).collect::<Vec<_>>()
+        && value.get("enabled").and_then(Value::as_bool) != Some(false)
+}
+
+fn pi_server_matches(value: Option<&Value>, server: &McpServerSpec) -> bool {
+    json_server_matches(value, server)
+        && value.is_some_and(|value| {
+            matches!(
+                value.get("transport").and_then(Value::as_str),
+                None | Some("stdio")
+            )
         })
 }
 
@@ -865,6 +1162,51 @@ fn kimi_home_path() -> PathBuf {
         .unwrap_or_else(|| home_path(".kimi-code"))
 }
 
+fn xdg_config_home() -> PathBuf {
+    env::var_os("XDG_CONFIG_HOME")
+        .filter(|path| !path.is_empty())
+        .map(PathBuf::from)
+        .unwrap_or_else(|| home_path(".config"))
+}
+
+fn opencode_config_path() -> PathBuf {
+    if let Some(path) = env::var_os("OPENCODE_CONFIG").filter(|path| !path.is_empty()) {
+        return PathBuf::from(path);
+    }
+    let directory = xdg_config_home().join("opencode");
+    let json = directory.join("opencode.json");
+    let jsonc = directory.join("opencode.jsonc");
+    if json.exists() || !jsonc.exists() {
+        json
+    } else {
+        jsonc
+    }
+}
+
+fn pi_agent_home_path() -> PathBuf {
+    env::var_os("PI_CODING_AGENT_DIR")
+        .filter(|path| !path.is_empty())
+        .map(PathBuf::from)
+        .unwrap_or_else(|| home_path(".pi/agent"))
+}
+
+fn pi_mcp_adapter_installed(executable: Option<&Path>, home: &Path) -> bool {
+    let listed = executable
+        .and_then(|executable| run(executable, ["list"]).ok())
+        .filter(|output| output.status.success())
+        .map(|output| {
+            format!(
+                "{}\n{}",
+                String::from_utf8_lossy(&output.stdout),
+                String::from_utf8_lossy(&output.stderr)
+            )
+        })
+        .is_some_and(|output| output.contains("pi-mcp-adapter"));
+    listed
+        || home.join("npm/pi-mcp-adapter").exists()
+        || home.join("npm/node_modules/pi-mcp-adapter").exists()
+}
+
 fn shell_join(args: &[String]) -> String {
     args.iter()
         .map(|arg| {
@@ -897,12 +1239,24 @@ mod tests {
             "traecli".parse::<IntegrationClient>().unwrap(),
             IntegrationClient::Trae
         );
+        assert_eq!(
+            "github-copilot".parse::<IntegrationClient>().unwrap(),
+            IntegrationClient::Copilot
+        );
+        assert_eq!(
+            "open-code".parse::<IntegrationClient>().unwrap(),
+            IntegrationClient::OpenCode
+        );
+        assert_eq!(
+            "pi-coding-agent".parse::<IntegrationClient>().unwrap(),
+            IntegrationClient::Pi
+        );
         assert!("other".parse::<IntegrationClient>().is_err());
     }
 
     #[test]
     fn expands_all_and_deduplicates_explicit_clients() {
-        assert_eq!(expand_clients(&[]).len(), 6);
+        assert_eq!(expand_clients(&[]).len(), 11);
         assert_eq!(
             expand_clients(&[
                 IntegrationClient::Gemini,
@@ -975,6 +1329,83 @@ mod tests {
             &server
         ));
         assert_eq!(merged["mcp"]["servers"]["awi"]["timeoutMs"], 45_000);
+    }
+
+    #[test]
+    fn merges_opencode_mcp_using_local_command_array() {
+        let server = McpServerSpec {
+            command: PathBuf::from("/opt/awi"),
+            args: vec!["--index-dir".into(), "/data/index".into(), "mcp".into()],
+        };
+        let merged = merge_opencode_mcp(
+            json!({
+                "$schema": "https://opencode.ai/config.json",
+                "mcp": {
+                    "other": {
+                        "type": "remote",
+                        "url": "https://example.invalid/mcp"
+                    }
+                }
+            }),
+            &server,
+        )
+        .unwrap();
+        let merged_again = merge_opencode_mcp(merged.clone(), &server).unwrap();
+        assert_eq!(merged_again, merged);
+        assert_eq!(merged["$schema"], "https://opencode.ai/config.json");
+        assert_eq!(merged["mcp"]["other"]["url"], "https://example.invalid/mcp");
+        assert_eq!(
+            merged["mcp"]["awi"]["command"],
+            json!(["/opt/awi", "--index-dir", "/data/index", "mcp"])
+        );
+        assert!(opencode_server_matches(merged.pointer("/mcp/awi"), &server));
+    }
+
+    #[test]
+    fn merges_pi_mcp_for_the_adapter_without_overwriting_settings() {
+        let server = McpServerSpec {
+            command: PathBuf::from("/opt/awi"),
+            args: vec!["mcp".into()],
+        };
+        let merged = merge_pi_mcp(
+            json!({
+                "settings": {
+                    "toolPrefix": "mcp"
+                },
+                "mcpServers": {
+                    "other": {
+                        "url": "https://example.invalid/mcp"
+                    }
+                }
+            }),
+            &server,
+        )
+        .unwrap();
+        assert_eq!(merged["settings"]["toolPrefix"], "mcp");
+        assert_eq!(
+            merged["mcpServers"]["other"]["url"],
+            "https://example.invalid/mcp"
+        );
+        assert_eq!(merged["mcpServers"]["awi"]["lifecycle"], "eager");
+        assert!(pi_server_matches(
+            merged.pointer("/mcpServers/awi"),
+            &server
+        ));
+    }
+
+    #[test]
+    fn merges_copilot_mcp_with_all_tools_enabled() {
+        let server = McpServerSpec {
+            command: PathBuf::from("/opt/awi"),
+            args: vec!["mcp".into()],
+        };
+        let merged = merge_copilot_mcp(json!({}), &server).unwrap();
+        assert_eq!(merged["mcpServers"]["awi"]["type"], "local");
+        assert_eq!(merged["mcpServers"]["awi"]["tools"], json!(["*"]));
+        assert!(copilot_server_matches(
+            merged.pointer("/mcpServers/awi"),
+            &server
+        ));
     }
 
     #[test]

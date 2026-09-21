@@ -217,7 +217,8 @@ enum Command {
 
     /// Register AWI as an MCP server across supported Agent clients.
     Integrate {
-        /// Client(s) to configure: all, codex, gemini, claude, trae, zcode, kimi.
+        /// Client(s) to configure: all, codex, gemini, claude, copilot, trae,
+        /// zcode, kimi, opencode, pi, cursor, windsurf.
         /// Defaults to all detected clients.
         #[arg(long = "client", value_delimiter = ',')]
         clients: Vec<String>,
