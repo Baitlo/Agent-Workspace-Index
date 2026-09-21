@@ -193,8 +193,16 @@ fn dispatch(
             roots,
             kinds,
             path_prefix,
+            context_path,
         } => workspace
-            .search_filtered(&query, limit, &roots, &kinds, path_prefix.as_deref())
+            .search_filtered(
+                &query,
+                limit,
+                &roots,
+                &kinds,
+                path_prefix.as_deref(),
+                context_path.as_deref(),
+            )
             .and_then(|value| ResponseEnvelope::success(value).map_err(Into::into)),
         Request::Inspect {
             path,

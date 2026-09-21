@@ -23,6 +23,7 @@ fn mcp_stdio_exposes_search_inspect_and_query() {
     let audit_log = fixture.path().join("mcp-calls.jsonl");
     let source = root.join("service.rs");
     let metrics = root.join("metrics.csv");
+    let instructions = root.join("AGENTS.md");
     fs::create_dir_all(&root).unwrap();
     fs::write(
         &source,
@@ -30,13 +31,18 @@ fn mcp_stdio_exposes_search_inspect_and_query() {
     )
     .unwrap();
     fs::write(&metrics, "model,score\nawi,0.95\nbaseline,0.80\n").unwrap();
+    fs::write(
+        &instructions,
+        "# Workspace Policy\nUse MCP evidence before deployment.\n",
+    )
+    .unwrap();
 
     {
         let mut workspace = WorkspaceIndex::open(&index_dir).unwrap();
         let report = workspace
             .index_root(&root, &IndexOptions::default())
             .unwrap();
-        assert_eq!(report.indexed, 2);
+        assert_eq!(report.indexed, 3);
         assert_eq!(report.failed, 0);
     }
 
@@ -89,6 +95,11 @@ fn mcp_stdio_exposes_search_inspect_and_query() {
         search_tool["inputSchema"]["properties"]["limit"]["maximum"],
         50
     );
+    assert!(
+        search_tool["inputSchema"]["properties"]["context_path"]
+            .as_object()
+            .is_some()
+    );
 
     let searched = mcp.request(
         3,
@@ -111,6 +122,26 @@ fn mcp_stdio_exposes_search_inspect_and_query() {
         hits.iter()
             .any(|hit| hit["path"].as_str().unwrap().ends_with("service.rs"))
     );
+
+    let agent_search = mcp.request(
+        31,
+        "tools/call",
+        json!({
+            "name": "workspace_search",
+            "arguments": {
+                "query": "MCP evidence deployment",
+                "limit": 5,
+                "kinds": ["agent_instructions"],
+                "context_path": source
+            }
+        }),
+    );
+    let agent_hits = agent_search["result"]["structuredContent"]["hits"]
+        .as_array()
+        .unwrap();
+    assert_eq!(agent_hits.len(), 1);
+    assert_eq!(agent_hits[0]["kind"], "agent_instructions");
+    assert_eq!(agent_hits[0]["agent"]["role"], "instructions");
 
     let parent_scoped = mcp.request(
         30,
@@ -232,7 +263,7 @@ fn mcp_stdio_exposes_search_inspect_and_query() {
         .lines()
         .map(|line| serde_json::from_str::<Value>(line).unwrap())
         .collect::<Vec<_>>();
-    assert_eq!(records.len(), 6);
+    assert_eq!(records.len(), 7);
     assert_eq!(records[0]["tool"], "workspace_search");
     assert_eq!(records[0]["status"], "ok");
     assert_eq!(records[0]["result_count_kind"], "hits");
@@ -240,19 +271,25 @@ fn mcp_stdio_exposes_search_inspect_and_query() {
     assert_eq!(records[1]["tool"], "workspace_search");
     assert_eq!(records[1]["status"], "ok");
     assert_eq!(
-        records[1]["arguments"]["roots"][0].as_str(),
+        records[1]["arguments"]["context_path"].as_str(),
+        source.to_str()
+    );
+    assert_eq!(records[2]["tool"], "workspace_search");
+    assert_eq!(records[2]["status"], "ok");
+    assert_eq!(
+        records[2]["arguments"]["roots"][0].as_str(),
         fixture.path().to_str()
     );
-    assert_eq!(records[2]["tool"], "workspace_inspect");
-    assert_eq!(records[2]["status"], "ok");
-    assert_eq!(records[3]["tool"], "workspace_query");
+    assert_eq!(records[3]["tool"], "workspace_inspect");
     assert_eq!(records[3]["status"], "ok");
-    assert_eq!(records[3]["result_count_kind"], "rows");
-    assert_eq!(records[3]["result_count"], 1);
-    assert_eq!(records[4]["status"], "tool_error");
-    assert_eq!(records[4]["error_code"], "query_failed");
-    assert_eq!(records[5]["status"], "protocol_error");
-    assert_eq!(records[5]["error_code"], "-32602");
+    assert_eq!(records[4]["tool"], "workspace_query");
+    assert_eq!(records[4]["status"], "ok");
+    assert_eq!(records[4]["result_count_kind"], "rows");
+    assert_eq!(records[4]["result_count"], 1);
+    assert_eq!(records[5]["status"], "tool_error");
+    assert_eq!(records[5]["error_code"], "query_failed");
+    assert_eq!(records[6]["status"], "protocol_error");
+    assert_eq!(records[6]["error_code"], "-32602");
     assert_eq!(
         fs::metadata(&audit_log).unwrap().permissions().mode() & 0o777,
         0o600

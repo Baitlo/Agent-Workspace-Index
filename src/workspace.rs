@@ -10,19 +10,21 @@ use ignore::WalkBuilder;
 use crate::catalog::Catalog;
 use crate::data::{DuckDbProfiler, execute_query};
 use crate::extract::{
-    classify, extension, extract_symbols, extract_text, is_default_excluded, is_sensitive,
-    mtime_ns, should_extract_text,
+    classify, contains_sensitive_agent_content, extension, extract_agent_document, extract_symbols,
+    extract_text, is_default_excluded, is_sensitive, mtime_ns, should_extract_text,
 };
 use crate::model::{
-    CatalogFileInput, ContentExcerpt, DatasetProfile, FileKind, IndexOptions, IndexReport,
-    IndexStatus, InspectResult, NotifyReport, QueryRequest, QueryResult, SearchDocument, SearchHit,
-    SymbolRecord,
+    AgentDocumentRole, CatalogFileInput, ContentExcerpt, DatasetProfile, FileKind, IndexOptions,
+    IndexReport, IndexStatus, InspectResult, NotifyReport, QueryRequest, QueryResult,
+    SearchDocument, SearchHit, SymbolRecord,
 };
 use crate::search::SearchIndex;
 use crate::snapshot::{SnapshotManifest, publish};
 
 const DEFAULT_INSPECT_LINES: usize = 120;
 const DEFAULT_INSPECT_CHARS: usize = 32 * 1024;
+const APPLICABLE_INSTRUCTION_BOOST: f32 = 1.0;
+const INSTRUCTION_DEPTH_BOOST: f32 = 0.001;
 
 pub struct WorkspaceIndex {
     index_dir: PathBuf,
@@ -49,10 +51,59 @@ impl WorkspaceIndex {
         root: impl AsRef<Path>,
         options: &IndexOptions,
     ) -> Result<IndexReport> {
-        let root = fs::canonicalize(root.as_ref())
-            .with_context(|| format!("resolve root {}", root.as_ref().display()))?;
-        if !root.is_dir() {
-            anyhow::bail!("index root is not a directory: {}", root.display());
+        let requested_root = root.as_ref();
+        let root = match fs::canonicalize(requested_root) {
+            Ok(root) => root,
+            Err(error)
+                if matches!(
+                    classify(requested_root),
+                    FileKind::AgentInstructions | FileKind::AgentSkill
+                ) =>
+            {
+                let root = notification_path(requested_root)?;
+                if !self
+                    .catalog
+                    .roots()?
+                    .iter()
+                    .any(|(_, registered)| registered == &root)
+                {
+                    return Err(error)
+                        .with_context(|| format!("resolve root {}", requested_root.display()));
+                }
+                let _writer_lock = acquire_writer_lock(&self.index_dir)?;
+                let (root_id, generation) = self.catalog.start_generation(&root)?;
+                let path = root.to_string_lossy().into_owned();
+                let deleted = self.catalog.mark_path_deleted(root_id, &path, generation)?;
+                let deleted_paths = deleted.then_some(path).into_iter().collect::<Vec<_>>();
+                self.search.apply_changes(&[], &deleted_paths)?;
+                self.catalog.complete_generation(root_id, generation)?;
+                return Ok(IndexReport {
+                    root,
+                    generation,
+                    discovered: 0,
+                    indexed: 0,
+                    unchanged: u64::from(!deleted),
+                    deleted: u64::from(deleted),
+                    metadata_only: 0,
+                    failed: 0,
+                });
+            }
+            Err(error) => {
+                return Err(error)
+                    .with_context(|| format!("resolve root {}", requested_root.display()));
+            }
+        };
+        if !(root.is_dir()
+            || root.is_file()
+                && matches!(
+                    classify(&root),
+                    FileKind::AgentInstructions | FileKind::AgentSkill
+                ))
+        {
+            anyhow::bail!(
+                "index root must be a directory, AGENTS.md, or SKILL.md: {}",
+                root.display()
+            );
         }
 
         let _writer_lock = acquire_writer_lock(&self.index_dir)?;
@@ -119,7 +170,7 @@ impl WorkspaceIndex {
     }
 
     pub fn search(&self, query: &str, limit: usize) -> Result<Vec<SearchHit>> {
-        self.search_filtered(query, limit, &[], &[], None)
+        self.search_filtered(query, limit, &[], &[], None, None)
     }
 
     pub fn search_filtered(
@@ -129,6 +180,7 @@ impl WorkspaceIndex {
         roots: &[PathBuf],
         kinds: &[String],
         path_prefix: Option<&str>,
+        context_path: Option<&Path>,
     ) -> Result<Vec<SearchHit>> {
         if query.trim().is_empty() {
             anyhow::bail!("search query must not be empty");
@@ -156,46 +208,130 @@ impl WorkspaceIndex {
             .iter()
             .map(|kind| FileKind::try_from(kind.as_str()))
             .collect::<Result<Vec<_>>>()?;
-        let filtered = !root_filter.is_empty() || !kind_filter.is_empty() || path_prefix.is_some();
+        let context_path = context_path.map(resolve_context_path).transpose()?;
+        if let Some(context_path) = &context_path
+            && !registered_roots
+                .iter()
+                .any(|(_, root)| root.is_dir() && context_path.starts_with(root))
+        {
+            anyhow::bail!(
+                "context path {} is outside every indexed workspace directory",
+                context_path.display()
+            );
+        }
+        let filtered = !root_filter.is_empty()
+            || !kind_filter.is_empty()
+            || path_prefix.is_some()
+            || context_path.is_some();
         let overfetch = if filtered {
             limit.saturating_mul(20).clamp(200, 1_000)
         } else {
             limit.saturating_mul(4).max(20)
         };
-        let candidates = self.search.search(query, overfetch, overfetch)?;
-        let mut hits = Vec::with_capacity(limit);
+        let include_agent_lane = context_path.is_some()
+            || kind_filter
+                .iter()
+                .any(|kind| matches!(kind, FileKind::AgentInstructions | FileKind::AgentSkill));
+        let candidates = self
+            .search
+            .search(query, overfetch, overfetch, include_agent_lane)?;
+        let candidate_ids = candidates
+            .iter()
+            .map(|candidate| candidate.file_id)
+            .collect::<Vec<_>>();
+        let files = self.catalog.current_files_by_ids(&candidate_ids)?;
+        let agent_ids = files
+            .values()
+            .filter(|file| {
+                matches!(
+                    file.kind,
+                    FileKind::AgentInstructions | FileKind::AgentSkill
+                )
+            })
+            .map(|file| file.id)
+            .collect::<Vec<_>>();
+        let agents = self.catalog.agent_documents_for(&agent_ids)?;
+        let mut ranked_hits = Vec::with_capacity(limit);
         for candidate in candidates {
-            let Some(file) = self.catalog.current_file_by_id(candidate.file_id)? else {
+            let Some(file) = files.get(&candidate.file_id).cloned() else {
                 continue;
             };
             if file.generation != candidate.generation
-                || (!root_filter.is_empty() && !root_filter.contains(&file.root))
                 || (!kind_filter.is_empty() && !kind_filter.contains(&file.kind))
-                || path_prefix.is_some_and(|prefix| {
-                    !file.absolute_path.starts_with(prefix)
-                        && !file.relative_path.starts_with(prefix)
+            {
+                continue;
+            }
+            let agent = agents.get(&file.id).cloned();
+            let applicable_instruction = context_path.as_ref().is_some_and(|context| {
+                agent.as_ref().is_some_and(|metadata| {
+                    metadata.role == AgentDocumentRole::Instructions
+                        && context.starts_with(&metadata.scope_root)
+                })
+            });
+            if context_path.is_some()
+                && agent.as_ref().is_some_and(|metadata| {
+                    metadata.role == AgentDocumentRole::Instructions && !applicable_instruction
                 })
             {
                 continue;
             }
-            hits.push(SearchHit {
-                file_id: file.id,
-                path: file.absolute_path,
-                relative_path: file.relative_path,
-                kind: file.kind,
-                experiment: file.experiment,
-                size_bytes: file.size_bytes,
-                mtime_ns: file.mtime_ns,
-                generation: file.generation,
-                score: candidate.score,
-                matched_lanes: candidate.lanes,
-                preview: candidate.preview,
-            });
-            if hits.len() == limit {
-                break;
+            if (!root_filter.is_empty() && !root_filter.contains(&file.root))
+                && !applicable_instruction
+            {
+                continue;
             }
+            if path_prefix.is_some_and(|prefix| {
+                !file.absolute_path.starts_with(prefix) && !file.relative_path.starts_with(prefix)
+            }) && !applicable_instruction
+            {
+                continue;
+            }
+            let mut score = candidate.score;
+            if applicable_instruction {
+                let depth = agent
+                    .as_ref()
+                    .map_or(0, |metadata| metadata.precedence_depth);
+                score += APPLICABLE_INSTRUCTION_BOOST + depth as f32 * INSTRUCTION_DEPTH_BOOST;
+            }
+            let content_hash = file.content_hash.clone();
+            ranked_hits.push((
+                SearchHit {
+                    file_id: file.id,
+                    path: file.absolute_path,
+                    relative_path: file.relative_path,
+                    kind: file.kind,
+                    experiment: file.experiment,
+                    size_bytes: file.size_bytes,
+                    mtime_ns: file.mtime_ns,
+                    generation: file.generation,
+                    score,
+                    matched_lanes: candidate.lanes,
+                    preview: candidate.preview,
+                    agent,
+                },
+                content_hash,
+            ));
         }
-        Ok(hits)
+        ranked_hits.sort_by(|(left, _), (right, _)| {
+            right
+                .score
+                .total_cmp(&left.score)
+                .then_with(|| left.path.cmp(&right.path))
+        });
+        let mut agent_hashes = HashSet::new();
+        ranked_hits.retain(|(hit, content_hash)| {
+            let Some(agent) = &hit.agent else {
+                return true;
+            };
+            content_hash.as_ref().is_none_or(|hash| {
+                agent_hashes.insert((agent.role.as_str().to_owned(), hash.clone()))
+            })
+        });
+        Ok(ranked_hits
+            .into_iter()
+            .map(|(hit, _)| hit)
+            .take(limit)
+            .collect())
     }
 
     pub fn inspect(&self, path: impl AsRef<Path>) -> Result<InspectResult> {
@@ -223,11 +359,13 @@ impl WorkspaceIndex {
             })?;
         let symbols = self.catalog.symbols_for(file.id)?;
         let dataset = self.catalog.dataset_profile_for(file.id)?;
+        let agent = self.catalog.agent_document_for(file.id)?;
         let content = content_excerpt(&path, &file, start_line, max_lines, max_chars)?;
         Ok(InspectResult {
             file,
             symbols,
             dataset,
+            agent,
             content,
         })
     }
@@ -302,62 +440,59 @@ impl WorkspaceIndex {
         };
         let mut documents = Vec::new();
 
-        let mut builder = WalkBuilder::new(root);
-        builder
-            .hidden(false)
-            .git_ignore(true)
-            .git_exclude(true)
-            .parents(true)
-            .follow_links(false)
-            .add_custom_ignore_filename(".awiignore");
-        let walker = builder
-            .filter_entry(|entry| !is_default_excluded(entry.path()))
-            .build();
-
-        for entry in walker {
-            let entry = match entry {
-                Ok(entry) => entry,
-                Err(error) => {
-                    report.failed += 1;
-                    self.catalog.record_failure(
-                        generation,
-                        "<walk>",
-                        "discovery",
-                        &error.to_string(),
-                    )?;
-                    continue;
-                }
-            };
-            let Some(file_type) = entry.file_type() else {
-                continue;
-            };
-            if !file_type.is_file() || is_sensitive(entry.path()) {
-                continue;
-            }
-
-            report.discovered += 1;
-            let path = entry.into_path();
-            if let Err(error) = self.index_file(
+        if root.is_file() {
+            self.index_discovered_file(
                 root,
                 root_id,
                 generation,
-                &path,
+                root,
                 options,
                 &profiler,
                 &mut documents,
                 &mut report,
-            ) {
-                report.failed += 1;
-                let path_text = path.to_string_lossy();
-                if let Ok(Some(existing)) = self.catalog.existing_file(&path_text) {
-                    let _ = self.catalog.mark_seen_only(existing.id, generation);
+            )?;
+        } else {
+            let mut builder = WalkBuilder::new(root);
+            builder
+                .hidden(false)
+                .git_ignore(true)
+                .git_exclude(true)
+                .parents(true)
+                .follow_links(false)
+                .add_custom_ignore_filename(".awiignore");
+            let walker = builder
+                .filter_entry(|entry| !is_default_excluded(entry.path()))
+                .build();
+            for entry in walker {
+                let entry = match entry {
+                    Ok(entry) => entry,
+                    Err(error) => {
+                        report.failed += 1;
+                        self.catalog.record_failure(
+                            generation,
+                            "<walk>",
+                            "discovery",
+                            &error.to_string(),
+                        )?;
+                        continue;
+                    }
+                };
+                if entry
+                    .file_type()
+                    .is_some_and(|file_type| file_type.is_file())
+                    && !is_sensitive(entry.path())
+                {
+                    self.index_discovered_file(
+                        root,
+                        root_id,
+                        generation,
+                        entry.path(),
+                        options,
+                        &profiler,
+                        &mut documents,
+                        &mut report,
+                    )?;
                 }
-                self.catalog.record_failure(
-                    generation,
-                    &path_text,
-                    "index_file",
-                    &format!("{error:#}"),
-                )?;
             }
         }
 
@@ -366,6 +501,37 @@ impl WorkspaceIndex {
         self.search.apply_changes(&documents, &deleted_paths)?;
         self.catalog.complete_generation(root_id, generation)?;
         Ok(report)
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn index_discovered_file(
+        &mut self,
+        root: &Path,
+        root_id: i64,
+        generation: i64,
+        path: &Path,
+        options: &IndexOptions,
+        profiler: &DuckDbProfiler,
+        documents: &mut Vec<SearchDocument>,
+        report: &mut IndexReport,
+    ) -> Result<()> {
+        report.discovered += 1;
+        if let Err(error) = self.index_file(
+            root, root_id, generation, path, options, profiler, documents, report,
+        ) {
+            report.failed += 1;
+            let path_text = path.to_string_lossy();
+            if let Ok(Some(existing)) = self.catalog.existing_file(&path_text) {
+                let _ = self.catalog.mark_seen_only(existing.id, generation);
+            }
+            self.catalog.record_failure(
+                generation,
+                &path_text,
+                "index_file",
+                &format!("{error:#}"),
+            )?;
+        }
+        Ok(())
     }
 
     fn notify_root_inner(
@@ -464,11 +630,17 @@ impl WorkspaceIndex {
         let mtime_ns = mtime_ns(&metadata);
         let kind = classify(path);
         let absolute_path = path.to_string_lossy().into_owned();
-        let relative_path = path
-            .strip_prefix(root)
-            .with_context(|| format!("strip root from {}", path.display()))?
-            .to_string_lossy()
-            .into_owned();
+        let relative_path = if root.is_file() {
+            path.file_name()
+                .and_then(OsStr::to_str)
+                .unwrap_or_default()
+                .to_owned()
+        } else {
+            path.strip_prefix(root)
+                .with_context(|| format!("strip root from {}", path.display()))?
+                .to_string_lossy()
+                .into_owned()
+        };
         let name = path
             .file_name()
             .and_then(OsStr::to_str)
@@ -487,7 +659,7 @@ impl WorkspaceIndex {
             return Ok(());
         }
 
-        let text = if should_extract_text(kind, size_bytes, options.max_content_bytes) {
+        let mut text = if should_extract_text(kind, size_bytes, options.max_content_bytes) {
             extract_text(path, options.max_content_bytes)?
         } else {
             crate::extract::TextExtraction {
@@ -497,6 +669,17 @@ impl WorkspaceIndex {
                 status: "metadata_only".to_owned(),
             }
         };
+        if matches!(kind, FileKind::AgentInstructions | FileKind::AgentSkill)
+            && text
+                .content
+                .as_deref()
+                .is_some_and(contains_sensitive_agent_content)
+        {
+            text.content = None;
+            text.content_hash = None;
+            text.preview.clear();
+            text.status = "metadata_only_sensitive_content".to_owned();
+        }
 
         if existing.as_ref().is_some_and(|state| {
             state.content_hash.is_some()
@@ -511,8 +694,28 @@ impl WorkspaceIndex {
         }
 
         let (symbols, code_status) = extract_code(path, kind, text.content.as_deref())?;
+        let (agent, agent_status) = if let Some(content) = text.content.as_deref()
+            && matches!(kind, FileKind::AgentInstructions | FileKind::AgentSkill)
+        {
+            match extract_agent_document(root, path, content) {
+                Ok(agent) => (agent, Some("agent_parsed")),
+                Err(error) => {
+                    report.failed += 1;
+                    self.catalog.record_failure(
+                        generation,
+                        &absolute_path,
+                        "agent_metadata",
+                        &format!("{error:#}"),
+                    )?;
+                    (None, Some("agent_parse_failed"))
+                }
+            }
+        } else {
+            (None, None)
+        };
         let profile = profiler.profile(path, size_bytes);
-        let extraction_status = combined_status(&text.status, &code_status, profile.as_ref());
+        let extraction_status =
+            combined_status(&text.status, &code_status, profile.as_ref(), agent_status);
         let input = CatalogFileInput {
             root_id,
             absolute_path: absolute_path.clone(),
@@ -532,8 +735,10 @@ impl WorkspaceIndex {
         self.catalog.replace_symbols(file_id, &symbols)?;
         self.catalog
             .replace_dataset_profile(file_id, profile.as_ref())?;
+        self.catalog
+            .replace_agent_document(file_id, agent.as_ref())?;
 
-        let symbols_text = symbols
+        let mut symbols_text = symbols
             .iter()
             .flat_map(|symbol| {
                 [
@@ -543,6 +748,12 @@ impl WorkspaceIndex {
             })
             .collect::<Vec<_>>()
             .join(" ");
+        if let Some(agent) = &agent {
+            if !symbols_text.is_empty() {
+                symbols_text.push(' ');
+            }
+            symbols_text.push_str(&agent.search_text());
+        }
         let schema = profile
             .as_ref()
             .map(DatasetProfile::schema_text)
@@ -641,6 +852,16 @@ fn notification_path(path: &Path) -> Result<PathBuf> {
         .join(name))
 }
 
+fn resolve_context_path(path: &Path) -> Result<PathBuf> {
+    let absolute = if path.is_absolute() {
+        path.to_owned()
+    } else {
+        std::env::current_dir()?.join(path)
+    };
+    fs::canonicalize(&absolute)
+        .with_context(|| format!("resolve Agent context path {}", absolute.display()))
+}
+
 fn acquire_writer_lock(index_dir: &Path) -> Result<File> {
     let path = index_dir.join("writer.lock");
     let file = OpenOptions::new()
@@ -682,10 +903,14 @@ fn combined_status(
     text_status: &str,
     code_status: &str,
     profile: Option<&DatasetProfile>,
+    agent_status: Option<&str>,
 ) -> String {
     let mut parts = vec![text_status, code_status];
     if let Some(profile) = profile {
         parts.push(&profile.status);
+    }
+    if let Some(agent_status) = agent_status {
+        parts.push(agent_status);
     }
     parts.join(",")
 }

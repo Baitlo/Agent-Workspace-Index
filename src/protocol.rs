@@ -40,6 +40,8 @@ pub enum Request {
         roots: Vec<PathBuf>,
         kinds: Vec<String>,
         path_prefix: Option<String>,
+        #[serde(default)]
+        context_path: Option<PathBuf>,
     },
     Inspect {
         path: PathBuf,
@@ -124,6 +126,7 @@ mod tests {
             roots: Vec::new(),
             kinds: Vec::new(),
             path_prefix: None,
+            context_path: None,
         }))
         .unwrap();
         assert!(encoded.contains("\"method\":\"search\""));

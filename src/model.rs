@@ -10,6 +10,8 @@ pub enum FileKind {
     Text,
     SemiStructured,
     Tabular,
+    AgentInstructions,
+    AgentSkill,
     Binary,
     Unknown,
 }
@@ -21,6 +23,8 @@ impl FileKind {
             Self::Text => "text",
             Self::SemiStructured => "semi_structured",
             Self::Tabular => "tabular",
+            Self::AgentInstructions => "agent_instructions",
+            Self::AgentSkill => "agent_skill",
             Self::Binary => "binary",
             Self::Unknown => "unknown",
         }
@@ -36,6 +40,8 @@ impl TryFrom<&str> for FileKind {
             "text" => Ok(Self::Text),
             "semi_structured" => Ok(Self::SemiStructured),
             "tabular" => Ok(Self::Tabular),
+            "agent_instructions" => Ok(Self::AgentInstructions),
+            "agent_skill" => Ok(Self::AgentSkill),
             "binary" => Ok(Self::Binary),
             "unknown" => Ok(Self::Unknown),
             other => anyhow::bail!("unknown file kind: {other}"),
@@ -93,6 +99,60 @@ pub struct DatasetProfile {
     pub columns: Vec<DatasetColumn>,
     pub profiler: String,
     pub error: Option<String>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum AgentDocumentRole {
+    Instructions,
+    Skill,
+}
+
+impl AgentDocumentRole {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Instructions => "instructions",
+            Self::Skill => "skill",
+        }
+    }
+}
+
+impl TryFrom<&str> for AgentDocumentRole {
+    type Error = anyhow::Error;
+
+    fn try_from(value: &str) -> Result<Self, Self::Error> {
+        match value {
+            "instructions" => Ok(Self::Instructions),
+            "skill" => Ok(Self::Skill),
+            other => anyhow::bail!("unknown Agent document role: {other}"),
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AgentDocumentMetadata {
+    pub role: AgentDocumentRole,
+    pub name: Option<String>,
+    pub description: Option<String>,
+    pub scope_root: PathBuf,
+    pub precedence_depth: usize,
+    pub headings: Vec<String>,
+    pub references: Vec<PathBuf>,
+}
+
+impl AgentDocumentMetadata {
+    pub fn search_text(&self) -> String {
+        let mut parts = vec![self.role.as_str().to_owned()];
+        parts.extend(self.name.iter().cloned());
+        parts.extend(self.description.iter().cloned());
+        parts.extend(self.headings.iter().cloned());
+        parts.extend(
+            self.references
+                .iter()
+                .map(|path| path.to_string_lossy().into_owned()),
+        );
+        parts.join(" ")
+    }
 }
 
 impl DatasetProfile {
@@ -159,6 +219,8 @@ pub struct SearchHit {
     pub score: f32,
     pub matched_lanes: Vec<String>,
     pub preview: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub agent: Option<AgentDocumentMetadata>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -184,6 +246,8 @@ pub struct InspectResult {
     pub file: FileRecord,
     pub symbols: Vec<SymbolRecord>,
     pub dataset: Option<DatasetProfile>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub agent: Option<AgentDocumentMetadata>,
     pub content: Option<ContentExcerpt>,
 }
 
@@ -261,5 +325,7 @@ pub struct IndexStatus {
     pub deleted_files: u64,
     pub symbols: u64,
     pub datasets: u64,
+    #[serde(default)]
+    pub agent_documents: u64,
     pub failures: u64,
 }

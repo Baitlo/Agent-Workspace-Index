@@ -4,7 +4,7 @@ use std::process::{Child, Command, Output, Stdio};
 use std::thread;
 use std::time::{Duration, Instant};
 
-use awi::{IndexOptions, WorkspaceIndex};
+use awi::{AgentDocumentRole, FileKind, IndexOptions, WorkspaceIndex};
 use serde_json::Value;
 use tempfile::tempdir;
 
@@ -124,6 +124,174 @@ fn indexes_code_text_and_tabular_metadata_incrementally() {
             .unwrap()
             .iter()
             .any(|hit| hit.path.ends_with("metrics.csv"))
+    );
+}
+
+#[test]
+fn indexes_agent_knowledge_with_scope_metadata_and_deduplication() {
+    let fixture = tempdir().unwrap();
+    let parent = fixture.path().join("parent");
+    let workspace_root = parent.join("project");
+    let service = workspace_root.join("services/api");
+    let unrelated = workspace_root.join("other");
+    let skills_root = fixture.path().join("global-skills");
+    let index_dir = fixture.path().join("index");
+    fs::create_dir_all(&service).unwrap();
+    fs::create_dir_all(&unrelated).unwrap();
+    fs::create_dir_all(skills_root.join("one/references")).unwrap();
+    fs::create_dir_all(skills_root.join("duplicate")).unwrap();
+    fs::create_dir_all(skills_root.join("secret")).unwrap();
+    fs::create_dir_all(skills_root.join("malformed")).unwrap();
+
+    let parent_agents = parent.join("AGENTS.md");
+    let nested_agents = workspace_root.join("services/AGENTS.md");
+    let unrelated_agents = unrelated.join("AGENTS.md");
+    let context_file = service.join("main.rs");
+    fs::write(
+        &parent_agents,
+        "# Parent Policy\nUse reviewed evidence for deployment.\n",
+    )
+    .unwrap();
+    fs::write(
+        &nested_agents,
+        "# Service Policy\nUse scoped evidence for deployment.\n",
+    )
+    .unwrap();
+    fs::write(
+        &unrelated_agents,
+        "# Other Policy\nUse unrelated evidence for deployment.\n",
+    )
+    .unwrap();
+    fs::write(&context_file, "fn main() {}\n").unwrap();
+
+    let skill = r#"---
+name: evidence-check
+description: Validate release evidence before deployment.
+---
+
+# Evidence Check
+
+Read [acceptance](references/acceptance.md).
+"#;
+    fs::write(
+        skills_root.join("one/references/acceptance.md"),
+        "# Acceptance\n",
+    )
+    .unwrap();
+    fs::write(skills_root.join("one/SKILL.md"), skill).unwrap();
+    fs::write(skills_root.join("duplicate/SKILL.md"), skill).unwrap();
+    let secret_skill = skills_root.join("secret/SKILL.md");
+    fs::write(
+        &secret_skill,
+        "---\nname: leaked\n---\ntoken = ghp_abcdefghijklmnopqrstuvwxyz1234567890\n",
+    )
+    .unwrap();
+    let malformed_skill = skills_root.join("malformed/SKILL.md");
+    fs::write(
+        &malformed_skill,
+        "---\nname: [unterminated\n---\n# Fresh Malformed Metadata\n",
+    )
+    .unwrap();
+
+    let mut workspace = WorkspaceIndex::open(&index_dir).unwrap();
+    workspace
+        .index_root(&workspace_root, &IndexOptions::default())
+        .unwrap();
+    workspace
+        .index_root(&parent_agents, &IndexOptions::default())
+        .unwrap();
+    let skill_report = workspace
+        .index_root(&skills_root, &IndexOptions::default())
+        .unwrap();
+    assert_eq!(skill_report.failed, 1);
+
+    let status = workspace.status().unwrap();
+    assert_eq!(status.agent_documents, 5);
+
+    let scoped = workspace
+        .search_filtered(
+            "evidence deployment",
+            10,
+            &[],
+            &["agent_instructions".to_owned()],
+            None,
+            Some(&context_file),
+        )
+        .unwrap();
+    assert_eq!(scoped.len(), 2);
+    assert!(scoped[0].path.ends_with("services/AGENTS.md"));
+    assert!(scoped.iter().any(|hit| hit.path == parent_agents));
+    assert!(
+        scoped
+            .iter()
+            .all(|hit| !hit.path.ends_with("other/AGENTS.md"))
+    );
+    assert!(
+        scoped
+            .iter()
+            .all(|hit| hit.matched_lanes.iter().any(|lane| lane == "agent"))
+    );
+
+    let skills = workspace
+        .search_filtered(
+            "release evidence",
+            10,
+            &[],
+            &["agent_skill".to_owned()],
+            None,
+            Some(&context_file),
+        )
+        .unwrap();
+    assert_eq!(skills.len(), 1);
+    assert_eq!(skills[0].kind, FileKind::AgentSkill);
+    assert!(
+        workspace
+            .search("release evidence", 10)
+            .unwrap()
+            .iter()
+            .all(|hit| hit.kind != FileKind::AgentSkill)
+    );
+
+    let inspected = workspace.inspect(skills_root.join("one/SKILL.md")).unwrap();
+    let metadata = inspected.agent.unwrap();
+    assert_eq!(metadata.role, AgentDocumentRole::Skill);
+    assert_eq!(metadata.name.as_deref(), Some("evidence-check"));
+    assert_eq!(metadata.headings, vec!["Evidence Check"]);
+    assert_eq!(metadata.references.len(), 1);
+    let sensitive = workspace.inspect(&secret_skill).unwrap();
+    assert_eq!(
+        sensitive.file.extraction_status,
+        "metadata_only_sensitive_content,not_source"
+    );
+    assert!(sensitive.content.is_none());
+    assert!(sensitive.agent.is_none());
+    let malformed = workspace.inspect(&malformed_skill).unwrap();
+    assert_eq!(
+        malformed.file.extraction_status,
+        "indexed,not_source,agent_parse_failed"
+    );
+    assert!(malformed.content.is_some());
+    assert!(malformed.agent.is_none());
+
+    fs::remove_file(&parent_agents).unwrap();
+    let deleted = workspace
+        .index_root(&parent_agents, &IndexOptions::default())
+        .unwrap();
+    assert_eq!(deleted.deleted, 1);
+    assert_eq!(workspace.status().unwrap().agent_documents, 4);
+    assert!(
+        workspace
+            .search_filtered(
+                "Parent Policy",
+                10,
+                &[],
+                &["agent_instructions".to_owned()],
+                None,
+                Some(&context_file),
+            )
+            .unwrap()
+            .iter()
+            .all(|hit| hit.path != parent_agents)
     );
 }
 

@@ -12,8 +12,9 @@ https://github.com/Baitlo/Agent-Workspace-Index.
    ${XDG_DATA_HOME:-$HOME/.local/share}/awi.
 3. Read scripts/install.sh before running it.
 4. Run scripts/install.sh --workspace "<absolute repository root>".
-5. Let the installer build AWI, create the first local index, detect installed
-   coding agents, and register AWI as their MCP server.
+5. Let the installer build AWI, create the first local index, index applicable
+   ancestor AGENTS.md files and SKILL.md manifests from allowlisted Agent
+   directories, detect installed coding agents, and register AWI as their MCP server.
 6. If Pi is installed, allow the installer to add pi-mcp-adapter; Pi has no
    native MCP client. Do not install unrelated packages.
 7. Verify that the reported index exists and rerun `awi integrate --dry-run`
@@ -27,6 +28,8 @@ The installer defaults to:
 
 - binary: `~/.local/bin/awi`
 - index: `${XDG_CACHE_HOME:-$HOME/.cache}/awi/indexes/<workspace>-<hash>`
+- Agent knowledge: ancestor `AGENTS.md` files and `SKILL.md` manifests from
+  known per-client directories
 - clients: every detected supported harness (Codex, Gemini CLI, Claude Code,
   GitHub Copilot CLI, TraeCode, Zcode, Kimi Code, OpenCode, Pi, Cursor,
   Windsurf, Qwen Code, Cline, Zed, Amazon Q Developer, and Crush)
@@ -40,4 +43,5 @@ bash scripts/install.sh \
 ```
 
 Use `--skip-pi-adapter` when third-party Pi extensions must be reviewed and
-installed separately.
+installed separately. Use `--skip-agent-knowledge` when only repository files
+should be indexed.

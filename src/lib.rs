@@ -18,9 +18,9 @@ pub use integration::{
     McpServerSpec, default_server_spec, integrate, render_human,
 };
 pub use model::{
-    ContentExcerpt, DatasetColumn, DatasetProfile, FileKind, FileRecord, IndexOptions, IndexReport,
-    IndexStatus, InspectResult, NotifyReport, QueryColumn, QueryInput, QueryRequest, QueryResult,
-    QuerySource, SearchHit, SymbolRecord,
+    AgentDocumentMetadata, AgentDocumentRole, ContentExcerpt, DatasetColumn, DatasetProfile,
+    FileKind, FileRecord, IndexOptions, IndexReport, IndexStatus, InspectResult, NotifyReport,
+    QueryColumn, QueryInput, QueryRequest, QueryResult, QuerySource, SearchHit, SymbolRecord,
 };
 pub use publisher::{
     PublishCycle, PublisherConfig, partition_roots, publish_once, resolve_roots, watch,

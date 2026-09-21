@@ -5,8 +5,10 @@ use std::path::Path;
 use anyhow::{Context, Result};
 use rayon::prelude::*;
 use tantivy::collector::TopDocs;
-use tantivy::query::QueryParser;
-use tantivy::schema::{Field, INDEXED, STORED, STRING, Schema, TantivyDocument, Value};
+use tantivy::query::{BooleanQuery, Query, QueryParser, TermQuery};
+use tantivy::schema::{
+    Field, INDEXED, IndexRecordOption, STORED, STRING, Schema, TantivyDocument, Value,
+};
 use tantivy::{Index, Term, doc};
 
 use crate::model::{SearchCandidate, SearchDocument};
@@ -14,6 +16,7 @@ use crate::model::{SearchCandidate, SearchDocument};
 const WRITER_HEAP_BYTES: usize = 50_000_000;
 const RRF_K: f32 = 60.0;
 const PATH_COVERAGE_WEIGHT: f32 = 0.05;
+const AGENT_KINDS: &[&str] = &["agent_instructions", "agent_skill"];
 
 pub(crate) struct SearchIndex {
     index: Index,
@@ -39,6 +42,8 @@ struct LaneSpec {
     name: &'static str,
     fields: Vec<Field>,
     weight: f32,
+    include_kinds: Option<&'static [&'static str]>,
+    exclude_kinds: Option<&'static [&'static str]>,
 }
 
 #[derive(Clone)]
@@ -123,35 +128,60 @@ impl SearchIndex {
         query: &str,
         lane_limit: usize,
         result_limit: usize,
+        include_agent_lane: bool,
     ) -> Result<Vec<SearchCandidate>> {
-        let lanes = [
+        let base_exclusions = (!include_agent_lane).then_some(AGENT_KINDS);
+        let mut lanes = vec![
             LaneSpec {
                 name: "path",
                 fields: vec![self.fields.path, self.fields.name, self.fields.experiment],
                 weight: 1.25,
+                include_kinds: None,
+                exclude_kinds: base_exclusions,
             },
             LaneSpec {
                 name: "content",
                 fields: vec![self.fields.content],
                 weight: 1.0,
+                include_kinds: None,
+                exclude_kinds: base_exclusions,
             },
             LaneSpec {
                 name: "symbol",
                 fields: vec![self.fields.symbols],
                 weight: 1.15,
+                include_kinds: None,
+                exclude_kinds: base_exclusions,
             },
             LaneSpec {
                 name: "schema",
                 fields: vec![self.fields.schema],
                 weight: 1.1,
+                include_kinds: None,
+                exclude_kinds: base_exclusions,
             },
         ];
+        if include_agent_lane {
+            lanes.push(LaneSpec {
+                name: "agent",
+                fields: vec![self.fields.name, self.fields.symbols, self.fields.content],
+                weight: 1.3,
+                include_kinds: Some(AGENT_KINDS),
+                exclude_kinds: None,
+            });
+        }
 
         let lane_results = lanes
             .par_iter()
             .map(|lane| {
-                self.search_lane(query, &lane.fields, lane_limit)
-                    .map(|hits| (lane.name, lane.weight, hits))
+                self.search_lane(
+                    query,
+                    &lane.fields,
+                    lane.include_kinds,
+                    lane.exclude_kinds,
+                    lane_limit,
+                )
+                .map(|hits| (lane.name, lane.weight, hits))
             })
             .collect::<Result<Vec<_>>>()?;
 
@@ -193,11 +223,46 @@ impl SearchIndex {
         Ok(candidates)
     }
 
-    fn search_lane(&self, query: &str, fields: &[Field], limit: usize) -> Result<Vec<LaneHit>> {
+    fn search_lane(
+        &self,
+        query: &str,
+        fields: &[Field],
+        include_kinds: Option<&[&str]>,
+        exclude_kinds: Option<&[&str]>,
+        limit: usize,
+    ) -> Result<Vec<LaneHit>> {
         let reader = self.index.reader().context("open Tantivy reader")?;
         let searcher = reader.searcher();
         let parser = QueryParser::for_index(&self.index, fields.to_vec());
-        let (query, _errors) = parser.parse_query_lenient(query);
+        let (text_query, _errors) = parser.parse_query_lenient(query);
+        let mut clauses = vec![(tantivy::query::Occur::Must, text_query)];
+        if let Some(kinds) = include_kinds {
+            let kind_queries = kinds
+                .iter()
+                .map(|kind| {
+                    Box::new(TermQuery::new(
+                        Term::from_field_text(self.fields.kind, kind),
+                        IndexRecordOption::Basic,
+                    )) as Box<dyn Query>
+                })
+                .collect();
+            clauses.push((
+                tantivy::query::Occur::Must,
+                Box::new(BooleanQuery::union(kind_queries)),
+            ));
+        }
+        if let Some(kinds) = exclude_kinds {
+            clauses.extend(kinds.iter().map(|kind| {
+                (
+                    tantivy::query::Occur::MustNot,
+                    Box::new(TermQuery::new(
+                        Term::from_field_text(self.fields.kind, kind),
+                        IndexRecordOption::Basic,
+                    )) as Box<dyn Query>,
+                )
+            }));
+        }
+        let query = BooleanQuery::new(clauses);
         let top_docs = searcher.search(&query, &TopDocs::with_limit(limit).order_by_score())?;
 
         top_docs

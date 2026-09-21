@@ -1,11 +1,13 @@
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use anyhow::{Context, Result};
-use rusqlite::{Connection, OptionalExtension, Row, params};
+use rusqlite::{Connection, OptionalExtension, Row, params, params_from_iter};
 
 use crate::model::{
-    CatalogFileInput, DatasetProfile, ExistingFile, FileKind, FileRecord, IndexStatus, SymbolRecord,
+    AgentDocumentMetadata, AgentDocumentRole, CatalogFileInput, DatasetProfile, ExistingFile,
+    FileKind, FileRecord, IndexStatus, SymbolRecord,
 };
 
 pub(crate) struct Catalog {
@@ -88,6 +90,20 @@ impl Catalog {
                 profiler TEXT NOT NULL,
                 error TEXT
             );
+
+            CREATE TABLE IF NOT EXISTS agent_documents (
+                file_id INTEGER PRIMARY KEY REFERENCES files(id) ON DELETE CASCADE,
+                role TEXT NOT NULL,
+                name TEXT,
+                description TEXT,
+                scope_root TEXT NOT NULL,
+                precedence_depth INTEGER NOT NULL,
+                headings_json TEXT NOT NULL,
+                references_json TEXT NOT NULL
+            );
+
+            CREATE INDEX IF NOT EXISTS agent_documents_role
+                ON agent_documents(role);
 
             CREATE TABLE IF NOT EXISTS lineage_edges (
                 id INTEGER PRIMARY KEY,
@@ -360,6 +376,46 @@ impl Catalog {
         Ok(())
     }
 
+    pub(crate) fn replace_agent_document(
+        &self,
+        file_id: i64,
+        metadata: Option<&AgentDocumentMetadata>,
+    ) -> Result<()> {
+        if let Some(metadata) = metadata {
+            self.connection.execute(
+                "INSERT INTO agent_documents(
+                    file_id, role, name, description, scope_root, precedence_depth,
+                    headings_json, references_json
+                 ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)
+                 ON CONFLICT(file_id) DO UPDATE SET
+                    role = excluded.role,
+                    name = excluded.name,
+                    description = excluded.description,
+                    scope_root = excluded.scope_root,
+                    precedence_depth = excluded.precedence_depth,
+                    headings_json = excluded.headings_json,
+                    references_json = excluded.references_json",
+                params![
+                    file_id,
+                    metadata.role.as_str(),
+                    metadata.name,
+                    metadata.description,
+                    metadata.scope_root.to_string_lossy().as_ref(),
+                    i64::try_from(metadata.precedence_depth)
+                        .context("Agent document precedence depth overflow")?,
+                    serde_json::to_string(&metadata.headings)?,
+                    serde_json::to_string(&metadata.references)?,
+                ],
+            )?;
+        } else {
+            self.connection.execute(
+                "DELETE FROM agent_documents WHERE file_id = ?1",
+                params![file_id],
+            )?;
+        }
+        Ok(())
+    }
+
     pub(crate) fn record_failure(
         &self,
         generation: i64,
@@ -427,14 +483,38 @@ impl Catalog {
             .context("checkpoint AWI catalog")
     }
 
-    pub(crate) fn current_file_by_id(&self, file_id: i64) -> Result<Option<FileRecord>> {
+    pub(crate) fn current_files_by_ids(
+        &self,
+        file_ids: &[i64],
+    ) -> Result<HashMap<i64, FileRecord>> {
         let Some(generation) = self.latest_completed_generation()? else {
-            return Ok(None);
+            return Ok(HashMap::new());
         };
-        self.query_file(
-            "WHERE f.id = ?1 AND f.deleted = 0 AND f.index_generation <= ?2",
-            params![file_id, generation],
-        )
+        if file_ids.is_empty() {
+            return Ok(HashMap::new());
+        }
+        let placeholders = std::iter::repeat_n("?", file_ids.len())
+            .collect::<Vec<_>>()
+            .join(",");
+        let sql = format!(
+            "SELECT
+                f.id, r.path, f.absolute_path, f.relative_path, f.name, f.extension,
+                f.kind, f.experiment, f.size_bytes, f.mtime_ns, f.content_hash,
+                f.index_generation, f.content_indexed, f.extraction_status
+             FROM files f JOIN roots r ON r.id = f.root_id
+             WHERE f.id IN ({placeholders}) AND f.deleted = 0
+               AND f.index_generation <= ?"
+        );
+        let mut parameters = file_ids.to_vec();
+        parameters.push(generation);
+        let mut statement = self.connection.prepare(&sql)?;
+        let rows = statement.query_map(params_from_iter(parameters), raw_file_from_row)?;
+        let mut files = HashMap::with_capacity(file_ids.len());
+        for row in rows {
+            let file: FileRecord = row?.try_into()?;
+            files.insert(file.id, file);
+        }
+        Ok(files)
     }
 
     pub(crate) fn current_file_by_path(&self, absolute_path: &str) -> Result<Option<FileRecord>> {
@@ -481,6 +561,68 @@ impl Catalog {
             .transpose()
     }
 
+    pub(crate) fn agent_document_for(&self, file_id: i64) -> Result<Option<AgentDocumentMetadata>> {
+        let raw = self
+            .connection
+            .query_row(
+                "SELECT role, name, description, scope_root, precedence_depth,
+                        headings_json, references_json
+                 FROM agent_documents WHERE file_id = ?1",
+                params![file_id],
+                |row| {
+                    Ok((
+                        row.get::<_, String>(0)?,
+                        row.get::<_, Option<String>>(1)?,
+                        row.get::<_, Option<String>>(2)?,
+                        row.get::<_, String>(3)?,
+                        row.get::<_, i64>(4)?,
+                        row.get::<_, String>(5)?,
+                        row.get::<_, String>(6)?,
+                    ))
+                },
+            )
+            .optional()?;
+        raw.map(agent_document_from_raw).transpose()
+    }
+
+    pub(crate) fn agent_documents_for(
+        &self,
+        file_ids: &[i64],
+    ) -> Result<HashMap<i64, AgentDocumentMetadata>> {
+        if file_ids.is_empty() {
+            return Ok(HashMap::new());
+        }
+        let placeholders = std::iter::repeat_n("?", file_ids.len())
+            .collect::<Vec<_>>()
+            .join(",");
+        let sql = format!(
+            "SELECT file_id, role, name, description, scope_root, precedence_depth,
+                    headings_json, references_json
+             FROM agent_documents WHERE file_id IN ({placeholders})"
+        );
+        let mut statement = self.connection.prepare(&sql)?;
+        let rows = statement.query_map(params_from_iter(file_ids.iter()), |row| {
+            Ok((
+                row.get::<_, i64>(0)?,
+                (
+                    row.get::<_, String>(1)?,
+                    row.get::<_, Option<String>>(2)?,
+                    row.get::<_, Option<String>>(3)?,
+                    row.get::<_, String>(4)?,
+                    row.get::<_, i64>(5)?,
+                    row.get::<_, String>(6)?,
+                    row.get::<_, String>(7)?,
+                ),
+            ))
+        })?;
+        let mut documents = HashMap::with_capacity(file_ids.len());
+        for row in rows {
+            let (file_id, raw) = row?;
+            documents.insert(file_id, agent_document_from_raw(raw)?);
+        }
+        Ok(documents)
+    }
+
     pub(crate) fn status(&self) -> Result<IndexStatus> {
         Ok(IndexStatus {
             completed_generation: self.latest_completed_generation()?,
@@ -490,6 +632,16 @@ impl Catalog {
             deleted_files: self.count("files", "deleted = 1")?,
             symbols: self.count("symbols", "1 = 1")?,
             datasets: self.count("dataset_profiles", "1 = 1")?,
+            agent_documents: {
+                let count: i64 = self.connection.query_row(
+                    "SELECT COUNT(*)
+                     FROM agent_documents a JOIN files f ON f.id = a.file_id
+                     WHERE f.deleted = 0",
+                    [],
+                    |row| row.get(0),
+                )?;
+                u64::try_from(count).context("negative Agent document count")?
+            },
             failures: self.count("index_failures", "1 = 1")?,
         })
     }
@@ -534,6 +686,31 @@ struct RawFile {
     generation: i64,
     content_indexed: bool,
     extraction_status: String,
+}
+
+type RawAgentDocument = (
+    String,
+    Option<String>,
+    Option<String>,
+    String,
+    i64,
+    String,
+    String,
+);
+
+fn agent_document_from_raw(raw: RawAgentDocument) -> Result<AgentDocumentMetadata> {
+    let (role, name, description, scope_root, precedence_depth, headings, references) = raw;
+    Ok(AgentDocumentMetadata {
+        role: AgentDocumentRole::try_from(role.as_str())?,
+        name,
+        description,
+        scope_root: PathBuf::from(scope_root),
+        precedence_depth: usize::try_from(precedence_depth)
+            .context("negative Agent document precedence depth")?,
+        headings: serde_json::from_str(&headings).context("decode Agent document headings")?,
+        references: serde_json::from_str(&references)
+            .context("decode Agent document references")?,
+    })
 }
 
 fn raw_file_from_row(row: &Row<'_>) -> rusqlite::Result<RawFile> {

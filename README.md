@@ -1,8 +1,8 @@
 # AWI: Agent Workspace Index
 
-AWI is a local-first AI code search, repository search, and structured-data
-retrieval layer for coding agents. It indexes source code, SQL, documents, logs,
-JSON/JSONL, CSV/TSV, and Parquet through one bounded CLI and Model Context
+AWI is a local-first unified index for code, data, and Agent operational
+knowledge. It indexes source code, SQL, documents, logs, JSON/JSONL, CSV/TSV,
+Parquet, `AGENTS.md`, and Agent Skills through one bounded CLI and Model Context
 Protocol (MCP) surface.
 
 One command connects that index to 16 coding-agent harnesses, including Codex,
@@ -14,10 +14,14 @@ Amazon Q Developer, and Crush.
 - Tantivy hybrid retrieval over paths, text, symbols, and dataset schemas.
 - Tree-sitter symbol extraction for Rust, Python, and Go.
 - Embedded, read-only DuckDB queries over explicitly allowlisted files.
+- Scope-aware `AGENTS.md` retrieval and structured `SKILL.md` metadata.
 - SQLite catalog checks that reject stale search results.
 - NFS-safe `notify` and `reconcile` update paths.
 - Immutable generation snapshots with atomic daemon activation.
 - MCP tools: `workspace_search`, `workspace_inspect`, and `workspace_query`.
+
+See [Agent knowledge indexing](docs/agent-knowledge.md) for discovery, scope,
+ranking, deduplication, and safety semantics.
 
 ## Agent-assisted Install
 
@@ -30,8 +34,10 @@ bash scripts/install.sh --workspace /absolute/path/to/your/repository
 ```
 
 The first run builds and installs `awi`, creates a local index outside the
-workspace, detects installed Agent clients, and registers the AWI MCP server
-with each supported client. The operation is idempotent. Rust and Cargo are
+workspace, indexes ancestor `AGENTS.md` files and `SKILL.md` manifests found in
+allowlisted Agent directories, detects installed Agent clients, and registers
+the AWI MCP server with each supported client. The operation is idempotent.
+Pass `--skip-agent-knowledge` to index only the workspace. Rust and Cargo are
 required when building from source.
 
 If Pi is detected, the installer also installs the pinned
@@ -63,6 +69,15 @@ awi --index-dir /tmp/my-awi-index serve
 # Search and inspect.
 awi --index-dir /tmp/my-awi-index search "workspace query" --limit 10 --json
 awi --index-dir /tmp/my-awi-index inspect /path/to/file --json
+
+# Resolve instructions applicable to a concrete workspace path.
+awi --index-dir /tmp/my-awi-index search "build and test rules" \
+  --kind agent_instructions --context-path /path/to/workspace/src/lib.rs --json
+
+# Index and search a standalone global Skill manifest.
+awi --index-dir /tmp/my-awi-index reconcile ~/.agents/skills/example/SKILL.md --json
+awi --index-dir /tmp/my-awi-index search "diagnose deployment failures" \
+  --kind agent_skill --json
 
 # Start the MCP stdio adapter.
 awi --index-dir /tmp/my-awi-index mcp
@@ -181,8 +196,11 @@ available for custom launchers.
 explicit inputs beneath registered roots. It enforces timeout, row, and output
 byte limits while disabling DuckDB extension loading and external access.
 
-Search and inspection responses are bounded. Sensitive files, generated
-directories, oversized content, and symlink escapes are excluded by default.
+Search and inspection responses are bounded. Agent knowledge discovery is
+limited to ancestor `AGENTS.md` files and `SKILL.md` manifests under known
+per-client directories; AWI never indexes an entire home directory. Sensitive
+files, generated directories, oversized content, and symlink escapes are
+excluded by default.
 Default-excluded directories are `.git`, `.hg`, `.svn`, `.awi-index`,
 `node_modules`, `target`, `__pycache__`, `.pytest_cache`, `.mypy_cache`,
 `.ruff_cache`, `.ipynb_checkpoints`, `.venv`, `.idea`, `.vscode`, and `.cache`,

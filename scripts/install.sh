@@ -19,6 +19,7 @@ Options:
                          zed, amazon-q, and crush
   --source-binary PATH   Install an existing AWI binary instead of building from source
   --skip-pi-adapter      Do not install pi-mcp-adapter when Pi is detected
+  --skip-agent-knowledge Do not index ancestor AGENTS.md or discovered SKILL.md files
   -h, --help             Show this help
 EOF
 }
@@ -60,6 +61,51 @@ client_requested() {
     esac
 }
 
+append_agent_root() {
+    local candidate="$1"
+    local resolved
+    [[ -e "$candidate" ]] || return 0
+    if [[ -d "$candidate" ]]; then
+        resolved="$(absolute_dir "$candidate")"
+    else
+        resolved="$(absolute_dir "$(dirname -- "$candidate")")/$(basename -- "$candidate")"
+    fi
+    case "$resolved" in
+        "$workspace" | "$workspace"/*) return 0 ;;
+    esac
+    local existing
+    for existing in "${agent_roots[@]-}"; do
+        [[ "$existing" == "$resolved" ]] && return 0
+    done
+    agent_roots+=("$resolved")
+}
+
+append_skill_manifests() {
+    local directory="$1"
+    local depth="${2:-0}"
+    local resolved
+    local existing
+    local child
+    [[ -d "$directory" ]] || return 0
+    resolved="$(absolute_dir "$directory")"
+    case "$(basename -- "$resolved")" in
+        .git | node_modules | target | .cache | .archive | .backups | skill-backups) return 0 ;;
+    esac
+    for existing in "${agent_scan_dirs[@]-}"; do
+        [[ "$existing" == "$resolved" ]] && return 0
+    done
+    agent_scan_dirs+=("$resolved")
+    if [[ -f "$resolved/SKILL.md" ]]; then
+        append_agent_root "$resolved/SKILL.md"
+        return 0
+    fi
+    ((depth < 4)) || return 0
+    for child in "$resolved"/* "$resolved"/.[!.]* "$resolved"/..?*; do
+        [[ -d "$child" ]] || continue
+        append_skill_manifests "$child" "$((depth + 1))"
+    done
+}
+
 repo_root="$(absolute_dir "$(dirname -- "${BASH_SOURCE[0]}")/..")"
 workspace="$PWD"
 index_dir=""
@@ -67,6 +113,7 @@ bin_dir="${AWI_INSTALL_BIN_DIR:-$HOME/.local/bin}"
 clients="all"
 source_binary="${AWI_SOURCE_BINARY:-}"
 install_pi_adapter=true
+index_agent_knowledge=true
 pi_adapter_spec="${AWI_PI_MCP_ADAPTER_SPEC:-npm:pi-mcp-adapter@2.34.0}"
 
 while (($# > 0)); do
@@ -98,6 +145,10 @@ while (($# > 0)); do
             ;;
         --skip-pi-adapter)
             install_pi_adapter=false
+            shift
+            ;;
+        --skip-agent-knowledge)
+            index_agent_knowledge=false
             shift
             ;;
         -h | --help)
@@ -146,6 +197,49 @@ mv -f "$temporary_target" "$install_target"
 
 printf 'Building initial index for %s...\n' "$workspace"
 "$install_target" --index-dir "$index_dir" reconcile "$workspace" --json
+
+if "$index_agent_knowledge"; then
+    agent_roots=()
+    agent_scan_dirs=()
+    ancestor="$(dirname -- "$workspace")"
+    while [[ "$ancestor" != "/" ]]; do
+        append_agent_root "$ancestor/AGENTS.md"
+        for relative in .agents/skills .claude/skills .codex/skills .gemini/skills .trae/skills; do
+            append_skill_manifests "$ancestor/$relative"
+        done
+        parent="$(dirname -- "$ancestor")"
+        [[ "$parent" != "$ancestor" ]] || break
+        ancestor="$parent"
+    done
+    for candidate in \
+        "$workspace/.agents/skills" \
+        "$workspace/.claude/skills" \
+        "$workspace/.codex/skills" \
+        "$workspace/.gemini/skills" \
+        "$workspace/.trae/skills" \
+        "$workspace/skills" \
+        "$HOME/.agents/skills" \
+        "$HOME/.codex/skills" \
+        "$HOME/.claude/skills" \
+        "$HOME/.gemini/skills" \
+        "$HOME/.trae/skills" \
+        "$HOME/.trae-cn/skills" \
+        "$HOME/.trae-cn/builtin_skills" \
+        "$HOME/.zcode/cli/skills" \
+        "${XDG_CONFIG_HOME:-$HOME/.config}/opencode/skills" \
+        "${PI_CODING_AGENT_DIR:-$HOME/.pi/agent}/skills"; do
+        append_skill_manifests "$candidate"
+    done
+    for plugin_skills in "$HOME"/.trae-cn/plugins/*/*/skills; do
+        append_skill_manifests "$plugin_skills"
+    done
+    if ((${#agent_roots[@]} > 0)); then
+        printf 'Indexing %s Agent knowledge root(s)...\n' "${#agent_roots[@]}"
+        for agent_root in "${agent_roots[@]}"; do
+            "$install_target" --index-dir "$index_dir" reconcile "$agent_root"
+        done
+    fi
+fi
 
 if client_requested pi && command_exists pi && "$install_pi_adapter"; then
     if ! pi list 2>/dev/null | grep -Fq "pi-mcp-adapter"; then

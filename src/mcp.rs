@@ -49,11 +49,15 @@ pub struct WorkspaceSearchRequest {
     /// containing one or more registered roots is accepted.
     pub roots: Option<Vec<PathBuf>>,
     /// Optional file kinds. Use source for code; text for SQL/Markdown/logs;
+    /// agent_instructions for AGENTS.md; agent_skill for SKILL.md;
     /// semi_structured for .json; tabular for .csv/.tsv/.jsonl/.ndjson/.parquet.
     /// Omit this filter when the file kind is uncertain.
     pub kinds: Option<Vec<String>>,
     /// Optional absolute or root-relative path prefix.
     pub path_prefix: Option<String>,
+    /// Optional workspace file or directory whose applicable AGENTS.md hierarchy
+    /// should be included and ranked from broadest to nearest scope.
+    pub context_path: Option<PathBuf>,
 }
 
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
@@ -186,7 +190,8 @@ impl AwiMcpServer {
                 "limit": arguments.limit,
                 "roots": &arguments.roots,
                 "kinds": &arguments.kinds,
-                "path_prefix": &arguments.path_prefix
+                "path_prefix": &arguments.path_prefix,
+                "context_path": &arguments.context_path
             }),
         );
         let query = arguments.query.trim();
@@ -224,6 +229,7 @@ impl AwiMcpServer {
                 roots: arguments.roots.unwrap_or_default(),
                 kinds: arguments.kinds.unwrap_or_default(),
                 path_prefix: arguments.path_prefix,
+                context_path: arguments.context_path,
             })
             .await
         {
@@ -382,6 +388,7 @@ impl AwiMcpServer {
                 "file": result.file,
                 "symbols": result.symbols,
                 "dataset": result.dataset,
+                "agent": result.agent,
                 "content": result.content,
                 "coverage": {
                     "total_symbols": total_symbols,
@@ -494,17 +501,20 @@ impl ServerHandler for AwiMcpServer {
             .with_server_info(
                 Implementation::new("awi", env!("CARGO_PKG_VERSION"))
                     .with_title("AWI: Agent Workspace Index")
-                    .with_description("Hybrid retrieval over indexed workspace code and data"),
+                    .with_description(
+                        "Hybrid retrieval over indexed workspace code, data, and Agent knowledge",
+                    ),
             )
             .with_instructions(
-                "For any code, symbol, document, or dataset lookup inside an indexed workspace, \
-                 use workspace_search first, before shell grep or file walking. Non-empty previews \
-                 are direct excerpts from the indexed generation and are sufficient evidence when \
-                 they contain the required facts. Once an authoritative path is selected, do not \
-                 repeat discovery searches. Use one workspace_inspect call, with up to 500 lines \
-                 for long text, only for missing details; use workspace_query directly for \
-                 structured aggregation. If a path is not in an indexed root, fall back to ordinary \
-                 file tools instead of passing it here.",
+                "For any code, symbol, document, Agent instruction, skill, or dataset lookup inside \
+                 an indexed workspace, use workspace_search first, before shell grep or file \
+                 walking. Pass context_path when resolving applicable AGENTS.md instructions. \
+                 Non-empty previews are direct excerpts from the indexed generation and are \
+                 sufficient evidence when they contain the required facts. Once an authoritative \
+                 path is selected, do not repeat discovery searches. Use one workspace_inspect \
+                 call, with up to 500 lines for long text, only for missing details; use \
+                 workspace_query directly for structured aggregation. If a path is not in an \
+                 indexed root, fall back to ordinary file tools instead of passing it here.",
             )
     }
 }
@@ -555,12 +565,14 @@ fn execute_request(index_dir: &Path, socket_path: &Path, request: Request) -> Re
             roots,
             kinds,
             path_prefix,
+            context_path,
         } => serde_json::to_value(workspace.search_filtered(
             &query,
             limit,
             &roots,
             &kinds,
             path_prefix.as_deref(),
+            context_path.as_deref(),
         )?)
         .map_err(Into::into),
         Request::Inspect {

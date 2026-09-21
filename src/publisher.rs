@@ -1,3 +1,4 @@
+use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::sync::mpsc::{Receiver, RecvTimeoutError, channel};
 use std::thread;
@@ -261,10 +262,29 @@ fn start_watcher(local_roots: &[PathBuf]) -> Result<(Receiver<()>, Option<Recomm
         }
     })
     .context("create filesystem watcher")?;
+    let mut targets = BTreeMap::<PathBuf, bool>::new();
     for root in local_roots {
+        let (target, recursive) = if root.is_dir() {
+            (root.clone(), true)
+        } else {
+            (root.parent().unwrap_or(root).to_owned(), false)
+        };
+        targets
+            .entry(target)
+            .and_modify(|value| *value |= recursive)
+            .or_insert(recursive);
+    }
+    for (target, recursive) in targets {
         watcher
-            .watch(root, RecursiveMode::Recursive)
-            .with_context(|| format!("watch root {}", root.display()))?;
+            .watch(
+                &target,
+                if recursive {
+                    RecursiveMode::Recursive
+                } else {
+                    RecursiveMode::NonRecursive
+                },
+            )
+            .with_context(|| format!("watch root {}", target.display()))?;
     }
     Ok((receiver, Some(watcher)))
 }

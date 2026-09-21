@@ -2,7 +2,7 @@
 name = "awi"
 version = "0.1.0"
 edition = "2024"
-description = "Agent Workspace Index for unified code and data retrieval"
+description = "Unified local index for code, data, and Agent operational knowledge"
 license = "MIT"
 repository = "https://github.com/Baitlo/Agent-Workspace-Index"
 readme = "README.md"
@@ -17,12 +17,14 @@ duckdb = { version = "1.10505.0", features = ["bundled", "json", "parquet"] }
 fs4 = "0.13"
 ignore = "0.4"
 notify = "8"
+pulldown-cmark = "0.13"
 rayon = "1.12"
 regex = "1.13"
 rmcp = { version = "3.4", default-features = false, features = ["macros", "server", "transport-io"] }
 rusqlite = { version = "0.40", features = ["bundled"] }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
+serde_yaml_ng = "0.10"
 sqlparser = { version = "0.63", features = ["visitor"] }
 tantivy = "0.26"
 tokio = { version = "1", features = ["rt"] }

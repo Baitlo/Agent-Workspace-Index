@@ -30,7 +30,7 @@ struct Cli {
 
 #[derive(Debug, Subcommand)]
 enum Command {
-    /// Incrementally index one workspace root.
+    /// Incrementally index one workspace directory, AGENTS.md, or SKILL.md root.
     Index {
         root: PathBuf,
 
@@ -47,7 +47,7 @@ enum Command {
         json: bool,
     },
 
-    /// Reconcile one root by performing a complete incremental scan.
+    /// Reconcile one directory or Agent document root with a complete incremental scan.
     Reconcile {
         root: PathBuf,
 
@@ -117,7 +117,7 @@ enum Command {
         json: bool,
     },
 
-    /// Search paths, text, symbols, and dataset schemas.
+    /// Search paths, text, symbols, Agent knowledge, and dataset schemas.
     Search {
         query: String,
 
@@ -132,6 +132,10 @@ enum Command {
 
         #[arg(long)]
         path_prefix: Option<String>,
+
+        /// File or directory used to resolve applicable AGENTS.md scopes.
+        #[arg(long)]
+        context_path: Option<PathBuf>,
 
         #[arg(long)]
         json: bool,
@@ -409,6 +413,7 @@ fn main() -> Result<()> {
             roots,
             kinds,
             path_prefix,
+            context_path,
             json,
         } => {
             let request = Request::Search {
@@ -417,10 +422,18 @@ fn main() -> Result<()> {
                 roots: roots.clone(),
                 kinds: kinds.clone(),
                 path_prefix: path_prefix.clone(),
+                context_path: context_path.clone(),
             };
             let hits: Vec<SearchHit> =
                 execute(&cli.index_dir, &socket, &request, move |workspace| {
-                    workspace.search_filtered(&query, limit, &roots, &kinds, path_prefix.as_deref())
+                    workspace.search_filtered(
+                        &query,
+                        limit,
+                        &roots,
+                        &kinds,
+                        path_prefix.as_deref(),
+                        context_path.as_deref(),
+                    )
                 })?;
             if json {
                 print_json(&hits)?;
@@ -544,7 +557,7 @@ fn main() -> Result<()> {
                 print_json(&status)?;
             } else {
                 println!(
-                    "completed_generation={:?} running={} failed={} active_files={} deleted_files={} symbols={} datasets={} failures={}",
+                    "completed_generation={:?} running={} failed={} active_files={} deleted_files={} symbols={} datasets={} agent_documents={} failures={}",
                     status.completed_generation,
                     status.running_generations,
                     status.failed_generations,
@@ -552,6 +565,7 @@ fn main() -> Result<()> {
                     status.deleted_files,
                     status.symbols,
                     status.datasets,
+                    status.agent_documents,
                     status.failures
                 );
             }
