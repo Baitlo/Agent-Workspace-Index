@@ -13,7 +13,10 @@ Options:
   --workspace PATH       Workspace to index (default: current directory)
   --index-dir PATH       Local index directory (default: XDG cache, keyed by workspace)
   --bin-dir PATH         Binary install directory (default: ~/.local/bin)
-  --clients LIST         Comma-separated clients passed to `awi integrate` (default: all)
+  --clients LIST         Comma-separated clients passed to `awi integrate` (default: all).
+                         Supports codex, gemini, claude, copilot, trae, zcode,
+                         kimi, opencode, pi, cursor, windsurf, qwen, cline,
+                         zed, amazon-q, and crush
   --source-binary PATH   Install an existing AWI binary instead of building from source
   --skip-pi-adapter      Do not install pi-mcp-adapter when Pi is detected
   -h, --help             Show this help

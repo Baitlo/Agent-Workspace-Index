@@ -27,7 +27,9 @@ The installer defaults to:
 
 - binary: `~/.local/bin/awi`
 - index: `${XDG_CACHE_HOME:-$HOME/.cache}/awi/indexes/<workspace>-<hash>`
-- clients: every detected supported harness
+- clients: every detected supported harness (Codex, Gemini CLI, Claude Code,
+  GitHub Copilot CLI, TraeCode, Zcode, Kimi Code, OpenCode, Pi, Cursor,
+  Windsurf, Qwen Code, Cline, Zed, Amazon Q Developer, and Crush)
 
 For a restricted install:
 

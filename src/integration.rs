@@ -12,6 +12,7 @@ use serde_json::{Value, json};
 
 const SERVER_NAME: &str = "awi";
 const MCP_TIMEOUT_MS: u64 = 45_000;
+const MCP_TIMEOUT_SECONDS: u64 = MCP_TIMEOUT_MS / 1_000;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum IntegrationClient {
@@ -27,6 +28,11 @@ pub enum IntegrationClient {
     Pi,
     Cursor,
     Windsurf,
+    Qwen,
+    Cline,
+    Zed,
+    AmazonQ,
+    Crush,
 }
 
 impl IntegrationClient {
@@ -44,6 +50,11 @@ impl IntegrationClient {
             Self::Pi => "pi",
             Self::Cursor => "cursor",
             Self::Windsurf => "windsurf",
+            Self::Qwen => "qwen",
+            Self::Cline => "cline",
+            Self::Zed => "zed",
+            Self::AmazonQ => "amazon-q",
+            Self::Crush => "crush",
         }
     }
 }
@@ -65,9 +76,15 @@ impl FromStr for IntegrationClient {
             "pi" | "pi-coding-agent" => Ok(Self::Pi),
             "cursor" | "cursor-agent" => Ok(Self::Cursor),
             "windsurf" | "windsurf-cascade" => Ok(Self::Windsurf),
+            "qwen" | "qwen-code" => Ok(Self::Qwen),
+            "cline" | "cline-cli" => Ok(Self::Cline),
+            "zed" | "zed-editor" => Ok(Self::Zed),
+            "amazon-q" | "amazonq" | "aws-q" | "q" => Ok(Self::AmazonQ),
+            "crush" | "crush-cli" => Ok(Self::Crush),
             other => anyhow::bail!(
                 "unsupported integration client {other:?}; expected all, codex, gemini, \
-                 claude, copilot, trae, zcode, kimi, opencode, pi, cursor, or windsurf"
+                 claude, copilot, trae, zcode, kimi, opencode, pi, cursor, windsurf, \
+                 qwen, cline, zed, amazon-q, or crush"
             ),
         }
     }
@@ -186,6 +203,11 @@ pub fn integrate(options: &IntegrationOptions) -> Result<IntegrationReport> {
             IntegrationClient::Pi => integrate_pi(&options.server, options.dry_run),
             IntegrationClient::Cursor => integrate_cursor(&options.server, options.dry_run),
             IntegrationClient::Windsurf => integrate_windsurf(&options.server, options.dry_run),
+            IntegrationClient::Qwen => integrate_qwen(&options.server, options.dry_run),
+            IntegrationClient::Cline => integrate_cline(&options.server, options.dry_run),
+            IntegrationClient::Zed => integrate_zed(&options.server, options.dry_run),
+            IntegrationClient::AmazonQ => integrate_amazon_q(&options.server, options.dry_run),
+            IntegrationClient::Crush => integrate_crush(&options.server, options.dry_run),
             IntegrationClient::All => unreachable!("all is expanded before integration"),
         };
         results.push(result);
@@ -209,7 +231,7 @@ pub fn render_human(report: &IntegrationReport) -> String {
             .map(|path| format!(" [{}]", path.display()))
             .unwrap_or_default();
         lines.push(format!(
-            "{:<7} {:<20} {}{}",
+            "{:<9} {:<20} {}{}",
             client.client,
             client.status.as_str(),
             client.detail,
@@ -238,6 +260,11 @@ fn expand_clients(clients: &[IntegrationClient]) -> Vec<IntegrationClient> {
             IntegrationClient::Pi,
             IntegrationClient::Cursor,
             IntegrationClient::Windsurf,
+            IntegrationClient::Qwen,
+            IntegrationClient::Cline,
+            IntegrationClient::Zed,
+            IntegrationClient::AmazonQ,
+            IntegrationClient::Crush,
         ];
     }
     let mut output = Vec::new();
@@ -700,6 +727,86 @@ fn integrate_windsurf(server: &McpServerSpec, dry_run: bool) -> ClientIntegratio
     )
 }
 
+fn integrate_qwen(server: &McpServerSpec, dry_run: bool) -> ClientIntegration {
+    let client = IntegrationClient::Qwen;
+    let path = home_path(".qwen/settings.json");
+    integrate_json_config(
+        client,
+        is_installed(&["qwen"], &[home_path(".qwen")]),
+        path,
+        "/mcpServers/awi",
+        server,
+        dry_run,
+        merge_qwen_mcp,
+        json_server_matches,
+        "native user-scope MCP entry added; restart Qwen Code to load it",
+    )
+}
+
+fn integrate_cline(server: &McpServerSpec, dry_run: bool) -> ClientIntegration {
+    let client = IntegrationClient::Cline;
+    let path = home_path(".cline/mcp.json");
+    integrate_json_config(
+        client,
+        is_installed(&["cline"], &[home_path(".cline")]),
+        path,
+        "/mcpServers/awi",
+        server,
+        dry_run,
+        merge_cline_mcp,
+        cline_server_matches,
+        "native CLI MCP entry added; restart Cline or start a new session",
+    )
+}
+
+fn integrate_zed(server: &McpServerSpec, dry_run: bool) -> ClientIntegration {
+    let client = IntegrationClient::Zed;
+    let path = xdg_config_home().join("zed/settings.json");
+    integrate_json_config(
+        client,
+        is_installed(&["zed"], &[xdg_config_home().join("zed")]),
+        path,
+        "/context_servers/awi",
+        server,
+        dry_run,
+        merge_zed_mcp,
+        json_server_matches,
+        "native context server entry added; Zed reloads settings automatically",
+    )
+}
+
+fn integrate_amazon_q(server: &McpServerSpec, dry_run: bool) -> ClientIntegration {
+    let client = IntegrationClient::AmazonQ;
+    let path = home_path(".aws/amazonq/mcp.json");
+    integrate_json_config(
+        client,
+        is_installed(&["q", "qchat"], &[home_path(".aws/amazonq")]),
+        path,
+        "/mcpServers/awi",
+        server,
+        dry_run,
+        merge_amazon_q_mcp,
+        json_server_matches,
+        "native global MCP entry added; restart Amazon Q or start a new session",
+    )
+}
+
+fn integrate_crush(server: &McpServerSpec, dry_run: bool) -> ClientIntegration {
+    let client = IntegrationClient::Crush;
+    let path = xdg_config_home().join("crush/crush.json");
+    integrate_json_config(
+        client,
+        is_installed(&["crush"], &[xdg_config_home().join("crush")]),
+        path,
+        "/mcp/awi",
+        server,
+        dry_run,
+        merge_crush_mcp,
+        crush_server_matches,
+        "native global MCP entry added; restart Crush or start a new session",
+    )
+}
+
 #[allow(clippy::too_many_arguments)]
 fn integrate_json_config(
     client: IntegrationClient,
@@ -886,17 +993,10 @@ fn merge_kimi_mcp(mut root: Value, server: &McpServerSpec) -> Result<Value> {
     Ok(root)
 }
 
-fn merge_json_mcp(mut root: Value, server: &McpServerSpec) -> Result<Value> {
-    if !root.is_object() {
-        anyhow::bail!("MCP config root must be a JSON object");
-    }
-    let root_object = root.as_object_mut().expect("checked above");
-    let servers = root_object.entry("mcpServers").or_insert_with(|| json!({}));
-    if !servers.is_object() {
-        anyhow::bail!("mcpServers must be a JSON object");
-    }
-    servers.as_object_mut().expect("checked above").insert(
-        SERVER_NAME.to_owned(),
+fn merge_json_mcp(root: Value, server: &McpServerSpec) -> Result<Value> {
+    merge_server_entry(
+        root,
+        "mcpServers",
         json!({
             "command": server.command,
             "args": server.args,
@@ -905,7 +1005,92 @@ fn merge_json_mcp(mut root: Value, server: &McpServerSpec) -> Result<Value> {
                 "RUN_MCP_TIMEOUT_MS": MCP_TIMEOUT_MS.to_string()
             }
         }),
-    );
+    )
+}
+
+fn merge_qwen_mcp(root: Value, server: &McpServerSpec) -> Result<Value> {
+    merge_server_entry(
+        root,
+        "mcpServers",
+        json!({
+            "command": server.command,
+            "args": server.args,
+            "env": {},
+            "timeout": MCP_TIMEOUT_MS
+        }),
+    )
+}
+
+fn merge_cline_mcp(root: Value, server: &McpServerSpec) -> Result<Value> {
+    merge_server_entry(
+        root,
+        "mcpServers",
+        json!({
+            "command": server.command,
+            "args": server.args,
+            "env": {},
+            "disabled": false,
+            "autoApprove": []
+        }),
+    )
+}
+
+fn merge_zed_mcp(root: Value, server: &McpServerSpec) -> Result<Value> {
+    merge_server_entry(
+        root,
+        "context_servers",
+        json!({
+            "command": server.command,
+            "args": server.args,
+            "env": {}
+        }),
+    )
+}
+
+fn merge_amazon_q_mcp(root: Value, server: &McpServerSpec) -> Result<Value> {
+    merge_server_entry(
+        root,
+        "mcpServers",
+        json!({
+            "command": server.command,
+            "args": server.args,
+            "env": {},
+            "timeout": MCP_TIMEOUT_MS
+        }),
+    )
+}
+
+fn merge_crush_mcp(root: Value, server: &McpServerSpec) -> Result<Value> {
+    merge_server_entry(
+        root,
+        "mcp",
+        json!({
+            "type": "stdio",
+            "command": server.command,
+            "args": server.args,
+            "env": {},
+            "disabled": false,
+            "timeout": MCP_TIMEOUT_SECONDS
+        }),
+    )
+}
+
+fn merge_server_entry(mut root: Value, section: &str, entry: Value) -> Result<Value> {
+    if !root.is_object() {
+        anyhow::bail!("MCP config root must be a JSON object");
+    }
+    let servers = root
+        .as_object_mut()
+        .expect("checked above")
+        .entry(section)
+        .or_insert_with(|| json!({}));
+    if !servers.is_object() {
+        anyhow::bail!("{section} must be a JSON object");
+    }
+    servers
+        .as_object_mut()
+        .expect("checked above")
+        .insert(SERVER_NAME.to_owned(), entry);
     Ok(root)
 }
 
@@ -995,6 +1180,21 @@ fn pi_server_matches(value: Option<&Value>, server: &McpServerSpec) -> bool {
                 value.get("transport").and_then(Value::as_str),
                 None | Some("stdio")
             )
+        })
+}
+
+fn cline_server_matches(value: Option<&Value>, server: &McpServerSpec) -> bool {
+    json_server_matches(value, server)
+        && value.is_some_and(|value| value.get("disabled").and_then(Value::as_bool) != Some(true))
+}
+
+fn crush_server_matches(value: Option<&Value>, server: &McpServerSpec) -> bool {
+    json_server_matches(value, server)
+        && value.is_some_and(|value| {
+            matches!(
+                value.get("type").and_then(Value::as_str),
+                None | Some("stdio")
+            ) && value.get("disabled").and_then(Value::as_bool) != Some(true)
         })
 }
 
@@ -1251,12 +1451,24 @@ mod tests {
             "pi-coding-agent".parse::<IntegrationClient>().unwrap(),
             IntegrationClient::Pi
         );
+        assert_eq!(
+            "qwen-code".parse::<IntegrationClient>().unwrap(),
+            IntegrationClient::Qwen
+        );
+        assert_eq!(
+            "aws-q".parse::<IntegrationClient>().unwrap(),
+            IntegrationClient::AmazonQ
+        );
+        assert_eq!(
+            "crush-cli".parse::<IntegrationClient>().unwrap(),
+            IntegrationClient::Crush
+        );
         assert!("other".parse::<IntegrationClient>().is_err());
     }
 
     #[test]
     fn expands_all_and_deduplicates_explicit_clients() {
-        assert_eq!(expand_clients(&[]).len(), 11);
+        assert_eq!(expand_clients(&[]).len(), 16);
         assert_eq!(
             expand_clients(&[
                 IntegrationClient::Gemini,
@@ -1439,6 +1651,106 @@ mod tests {
     }
 
     #[test]
+    fn merges_qwen_and_amazon_q_with_millisecond_timeouts() {
+        let server = McpServerSpec {
+            command: PathBuf::from("/opt/awi"),
+            args: vec!["mcp".into()],
+        };
+        let existing = json!({
+            "mcpServers": {
+                "other": {
+                    "command": "/bin/other"
+                }
+            },
+            "preserved": true
+        });
+        for merged in [
+            merge_qwen_mcp(existing.clone(), &server).unwrap(),
+            merge_amazon_q_mcp(existing.clone(), &server).unwrap(),
+        ] {
+            assert_eq!(merged["preserved"], true);
+            assert_eq!(merged["mcpServers"]["other"]["command"], "/bin/other");
+            assert_eq!(merged["mcpServers"]["awi"]["timeout"], 45_000);
+            assert!(json_server_matches(
+                merged.pointer("/mcpServers/awi"),
+                &server
+            ));
+        }
+    }
+
+    #[test]
+    fn merges_cline_as_enabled_without_auto_approvals() {
+        let server = McpServerSpec {
+            command: PathBuf::from("/opt/awi"),
+            args: vec!["mcp".into()],
+        };
+        let merged = merge_cline_mcp(json!({"preserved": true}), &server).unwrap();
+        assert_eq!(merged["preserved"], true);
+        assert_eq!(merged["mcpServers"]["awi"]["disabled"], false);
+        assert_eq!(merged["mcpServers"]["awi"]["autoApprove"], json!([]));
+        assert!(cline_server_matches(
+            merged.pointer("/mcpServers/awi"),
+            &server
+        ));
+    }
+
+    #[test]
+    fn merges_zed_context_server_without_overwriting_settings() {
+        let server = McpServerSpec {
+            command: PathBuf::from("/opt/awi"),
+            args: vec!["mcp".into()],
+        };
+        let merged = merge_zed_mcp(
+            json!({
+                "theme": "One Dark",
+                "context_servers": {
+                    "other": {
+                        "url": "https://example.invalid/mcp"
+                    }
+                }
+            }),
+            &server,
+        )
+        .unwrap();
+        assert_eq!(merged["theme"], "One Dark");
+        assert_eq!(
+            merged["context_servers"]["other"]["url"],
+            "https://example.invalid/mcp"
+        );
+        assert!(json_server_matches(
+            merged.pointer("/context_servers/awi"),
+            &server
+        ));
+    }
+
+    #[test]
+    fn merges_crush_with_seconds_timeout_and_enabled_stdio() {
+        let server = McpServerSpec {
+            command: PathBuf::from("/opt/awi"),
+            args: vec!["mcp".into()],
+        };
+        let merged = merge_crush_mcp(
+            json!({
+                "$schema": "https://charm.land/crush.json",
+                "mcp": {
+                    "other": {
+                        "type": "http",
+                        "url": "https://example.invalid/mcp"
+                    }
+                }
+            }),
+            &server,
+        )
+        .unwrap();
+        let merged_again = merge_crush_mcp(merged.clone(), &server).unwrap();
+        assert_eq!(merged_again, merged);
+        assert_eq!(merged["mcp"]["other"]["type"], "http");
+        assert_eq!(merged["mcp"]["awi"]["type"], "stdio");
+        assert_eq!(merged["mcp"]["awi"]["timeout"], 45);
+        assert!(crush_server_matches(merged.pointer("/mcp/awi"), &server));
+    }
+
+    #[test]
     fn native_client_matches_reject_disabled_or_wrong_transport_entries() {
         let server = McpServerSpec {
             command: PathBuf::from("/opt/awi"),
@@ -1457,6 +1769,15 @@ mod tests {
         assert!(!zcode_server_matches(Some(&disabled), &server));
         assert!(!zcode_server_matches(Some(&remote), &server));
         assert!(!kimi_server_matches(Some(&disabled), &server));
+        assert!(!cline_server_matches(
+            Some(&json!({
+                "command": "/opt/awi",
+                "args": ["mcp"],
+                "disabled": true
+            })),
+            &server
+        ));
+        assert!(!crush_server_matches(Some(&remote), &server));
         assert!(kimi_server_matches(
             Some(&json!({
                 "transport": "stdio",

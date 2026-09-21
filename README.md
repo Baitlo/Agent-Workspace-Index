@@ -5,6 +5,10 @@ retrieval layer for coding agents. It indexes source code, SQL, documents, logs,
 JSON/JSONL, CSV/TSV, and Parquet through one bounded CLI and Model Context
 Protocol (MCP) surface.
 
+One command connects that index to 16 coding-agent harnesses, including Codex,
+Claude Code, Gemini CLI, GitHub Copilot CLI, OpenCode, Qwen Code, Cline, Zed,
+Amazon Q Developer, and Crush.
+
 ## Capabilities
 
 - Tantivy hybrid retrieval over paths, text, symbols, and dataset schemas.
@@ -132,7 +136,7 @@ awi integrate --project-root /path/to/workspace --dry-run --json
 awi integrate --project-root /path/to/workspace
 
 # Restrict the operation to selected clients.
-awi integrate --client codex,gemini,trae,zcode,kimi,opencode,pi \
+awi integrate --client codex,gemini,opencode,qwen,cline,zed,amazon-q,crush \
   --project-root /path/to/workspace
 ```
 
@@ -152,6 +156,11 @@ other clients:
 | [Pi](https://github.com/badlogic/pi-mono/tree/main/packages/coding-agent) | `$PI_CODING_AGENT_DIR/mcp.json` through [`pi-mcp-adapter`](https://pi.dev/packages/pi-mcp-adapter) |
 | [Cursor](https://cursor.com/help/customization/mcp) | `~/.cursor/mcp.json` |
 | [Windsurf](https://docs.windsurf.com/windsurf/cascade/mcp) | `~/.codeium/windsurf/mcp_config.json` |
+| [Qwen Code](https://qwenlm.github.io/qwen-code-docs/en/users/features/mcp/) | `~/.qwen/settings.json` |
+| [Cline CLI](https://docs.cline.bot/mcp/mcp-overview) | `~/.cline/mcp.json` |
+| [Zed](https://zed.dev/docs/ai/mcp) | `${XDG_CONFIG_HOME:-~/.config}/zed/settings.json` at `context_servers` |
+| [Amazon Q Developer](https://docs.aws.amazon.com/amazonq/latest/qdeveloper-ug/command-line-mcp-configuration.html) | `~/.aws/amazonq/mcp.json` |
+| [Crush](https://www.mintlify.com/charmbracelet/crush/configuration/mcp) | `${XDG_CONFIG_HOME:-~/.config}/crush/crush.json` |
 
 Plugins are optional packaging for clients with native MCP support. Pi is the
 exception: its core deliberately omits MCP, so an extension is required. New
