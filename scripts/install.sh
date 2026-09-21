@@ -20,6 +20,8 @@ Options:
   --source-binary PATH   Install an existing AWI binary instead of building from source
   --skip-pi-adapter      Do not install pi-mcp-adapter when Pi is detected
   --skip-agent-knowledge Do not index ancestor AGENTS.md or discovered SKILL.md files
+  --skip-agent-memory    Do not discover or index Agent memory for this workspace
+  --include-raw-memory   Also index matching raw chat/session history (opt-in)
   -h, --help             Show this help
 EOF
 }
@@ -114,6 +116,8 @@ clients="all"
 source_binary="${AWI_SOURCE_BINARY:-}"
 install_pi_adapter=true
 index_agent_knowledge=true
+index_agent_memory=true
+include_raw_memory=false
 pi_adapter_spec="${AWI_PI_MCP_ADAPTER_SPEC:-npm:pi-mcp-adapter@2.34.0}"
 
 while (($# > 0)); do
@@ -149,6 +153,14 @@ while (($# > 0)); do
             ;;
         --skip-agent-knowledge)
             index_agent_knowledge=false
+            shift
+            ;;
+        --skip-agent-memory)
+            index_agent_memory=false
+            shift
+            ;;
+        --include-raw-memory)
+            include_raw_memory=true
             shift
             ;;
         -h | --help)
@@ -239,6 +251,19 @@ if "$index_agent_knowledge"; then
             "$install_target" --index-dir "$index_dir" reconcile "$agent_root"
         done
     fi
+fi
+
+if "$index_agent_memory"; then
+    printf 'Discovering Agent memory for %s...\n' "$workspace"
+    memory_args=(
+        --index-dir "$index_dir"
+        memory
+        --project-root "$workspace"
+    )
+    if "$include_raw_memory"; then
+        memory_args+=(--include-raw)
+    fi
+    "$install_target" "${memory_args[@]}"
 fi
 
 if client_requested pi && command_exists pi && "$install_pi_adapter"; then

@@ -7,12 +7,14 @@ use std::time::UNIX_EPOCH;
 use anyhow::{Context, Result};
 use pulldown_cmark::{Event, Parser as MarkdownParser, Tag, TagEnd};
 use regex::RegexSet;
+use serde_json::Value as JsonValue;
 use serde_yaml_ng::Value as YamlValue;
 use tree_sitter::{Language, Node, Parser as TreeSitterParser};
 
 use crate::model::{AgentDocumentMetadata, AgentDocumentRole, FileKind, SymbolRecord};
 
 const INDEX_PREVIEW_CHARS: usize = 2_000;
+const MAX_MEMORY_INDEX_CHARS: usize = 1_000_000;
 const MAX_AGENT_HEADINGS: usize = 64;
 const MAX_AGENT_REFERENCES: usize = 64;
 
@@ -65,6 +67,7 @@ pub(crate) fn should_extract_text(kind: FileKind, size_bytes: u64, max_bytes: u6
             | FileKind::Tabular
             | FileKind::AgentInstructions
             | FileKind::AgentSkill
+            | FileKind::AgentMemory
     ) && size_bytes <= max_bytes
         && kind != FileKind::Binary
 }
@@ -176,6 +179,35 @@ pub(crate) fn extract_agent_document(
         headings,
         references,
     }))
+}
+
+pub(crate) fn normalize_agent_memory_content(
+    path: &Path,
+    source: &str,
+    raw_history: bool,
+) -> String {
+    if !matches!(
+        extension(path).as_deref(),
+        Some("jsonl" | "ndjson" | "json")
+    ) {
+        return source.chars().take(MAX_MEMORY_INDEX_CHARS).collect();
+    }
+
+    let mut output = String::new();
+    for line in source.lines() {
+        let Ok(value) = serde_json::from_str::<JsonValue>(line) else {
+            continue;
+        };
+        collect_memory_fields(&value, raw_history, &mut output);
+        if output.chars().count() >= MAX_MEMORY_INDEX_CHARS {
+            break;
+        }
+    }
+    output.chars().take(MAX_MEMORY_INDEX_CHARS).collect()
+}
+
+pub(crate) fn index_preview(source: &str) -> String {
+    source.chars().take(INDEX_PREVIEW_CHARS).collect()
 }
 
 pub(crate) fn mtime_ns(metadata: &std::fs::Metadata) -> i64 {
@@ -419,6 +451,70 @@ fn compact(value: &str, max_chars: usize) -> String {
         .collect()
 }
 
+fn collect_memory_fields(value: &JsonValue, raw_history: bool, output: &mut String) {
+    match value {
+        JsonValue::Object(map) => {
+            for (key, value) in map {
+                let selected = matches!(
+                    key.as_str(),
+                    "intent"
+                        | "actions"
+                        | "outcome"
+                        | "learned"
+                        | "message_summary_time"
+                        | "summary"
+                        | "title"
+                ) || raw_history
+                    && matches!(
+                        key.as_str(),
+                        "role" | "content" | "text" | "message" | "cwd" | "project"
+                    );
+                if selected {
+                    append_memory_value(key, value, output);
+                } else if raw_history && matches!(value, JsonValue::Object(_) | JsonValue::Array(_))
+                {
+                    collect_memory_fields(value, true, output);
+                }
+            }
+        }
+        JsonValue::Array(values) => {
+            for value in values {
+                collect_memory_fields(value, raw_history, output);
+            }
+        }
+        _ => {}
+    }
+}
+
+fn append_memory_value(key: &str, value: &JsonValue, output: &mut String) {
+    match value {
+        JsonValue::String(value) => {
+            output.push_str(key);
+            output.push_str(": ");
+            output.push_str(value);
+            output.push('\n');
+        }
+        JsonValue::Array(values) => {
+            for value in values {
+                match value {
+                    JsonValue::String(value) => {
+                        output.push_str(key);
+                        output.push_str(": ");
+                        output.push_str(value);
+                        output.push('\n');
+                    }
+                    JsonValue::Object(_) | JsonValue::Array(_) => {
+                        collect_memory_fields(value, true, output);
+                    }
+                    _ => {}
+                }
+            }
+        }
+        JsonValue::Object(_) => collect_memory_fields(value, true, output),
+        _ => {}
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use std::fs;
@@ -529,6 +625,18 @@ Read [architecture](references/architecture.md) before changes.
         assert!(!contains_sensitive_agent_content(
             "Set API_KEY to YOUR_API_KEY before running."
         ));
+    }
+
+    #[test]
+    fn normalizes_session_memory_without_indexing_internal_ids() {
+        let source = r#"{"intent":"debug ranking","actions":["inspect logs"],"outcome":"fixed","message_id":"secret-id","compact_summary_meta":{"summary_digest":"digest"}}"#;
+        let normalized =
+            normalize_agent_memory_content(Path::new("session_memory_abc.jsonl"), source, false);
+        assert!(normalized.contains("intent: debug ranking"));
+        assert!(normalized.contains("actions: inspect logs"));
+        assert!(normalized.contains("outcome: fixed"));
+        assert!(!normalized.contains("secret-id"));
+        assert!(!normalized.contains("digest"));
     }
 
     #[test]

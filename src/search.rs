@@ -17,6 +17,7 @@ const WRITER_HEAP_BYTES: usize = 50_000_000;
 const RRF_K: f32 = 60.0;
 const PATH_COVERAGE_WEIGHT: f32 = 0.05;
 const AGENT_KINDS: &[&str] = &["agent_instructions", "agent_skill"];
+const MEMORY_KINDS: &[&str] = &["agent_memory"];
 
 pub(crate) struct SearchIndex {
     index: Index,
@@ -170,6 +171,13 @@ impl SearchIndex {
                 exclude_kinds: None,
             });
         }
+        lanes.push(LaneSpec {
+            name: "memory",
+            fields: vec![self.fields.name, self.fields.symbols, self.fields.content],
+            weight: 1.15,
+            include_kinds: Some(MEMORY_KINDS),
+            exclude_kinds: None,
+        });
 
         let lane_results = lanes
             .par_iter()

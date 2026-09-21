@@ -6,8 +6,9 @@ use anyhow::{Context, Result};
 use rusqlite::{Connection, OptionalExtension, Row, params, params_from_iter};
 
 use crate::model::{
-    AgentDocumentMetadata, AgentDocumentRole, CatalogFileInput, DatasetProfile, ExistingFile,
-    FileKind, FileRecord, IndexStatus, SymbolRecord,
+    AgentDocumentMetadata, AgentDocumentRole, AgentMemoryLayer, AgentMemoryMetadata,
+    AgentMemorySource, CatalogFileInput, DatasetProfile, ExistingFile, FileKind, FileRecord,
+    IndexStatus, SymbolRecord,
 };
 
 pub(crate) struct Catalog {
@@ -105,6 +106,31 @@ impl Catalog {
             CREATE INDEX IF NOT EXISTS agent_documents_role
                 ON agent_documents(role);
 
+            CREATE TABLE IF NOT EXISTS agent_memory_sources (
+                path TEXT PRIMARY KEY,
+                agent TEXT NOT NULL,
+                workspace_root TEXT,
+                project_key TEXT,
+                raw_history INTEGER NOT NULL
+            );
+
+            CREATE INDEX IF NOT EXISTS agent_memory_sources_workspace
+                ON agent_memory_sources(workspace_root);
+
+            CREATE TABLE IF NOT EXISTS agent_memories (
+                file_id INTEGER PRIMARY KEY REFERENCES files(id) ON DELETE CASCADE,
+                agent TEXT NOT NULL,
+                layer TEXT NOT NULL,
+                workspace_root TEXT,
+                project_key TEXT,
+                session_id TEXT,
+                observed_at_ms INTEGER NOT NULL,
+                raw_history INTEGER NOT NULL
+            );
+
+            CREATE INDEX IF NOT EXISTS agent_memories_workspace
+                ON agent_memories(workspace_root, layer);
+
             CREATE TABLE IF NOT EXISTS lineage_edges (
                 id INTEGER PRIMARY KEY,
                 source_file_id INTEGER REFERENCES files(id),
@@ -167,6 +193,66 @@ impl Catalog {
             })?
             .collect::<rusqlite::Result<Vec<_>>>()
             .context("list indexed roots")
+    }
+
+    pub(crate) fn upsert_agent_memory_source(&self, source: &AgentMemorySource) -> Result<()> {
+        self.connection.execute(
+            "INSERT INTO agent_memory_sources(
+                path, agent, workspace_root, project_key, raw_history
+             ) VALUES (?1, ?2, ?3, ?4, ?5)
+             ON CONFLICT(path) DO UPDATE SET
+                agent = excluded.agent,
+                workspace_root = excluded.workspace_root,
+                project_key = excluded.project_key,
+                raw_history = excluded.raw_history",
+            params![
+                source.path.to_string_lossy().as_ref(),
+                source.agent,
+                source
+                    .workspace_root
+                    .as_ref()
+                    .map(|path| path.to_string_lossy().into_owned()),
+                source.project_key,
+                source.raw_history,
+            ],
+        )?;
+        Ok(())
+    }
+
+    pub(crate) fn agent_memory_source_for_path(
+        &self,
+        path: &Path,
+    ) -> Result<Option<AgentMemorySource>> {
+        let path = path.to_string_lossy();
+        let raw = self
+            .connection
+            .query_row(
+                "SELECT path, agent, workspace_root, project_key, raw_history
+                 FROM agent_memory_sources
+                 WHERE ?1 = path OR substr(?1, 1, length(path) + 1) = path || '/'
+                 ORDER BY length(path) DESC
+                 LIMIT 1",
+                params![path.as_ref()],
+                |row| {
+                    Ok((
+                        row.get::<_, String>(0)?,
+                        row.get::<_, String>(1)?,
+                        row.get::<_, Option<String>>(2)?,
+                        row.get::<_, Option<String>>(3)?,
+                        row.get::<_, bool>(4)?,
+                    ))
+                },
+            )
+            .optional()?;
+        Ok(raw.map(
+            |(path, agent, workspace_root, project_key, raw_history)| AgentMemorySource {
+                path: PathBuf::from(path),
+                agent,
+                workspace_root: workspace_root.map(PathBuf::from),
+                project_key,
+                raw_history,
+            },
+        ))
     }
 
     pub(crate) fn complete_generation(&mut self, root_id: i64, generation: i64) -> Result<()> {
@@ -416,6 +502,48 @@ impl Catalog {
         Ok(())
     }
 
+    pub(crate) fn replace_agent_memory(
+        &self,
+        file_id: i64,
+        metadata: Option<&AgentMemoryMetadata>,
+    ) -> Result<()> {
+        if let Some(metadata) = metadata {
+            self.connection.execute(
+                "INSERT INTO agent_memories(
+                    file_id, agent, layer, workspace_root, project_key, session_id,
+                    observed_at_ms, raw_history
+                 ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)
+                 ON CONFLICT(file_id) DO UPDATE SET
+                    agent = excluded.agent,
+                    layer = excluded.layer,
+                    workspace_root = excluded.workspace_root,
+                    project_key = excluded.project_key,
+                    session_id = excluded.session_id,
+                    observed_at_ms = excluded.observed_at_ms,
+                    raw_history = excluded.raw_history",
+                params![
+                    file_id,
+                    metadata.agent,
+                    metadata.layer.as_str(),
+                    metadata
+                        .workspace_root
+                        .as_ref()
+                        .map(|path| path.to_string_lossy().into_owned()),
+                    metadata.project_key,
+                    metadata.session_id,
+                    metadata.observed_at_ms,
+                    metadata.raw_history,
+                ],
+            )?;
+        } else {
+            self.connection.execute(
+                "DELETE FROM agent_memories WHERE file_id = ?1",
+                params![file_id],
+            )?;
+        }
+        Ok(())
+    }
+
     pub(crate) fn record_failure(
         &self,
         generation: i64,
@@ -623,6 +751,68 @@ impl Catalog {
         Ok(documents)
     }
 
+    pub(crate) fn agent_memory_for(&self, file_id: i64) -> Result<Option<AgentMemoryMetadata>> {
+        let raw = self
+            .connection
+            .query_row(
+                "SELECT agent, layer, workspace_root, project_key, session_id,
+                        observed_at_ms, raw_history
+                 FROM agent_memories WHERE file_id = ?1",
+                params![file_id],
+                |row| {
+                    Ok((
+                        row.get::<_, String>(0)?,
+                        row.get::<_, String>(1)?,
+                        row.get::<_, Option<String>>(2)?,
+                        row.get::<_, Option<String>>(3)?,
+                        row.get::<_, Option<String>>(4)?,
+                        row.get::<_, i64>(5)?,
+                        row.get::<_, bool>(6)?,
+                    ))
+                },
+            )
+            .optional()?;
+        raw.map(agent_memory_from_raw).transpose()
+    }
+
+    pub(crate) fn agent_memories_for(
+        &self,
+        file_ids: &[i64],
+    ) -> Result<HashMap<i64, AgentMemoryMetadata>> {
+        if file_ids.is_empty() {
+            return Ok(HashMap::new());
+        }
+        let placeholders = std::iter::repeat_n("?", file_ids.len())
+            .collect::<Vec<_>>()
+            .join(",");
+        let sql = format!(
+            "SELECT file_id, agent, layer, workspace_root, project_key, session_id,
+                    observed_at_ms, raw_history
+             FROM agent_memories WHERE file_id IN ({placeholders})"
+        );
+        let mut statement = self.connection.prepare(&sql)?;
+        let rows = statement.query_map(params_from_iter(file_ids.iter()), |row| {
+            Ok((
+                row.get::<_, i64>(0)?,
+                (
+                    row.get::<_, String>(1)?,
+                    row.get::<_, String>(2)?,
+                    row.get::<_, Option<String>>(3)?,
+                    row.get::<_, Option<String>>(4)?,
+                    row.get::<_, Option<String>>(5)?,
+                    row.get::<_, i64>(6)?,
+                    row.get::<_, bool>(7)?,
+                ),
+            ))
+        })?;
+        let mut memories = HashMap::with_capacity(file_ids.len());
+        for row in rows {
+            let (file_id, raw) = row?;
+            memories.insert(file_id, agent_memory_from_raw(raw)?);
+        }
+        Ok(memories)
+    }
+
     pub(crate) fn status(&self) -> Result<IndexStatus> {
         Ok(IndexStatus {
             completed_generation: self.latest_completed_generation()?,
@@ -641,6 +831,16 @@ impl Catalog {
                     |row| row.get(0),
                 )?;
                 u64::try_from(count).context("negative Agent document count")?
+            },
+            agent_memories: {
+                let count: i64 = self.connection.query_row(
+                    "SELECT COUNT(*)
+                     FROM agent_memories m JOIN files f ON f.id = m.file_id
+                     WHERE f.deleted = 0",
+                    [],
+                    |row| row.get(0),
+                )?;
+                u64::try_from(count).context("negative Agent memory count")?
             },
             failures: self.count("index_failures", "1 = 1")?,
         })
@@ -698,6 +898,16 @@ type RawAgentDocument = (
     String,
 );
 
+type RawAgentMemory = (
+    String,
+    String,
+    Option<String>,
+    Option<String>,
+    Option<String>,
+    i64,
+    bool,
+);
+
 fn agent_document_from_raw(raw: RawAgentDocument) -> Result<AgentDocumentMetadata> {
     let (role, name, description, scope_root, precedence_depth, headings, references) = raw;
     Ok(AgentDocumentMetadata {
@@ -710,6 +920,19 @@ fn agent_document_from_raw(raw: RawAgentDocument) -> Result<AgentDocumentMetadat
         headings: serde_json::from_str(&headings).context("decode Agent document headings")?,
         references: serde_json::from_str(&references)
             .context("decode Agent document references")?,
+    })
+}
+
+fn agent_memory_from_raw(raw: RawAgentMemory) -> Result<AgentMemoryMetadata> {
+    let (agent, layer, workspace_root, project_key, session_id, observed_at_ms, raw_history) = raw;
+    Ok(AgentMemoryMetadata {
+        agent,
+        layer: AgentMemoryLayer::try_from(layer.as_str())?,
+        workspace_root: workspace_root.map(PathBuf::from),
+        project_key,
+        session_id,
+        observed_at_ms,
+        raw_history,
     })
 }
 

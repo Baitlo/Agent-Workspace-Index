@@ -12,6 +12,7 @@ pub enum FileKind {
     Tabular,
     AgentInstructions,
     AgentSkill,
+    AgentMemory,
     Binary,
     Unknown,
 }
@@ -25,6 +26,7 @@ impl FileKind {
             Self::Tabular => "tabular",
             Self::AgentInstructions => "agent_instructions",
             Self::AgentSkill => "agent_skill",
+            Self::AgentMemory => "agent_memory",
             Self::Binary => "binary",
             Self::Unknown => "unknown",
         }
@@ -42,6 +44,7 @@ impl TryFrom<&str> for FileKind {
             "tabular" => Ok(Self::Tabular),
             "agent_instructions" => Ok(Self::AgentInstructions),
             "agent_skill" => Ok(Self::AgentSkill),
+            "agent_memory" => Ok(Self::AgentMemory),
             "binary" => Ok(Self::Binary),
             "unknown" => Ok(Self::Unknown),
             other => anyhow::bail!("unknown file kind: {other}"),
@@ -155,6 +158,106 @@ impl AgentDocumentMetadata {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum AgentMemoryLayer {
+    UserProfile,
+    ProjectSummary,
+    TopicSummary,
+    SessionSummary,
+    MemoryNote,
+    RawHistory,
+}
+
+impl AgentMemoryLayer {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::UserProfile => "user_profile",
+            Self::ProjectSummary => "project_summary",
+            Self::TopicSummary => "topic_summary",
+            Self::SessionSummary => "session_summary",
+            Self::MemoryNote => "memory_note",
+            Self::RawHistory => "raw_history",
+        }
+    }
+
+    pub fn summary_priority(self) -> u8 {
+        match self {
+            Self::ProjectSummary => 5,
+            Self::TopicSummary => 4,
+            Self::UserProfile => 3,
+            Self::SessionSummary => 2,
+            Self::MemoryNote => 1,
+            Self::RawHistory => 0,
+        }
+    }
+}
+
+impl TryFrom<&str> for AgentMemoryLayer {
+    type Error = anyhow::Error;
+
+    fn try_from(value: &str) -> Result<Self, Self::Error> {
+        match value {
+            "user_profile" => Ok(Self::UserProfile),
+            "project_summary" => Ok(Self::ProjectSummary),
+            "topic_summary" => Ok(Self::TopicSummary),
+            "session_summary" => Ok(Self::SessionSummary),
+            "memory_note" => Ok(Self::MemoryNote),
+            "raw_history" => Ok(Self::RawHistory),
+            other => anyhow::bail!("unknown Agent memory layer: {other}"),
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AgentMemorySource {
+    pub path: PathBuf,
+    pub agent: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub workspace_root: Option<PathBuf>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub project_key: Option<String>,
+    pub raw_history: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AgentMemoryMetadata {
+    pub agent: String,
+    pub layer: AgentMemoryLayer,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub workspace_root: Option<PathBuf>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub project_key: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub session_id: Option<String>,
+    pub observed_at_ms: i64,
+    pub raw_history: bool,
+}
+
+impl AgentMemoryMetadata {
+    pub fn search_text(&self) -> String {
+        [
+            Some(self.agent.as_str()),
+            Some(self.layer.as_str()),
+            self.workspace_root.as_ref().and_then(|path| path.to_str()),
+            self.project_key.as_deref(),
+            self.session_id.as_deref(),
+        ]
+        .into_iter()
+        .flatten()
+        .collect::<Vec<_>>()
+        .join(" ")
+    }
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct AgentMemoryIndexReport {
+    pub project_root: PathBuf,
+    pub include_raw: bool,
+    pub sources: Vec<AgentMemorySource>,
+    pub reports: Vec<IndexReport>,
+}
+
 impl DatasetProfile {
     pub fn schema_text(&self) -> String {
         self.columns
@@ -221,6 +324,8 @@ pub struct SearchHit {
     pub preview: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub agent: Option<AgentDocumentMetadata>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub memory: Option<AgentMemoryMetadata>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -248,6 +353,8 @@ pub struct InspectResult {
     pub dataset: Option<DatasetProfile>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub agent: Option<AgentDocumentMetadata>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub memory: Option<AgentMemoryMetadata>,
     pub content: Option<ContentExcerpt>,
 }
 
@@ -327,5 +434,7 @@ pub struct IndexStatus {
     pub datasets: u64,
     #[serde(default)]
     pub agent_documents: u64,
+    #[serde(default)]
+    pub agent_memories: u64,
     pub failures: u64,
 }

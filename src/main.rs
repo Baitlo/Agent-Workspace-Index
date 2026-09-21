@@ -67,6 +67,28 @@ enum Command {
         json: bool,
     },
 
+    /// Discover and index memory for this project across supported Agent clients.
+    Memory {
+        #[arg(long, default_value = ".")]
+        project_root: PathBuf,
+
+        /// Include raw chat/session history. Curated memory is the default.
+        #[arg(long)]
+        include_raw: bool,
+
+        #[arg(long, default_value_t = 4)]
+        max_content_mib: u64,
+
+        #[arg(long, default_value_t = 256)]
+        max_profile_mib: u64,
+
+        #[arg(long, default_value_t = 15)]
+        duckdb_timeout_seconds: u64,
+
+        #[arg(long)]
+        json: bool,
+    },
+
     /// Continuously reconcile roots and auto-publish immutable snapshots on change.
     Watch {
         /// Roots to reconcile. Defaults to every root already in the catalog.
@@ -350,6 +372,50 @@ fn main() -> Result<()> {
                 }
             }
         }
+        Command::Memory {
+            project_root,
+            include_raw,
+            max_content_mib,
+            max_profile_mib,
+            duckdb_timeout_seconds,
+            json,
+        } => {
+            let options = IndexOptions {
+                max_content_bytes: mib(max_content_mib),
+                max_profile_bytes: mib(max_profile_mib),
+                duckdb_timeout_seconds,
+            };
+            let mut workspace = WorkspaceIndex::open(&cli.index_dir)
+                .with_context(|| format!("open AWI index {}", cli.index_dir.display()))?;
+            let report = workspace.index_agent_memories(project_root, include_raw, &options)?;
+            if json {
+                print_json(&report)?;
+            } else {
+                println!(
+                    "sources={} files={} indexed={} unchanged={} deleted={} metadata_only={} failed={} raw={}",
+                    report.sources.len(),
+                    report
+                        .reports
+                        .iter()
+                        .map(|item| item.discovered)
+                        .sum::<u64>(),
+                    report.reports.iter().map(|item| item.indexed).sum::<u64>(),
+                    report
+                        .reports
+                        .iter()
+                        .map(|item| item.unchanged)
+                        .sum::<u64>(),
+                    report.reports.iter().map(|item| item.deleted).sum::<u64>(),
+                    report
+                        .reports
+                        .iter()
+                        .map(|item| item.metadata_only)
+                        .sum::<u64>(),
+                    report.reports.iter().map(|item| item.failed).sum::<u64>(),
+                    report.include_raw
+                );
+            }
+        }
         Command::Watch {
             roots,
             publish_dir,
@@ -483,6 +549,16 @@ fn main() -> Result<()> {
                         println!("column: {}\t{}", column.name, column.data_type);
                     }
                 }
+                if let Some(memory) = result.memory {
+                    println!("memory_agent: {}", memory.agent);
+                    println!("memory_layer: {}", memory.layer.as_str());
+                    if let Some(workspace_root) = memory.workspace_root {
+                        println!("memory_workspace: {}", workspace_root.display());
+                    }
+                    if let Some(session_id) = memory.session_id {
+                        println!("memory_session: {session_id}");
+                    }
+                }
                 for symbol in result.symbols {
                     println!(
                         "symbol: {}\t{}\t{}:{}-{}",
@@ -557,7 +633,7 @@ fn main() -> Result<()> {
                 print_json(&status)?;
             } else {
                 println!(
-                    "completed_generation={:?} running={} failed={} active_files={} deleted_files={} symbols={} datasets={} agent_documents={} failures={}",
+                    "completed_generation={:?} running={} failed={} active_files={} deleted_files={} symbols={} datasets={} agent_documents={} agent_memories={} failures={}",
                     status.completed_generation,
                     status.running_generations,
                     status.failed_generations,
@@ -566,6 +642,7 @@ fn main() -> Result<()> {
                     status.symbols,
                     status.datasets,
                     status.agent_documents,
+                    status.agent_memories,
                     status.failures
                 );
             }

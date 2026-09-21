@@ -4,7 +4,9 @@ use std::process::{Child, Command, Output, Stdio};
 use std::thread;
 use std::time::{Duration, Instant};
 
-use awi::{AgentDocumentRole, FileKind, IndexOptions, WorkspaceIndex};
+use awi::{
+    AgentDocumentRole, AgentMemoryLayer, AgentMemorySource, FileKind, IndexOptions, WorkspaceIndex,
+};
 use serde_json::Value;
 use tempfile::tempdir;
 
@@ -292,6 +294,203 @@ Read [acceptance](references/acceptance.md).
             .unwrap()
             .iter()
             .all(|hit| hit.path != parent_agents)
+    );
+}
+
+#[test]
+fn deletes_registered_agent_root_after_parent_directory_disappears() {
+    let fixture = tempdir().unwrap();
+    let skill_dir = fixture.path().join("transient-skill");
+    let skill = skill_dir.join("SKILL.md");
+    let index_dir = fixture.path().join("index");
+    fs::create_dir_all(&skill_dir).unwrap();
+    fs::write(
+        &skill,
+        "---\nname: transient\ndescription: Temporary indexed knowledge.\n---\n",
+    )
+    .unwrap();
+
+    let mut workspace = WorkspaceIndex::open(&index_dir).unwrap();
+    workspace
+        .index_root(&skill, &IndexOptions::default())
+        .unwrap();
+    fs::remove_dir_all(&skill_dir).unwrap();
+    let deleted = workspace
+        .index_root(&skill, &IndexOptions::default())
+        .unwrap();
+    assert_eq!(deleted.deleted, 1);
+    assert_eq!(workspace.status().unwrap().agent_documents, 0);
+}
+
+#[test]
+fn indexes_project_scoped_agent_memory_safely_and_incrementally() {
+    let fixture = tempdir().unwrap();
+    let project_a = fixture.path().join("project-a");
+    let project_b = fixture.path().join("project-b");
+    let memory_a = fixture.path().join("memory-a");
+    let memory_b = fixture.path().join("memory-b");
+    let duplicate = fixture.path().join("duplicate.md");
+    let raw = fixture.path().join("raw-session.jsonl");
+    let index_dir = fixture.path().join("index");
+    fs::create_dir_all(project_a.join("src")).unwrap();
+    fs::create_dir_all(project_b.join("src")).unwrap();
+    fs::create_dir_all(&memory_a).unwrap();
+    fs::create_dir_all(&memory_b).unwrap();
+    fs::write(project_a.join("src/lib.rs"), "fn alpha() {}\n").unwrap();
+    fs::write(project_b.join("src/lib.rs"), "fn beta() {}\n").unwrap();
+    fs::write(
+        memory_a.join("project_memory.md"),
+        "# Project memory\nvalidated delta protocol\n",
+    )
+    .unwrap();
+    fs::write(
+        memory_a.join("session_memory_session-a.jsonl"),
+        r#"{"intent":"inspect append marker","actions":["first pass"],"outcome":"ready","message_id":"not-indexed"}"#,
+    )
+    .unwrap();
+    fs::write(
+        memory_a.join("secret.md"),
+        "token = ghp_abcdefghijklmnopqrstuvwxyz1234567890\n",
+    )
+    .unwrap();
+    fs::write(
+        memory_b.join("project_memory.md"),
+        "# Other memory\nforeign omega protocol\n",
+    )
+    .unwrap();
+    fs::write(&duplicate, "# Project memory\nvalidated delta protocol\n").unwrap();
+    fs::write(
+        &raw,
+        r#"{"role":"user","content":"validated delta protocol raw archive"}"#,
+    )
+    .unwrap();
+
+    let source = |path, agent: &str, workspace_root, raw_history| AgentMemorySource {
+        path,
+        agent: agent.to_owned(),
+        workspace_root: Some(workspace_root),
+        project_key: None,
+        raw_history,
+    };
+    let mut workspace = WorkspaceIndex::open(&index_dir).unwrap();
+    workspace
+        .index_root(&project_a, &IndexOptions::default())
+        .unwrap();
+    workspace
+        .index_root(&project_b, &IndexOptions::default())
+        .unwrap();
+    for memory_source in [
+        source(memory_a.clone(), "trae", project_a.clone(), false),
+        source(memory_b.clone(), "trae", project_b.clone(), false),
+        source(duplicate.clone(), "zcode", project_a.clone(), false),
+        source(raw.clone(), "gemini", project_a.clone(), true),
+    ] {
+        workspace
+            .index_agent_memory_source(&memory_source, &IndexOptions::default())
+            .unwrap();
+    }
+
+    assert_eq!(workspace.status().unwrap().agent_memories, 6);
+    assert!(
+        workspace
+            .search("validated delta protocol", 10)
+            .unwrap()
+            .iter()
+            .all(|hit| hit.kind != FileKind::AgentMemory)
+    );
+    let hits = workspace
+        .search_filtered(
+            "validated delta protocol",
+            10,
+            std::slice::from_ref(&project_a),
+            &["agent_memory".to_owned()],
+            None,
+            Some(&project_a.join("src/lib.rs")),
+        )
+        .unwrap();
+    assert_eq!(
+        hits.iter()
+            .filter(|hit| {
+                hit.memory
+                    .as_ref()
+                    .is_some_and(|memory| memory.layer == AgentMemoryLayer::ProjectSummary)
+            })
+            .count(),
+        1,
+        "content-identical project summaries must collapse"
+    );
+    assert_eq!(
+        hits[0].memory.as_ref().unwrap().layer,
+        AgentMemoryLayer::ProjectSummary
+    );
+    assert!(
+        hits.iter()
+            .all(|hit| !Path::new(&hit.path).starts_with(memory_b.as_path()))
+    );
+
+    let session = memory_a.join("session_memory_session-a.jsonl");
+    let inspected = workspace.inspect(&session).unwrap();
+    let metadata = inspected.memory.unwrap();
+    assert_eq!(metadata.agent, "trae");
+    assert_eq!(metadata.layer, AgentMemoryLayer::SessionSummary);
+    assert_eq!(metadata.session_id.as_deref(), Some("session-a"));
+    assert!(inspected.dataset.is_none());
+
+    let sensitive = workspace.inspect(memory_a.join("secret.md")).unwrap();
+    assert_eq!(
+        sensitive.file.extraction_status,
+        "metadata_only_sensitive_content,not_source,memory_parsed"
+    );
+    assert!(sensitive.content.is_none());
+
+    fs::write(
+        &session,
+        r#"{"intent":"inspect append marker","actions":["second pass"],"outcome":"fresh appendix token"}"#,
+    )
+    .unwrap();
+    workspace
+        .index_agent_memory_source(
+            &source(memory_a, "trae", project_a.clone(), false),
+            &IndexOptions::default(),
+        )
+        .unwrap();
+    let refreshed = workspace
+        .search_filtered(
+            "fresh appendix token",
+            10,
+            &[],
+            &["agent_memory".to_owned()],
+            None,
+            Some(&project_a),
+        )
+        .unwrap();
+    assert_eq!(refreshed[0].path, session);
+    assert!(!refreshed[0].preview.contains("message_id"));
+
+    fs::remove_file(&session).unwrap();
+    workspace
+        .index_agent_memory_source(
+            &source(
+                fixture.path().join("memory-a"),
+                "trae",
+                project_a.clone(),
+                false,
+            ),
+            &IndexOptions::default(),
+        )
+        .unwrap();
+    assert!(
+        workspace
+            .search_filtered(
+                "fresh appendix token",
+                10,
+                &[],
+                &["agent_memory".to_owned()],
+                None,
+                Some(&project_a),
+            )
+            .unwrap()
+            .is_empty()
     );
 }
 

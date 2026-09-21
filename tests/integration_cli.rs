@@ -72,12 +72,20 @@ fn installer_indexes_ancestor_instructions_and_allowlisted_skill_manifests() {
     let skill = home.join(".agents/skills/release-check/SKILL.md");
     let parent_skill = home.join("projects/.trae/skills/team-policy/SKILL.md");
     let linked_skill = fixture.path().join("shared/linked-skill/SKILL.md");
+    let encoded_workspace = workspace.to_string_lossy().replace('/', "-");
+    let trae_memory = home
+        .join(".trae-cn/memory/projects")
+        .join(format!("{encoded_workspace}--p2-test"));
+    let gemini_raw = home.join(".gemini/tmp/repository/chats");
     let index = fixture.path().join("index");
     let bin = fixture.path().join("installed");
     fs::create_dir_all(context_file.parent().unwrap()).unwrap();
     fs::create_dir_all(skill.parent().unwrap()).unwrap();
     fs::create_dir_all(parent_skill.parent().unwrap()).unwrap();
     fs::create_dir_all(linked_skill.parent().unwrap()).unwrap();
+    fs::create_dir_all(&trae_memory).unwrap();
+    fs::create_dir_all(home.join(".trae-cn/memory")).unwrap();
+    fs::create_dir_all(&gemini_raw).unwrap();
     let archived_skill = home.join(".agents/skills/.archive/old/SKILL.md");
     fs::create_dir_all(archived_skill.parent().unwrap()).unwrap();
     fs::write(
@@ -111,6 +119,34 @@ fn installer_indexes_ancestor_instructions_and_allowlisted_skill_manifests() {
         "---\nname: archived\ndescription: Must not be indexed.\n---\n",
     )
     .unwrap();
+    fs::write(
+        home.join(".trae-cn/memory/user_profile.md"),
+        "# Profile\nPrefer concise evidence.\n",
+    )
+    .unwrap();
+    fs::write(
+        trae_memory.join("project_memory.md"),
+        "# Memory\nRemember durable release checksum.\n",
+    )
+    .unwrap();
+    fs::write(
+        trae_memory.join("session_memory_session-1.jsonl"),
+        r#"{"intent":"release memory","outcome":"checksum verified"}"#,
+    )
+    .unwrap();
+    fs::write(
+        home.join(".gemini/projects.json"),
+        format!(
+            r#"{{"projects":{{"{}":"repository"}}}}"#,
+            workspace.display()
+        ),
+    )
+    .unwrap();
+    fs::write(
+        gemini_raw.join("session-raw.jsonl"),
+        r#"{"role":"user","content":"must remain opt in"}"#,
+    )
+    .unwrap();
 
     let script = Path::new(env!("CARGO_MANIFEST_DIR")).join("scripts/install.sh");
     let output = Command::new("bash")
@@ -132,6 +168,7 @@ fn installer_indexes_ancestor_instructions_and_allowlisted_skill_manifests() {
         String::from_utf8_lossy(&output.stderr)
     );
     assert!(String::from_utf8_lossy(&output.stdout).contains("Indexing 4 Agent knowledge root(s)"));
+    assert!(String::from_utf8_lossy(&output.stdout).contains("Discovering Agent memory"));
 
     let status = Command::new(bin.join("awi"))
         .args(["--index-dir", index.to_str().unwrap(), "status", "--json"])
@@ -140,6 +177,7 @@ fn installer_indexes_ancestor_instructions_and_allowlisted_skill_manifests() {
     assert!(status.status.success());
     let status: Value = serde_json::from_slice(&status.stdout).unwrap();
     assert_eq!(status["agent_documents"], 4);
+    assert_eq!(status["agent_memories"], 3);
 
     let instructions = Command::new(bin.join("awi"))
         .args(["--index-dir", index.to_str().unwrap(), "search"])
@@ -162,6 +200,28 @@ fn installer_indexes_ancestor_instructions_and_allowlisted_skill_manifests() {
     assert!(skills.status.success());
     let skills: Value = serde_json::from_slice(&skills.stdout).unwrap();
     assert_eq!(skills[0]["agent"]["name"], "release-check");
+
+    let memories = Command::new(bin.join("awi"))
+        .args(["--index-dir", index.to_str().unwrap(), "search"])
+        .arg("release checksum")
+        .args(["--kind", "agent_memory", "--context-path"])
+        .arg(&context_file)
+        .arg("--json")
+        .output()
+        .unwrap();
+    assert!(memories.status.success());
+    let memories: Value = serde_json::from_slice(&memories.stdout).unwrap();
+    assert_eq!(memories[0]["memory"]["agent"], "trae");
+
+    let raw = Command::new(bin.join("awi"))
+        .args(["--index-dir", index.to_str().unwrap(), "search"])
+        .arg("must remain opt in")
+        .args(["--kind", "agent_memory", "--json"])
+        .output()
+        .unwrap();
+    assert!(raw.status.success());
+    let raw: Value = serde_json::from_slice(&raw.stdout).unwrap();
+    assert_eq!(raw.as_array().unwrap().len(), 0);
 }
 
 fn run_integrate(

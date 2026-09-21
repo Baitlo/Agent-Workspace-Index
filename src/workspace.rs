@@ -11,12 +11,14 @@ use crate::catalog::Catalog;
 use crate::data::{DuckDbProfiler, execute_query};
 use crate::extract::{
     classify, contains_sensitive_agent_content, extension, extract_agent_document, extract_symbols,
-    extract_text, is_default_excluded, is_sensitive, mtime_ns, should_extract_text,
+    extract_text, index_preview, is_default_excluded, is_sensitive, mtime_ns,
+    normalize_agent_memory_content, should_extract_text,
 };
+use crate::memory::{discover_agent_memory_sources, memory_metadata};
 use crate::model::{
-    AgentDocumentRole, CatalogFileInput, ContentExcerpt, DatasetProfile, FileKind, IndexOptions,
-    IndexReport, IndexStatus, InspectResult, NotifyReport, QueryRequest, QueryResult,
-    SearchDocument, SearchHit, SymbolRecord,
+    AgentDocumentRole, AgentMemoryIndexReport, AgentMemorySource, CatalogFileInput, ContentExcerpt,
+    DatasetProfile, FileKind, IndexOptions, IndexReport, IndexStatus, InspectResult, NotifyReport,
+    QueryRequest, QueryResult, SearchDocument, SearchHit, SymbolRecord,
 };
 use crate::search::SearchIndex;
 use crate::snapshot::{SnapshotManifest, publish};
@@ -25,11 +27,16 @@ const DEFAULT_INSPECT_LINES: usize = 120;
 const DEFAULT_INSPECT_CHARS: usize = 32 * 1024;
 const APPLICABLE_INSTRUCTION_BOOST: f32 = 1.0;
 const INSTRUCTION_DEPTH_BOOST: f32 = 0.001;
+const EXACT_PROJECT_MEMORY_BOOST: f32 = 0.08;
+const GLOBAL_MEMORY_BOOST: f32 = 0.01;
+const MEMORY_LAYER_BOOST: f32 = 0.004;
+const MAX_MEMORY_RECENCY_BOOST: f32 = 0.005;
 
 pub struct WorkspaceIndex {
     index_dir: PathBuf,
     catalog: Catalog,
     search: SearchIndex,
+    memory_search: SearchIndex,
 }
 
 impl WorkspaceIndex {
@@ -39,10 +46,12 @@ impl WorkspaceIndex {
             .with_context(|| format!("create AWI index directory {}", index_dir.display()))?;
         let catalog = Catalog::open(&index_dir.join("catalog.sqlite3"))?;
         let search = SearchIndex::open(&index_dir.join("tantivy"))?;
+        let memory_search = SearchIndex::open(&index_dir.join("memory-tantivy"))?;
         Ok(Self {
             index_dir: index_dir.to_owned(),
             catalog,
             search,
+            memory_search,
         })
     }
 
@@ -54,16 +63,32 @@ impl WorkspaceIndex {
         let requested_root = root.as_ref();
         let root = match fs::canonicalize(requested_root) {
             Ok(root) => root,
-            Err(error)
-                if matches!(
+            Err(error) => {
+                let absolute = if requested_root.is_absolute() {
+                    requested_root.to_owned()
+                } else {
+                    std::env::current_dir()?.join(requested_root)
+                };
+                let registered_roots = self.catalog.roots()?;
+                let root = if let Some((_, registered)) = registered_roots
+                    .iter()
+                    .find(|(_, registered)| registered == &absolute)
+                {
+                    registered.clone()
+                } else {
+                    notification_path(requested_root)?
+                };
+                let is_registered_memory =
+                    self.catalog.agent_memory_source_for_path(&root)?.is_some();
+                if !matches!(
                     classify(requested_root),
                     FileKind::AgentInstructions | FileKind::AgentSkill
-                ) =>
-            {
-                let root = notification_path(requested_root)?;
-                if !self
-                    .catalog
-                    .roots()?
+                ) && !is_registered_memory
+                {
+                    return Err(error)
+                        .with_context(|| format!("resolve root {}", requested_root.display()));
+                }
+                if !registered_roots
                     .iter()
                     .any(|(_, registered)| registered == &root)
                 {
@@ -73,35 +98,41 @@ impl WorkspaceIndex {
                 let _writer_lock = acquire_writer_lock(&self.index_dir)?;
                 let (root_id, generation) = self.catalog.start_generation(&root)?;
                 let path = root.to_string_lossy().into_owned();
-                let deleted = self.catalog.mark_path_deleted(root_id, &path, generation)?;
-                let deleted_paths = deleted.then_some(path).into_iter().collect::<Vec<_>>();
-                self.search.apply_changes(&[], &deleted_paths)?;
+                let deleted_paths = if is_registered_memory {
+                    self.catalog.mark_missing_deleted(root_id, generation)?
+                } else {
+                    self.catalog
+                        .mark_path_deleted(root_id, &path, generation)?
+                        .then_some(path)
+                        .into_iter()
+                        .collect::<Vec<_>>()
+                };
+                let deleted = deleted_paths.len() as u64;
+                self.apply_search_changes(&[], &deleted_paths)?;
                 self.catalog.complete_generation(root_id, generation)?;
                 return Ok(IndexReport {
                     root,
                     generation,
                     discovered: 0,
                     indexed: 0,
-                    unchanged: u64::from(!deleted),
-                    deleted: u64::from(deleted),
+                    unchanged: u64::from(deleted == 0),
+                    deleted,
                     metadata_only: 0,
                     failed: 0,
                 });
             }
-            Err(error) => {
-                return Err(error)
-                    .with_context(|| format!("resolve root {}", requested_root.display()));
-            }
         };
+        let is_registered_memory = self.catalog.agent_memory_source_for_path(&root)?.is_some();
         if !(root.is_dir()
             || root.is_file()
                 && matches!(
                     classify(&root),
                     FileKind::AgentInstructions | FileKind::AgentSkill
-                ))
+                )
+            || root.is_file() && is_registered_memory)
         {
             anyhow::bail!(
-                "index root must be a directory, AGENTS.md, or SKILL.md: {}",
+                "index root must be a directory, AGENTS.md, SKILL.md, or registered Agent memory: {}",
                 root.display()
             );
         }
@@ -115,6 +146,55 @@ impl WorkspaceIndex {
                 .fail_generation(generation, &format!("{error:#}"));
         }
         result
+    }
+
+    pub fn index_agent_memories(
+        &mut self,
+        project_root: impl AsRef<Path>,
+        include_raw: bool,
+        options: &IndexOptions,
+    ) -> Result<AgentMemoryIndexReport> {
+        let project_root = fs::canonicalize(project_root.as_ref()).with_context(|| {
+            format!(
+                "resolve Agent memory project root {}",
+                project_root.as_ref().display()
+            )
+        })?;
+        let sources = discover_agent_memory_sources(&project_root, include_raw)?;
+        let mut reports = Vec::with_capacity(sources.len());
+        for source in &sources {
+            reports.push(self.index_agent_memory_source(source, options)?);
+        }
+        Ok(AgentMemoryIndexReport {
+            project_root,
+            include_raw,
+            sources,
+            reports,
+        })
+    }
+
+    pub fn index_agent_memory_source(
+        &mut self,
+        source: &AgentMemorySource,
+        options: &IndexOptions,
+    ) -> Result<IndexReport> {
+        let path = fs::canonicalize(&source.path)
+            .with_context(|| format!("resolve Agent memory source {}", source.path.display()))?;
+        let mut source = source.clone();
+        source.path = path;
+        if let Some(workspace_root) = &source.workspace_root {
+            source.workspace_root = Some(fs::canonicalize(workspace_root).with_context(|| {
+                format!(
+                    "resolve Agent memory workspace {}",
+                    workspace_root.display()
+                )
+            })?);
+        }
+        {
+            let _writer_lock = acquire_writer_lock(&self.index_dir)?;
+            self.catalog.upsert_agent_memory_source(&source)?;
+        }
+        self.index_root(&source.path, options)
     }
 
     pub fn notify_paths(
@@ -187,9 +267,11 @@ impl WorkspaceIndex {
         }
         let registered_roots = self.catalog.roots()?;
         let mut root_filter = HashSet::new();
+        let mut search_scopes = Vec::new();
         for root in roots {
             let canonical = fs::canonicalize(root)
                 .with_context(|| format!("resolve search root {}", root.display()))?;
+            search_scopes.push(canonical.clone());
             let mut matched = false;
             for (_, registered) in &registered_roots {
                 if registered == &canonical || registered.starts_with(&canonical) {
@@ -232,9 +314,25 @@ impl WorkspaceIndex {
             || kind_filter
                 .iter()
                 .any(|kind| matches!(kind, FileKind::AgentInstructions | FileKind::AgentSkill));
-        let candidates = self
+        let include_memory = kind_filter.contains(&FileKind::AgentMemory);
+        let mut candidates = self
             .search
             .search(query, overfetch, overfetch, include_agent_lane)?;
+        if include_memory {
+            candidates.extend(
+                self.memory_search
+                    .search(query, overfetch, overfetch, false)?,
+            );
+            candidates.sort_by(|left, right| {
+                right
+                    .score
+                    .total_cmp(&left.score)
+                    .then_with(|| left.path.cmp(&right.path))
+            });
+            let mut seen = HashSet::new();
+            candidates.retain(|candidate| seen.insert(candidate.file_id));
+            candidates.truncate(overfetch);
+        }
         let candidate_ids = candidates
             .iter()
             .map(|candidate| candidate.file_id)
@@ -251,6 +349,12 @@ impl WorkspaceIndex {
             .map(|file| file.id)
             .collect::<Vec<_>>();
         let agents = self.catalog.agent_documents_for(&agent_ids)?;
+        let memory_ids = files
+            .values()
+            .filter(|file| file.kind == FileKind::AgentMemory)
+            .map(|file| file.id)
+            .collect::<Vec<_>>();
+        let memories = self.catalog.agent_memories_for(&memory_ids)?;
         let mut ranked_hits = Vec::with_capacity(limit);
         for candidate in candidates {
             let Some(file) = files.get(&candidate.file_id).cloned() else {
@@ -258,10 +362,12 @@ impl WorkspaceIndex {
             };
             if file.generation != candidate.generation
                 || (!kind_filter.is_empty() && !kind_filter.contains(&file.kind))
+                || (file.kind == FileKind::AgentMemory && !include_memory)
             {
                 continue;
             }
             let agent = agents.get(&file.id).cloned();
+            let memory = memories.get(&file.id).cloned();
             let applicable_instruction = context_path.as_ref().is_some_and(|context| {
                 agent.as_ref().is_some_and(|metadata| {
                     metadata.role == AgentDocumentRole::Instructions
@@ -275,8 +381,26 @@ impl WorkspaceIndex {
             {
                 continue;
             }
+            let applicable_memory = memory.as_ref().is_some_and(|metadata| {
+                metadata.workspace_root.as_ref().is_none_or(|workspace| {
+                    context_path
+                        .as_ref()
+                        .is_none_or(|context| context.starts_with(workspace))
+                        && (search_scopes.is_empty()
+                            || search_scopes.iter().any(|scope| {
+                                workspace.starts_with(scope) || scope.starts_with(workspace)
+                            }))
+                })
+            });
+            if memory.is_some()
+                && (!search_scopes.is_empty() || context_path.is_some())
+                && !applicable_memory
+            {
+                continue;
+            }
             if (!root_filter.is_empty() && !root_filter.contains(&file.root))
                 && !applicable_instruction
+                && !applicable_memory
             {
                 continue;
             }
@@ -293,6 +417,15 @@ impl WorkspaceIndex {
                     .map_or(0, |metadata| metadata.precedence_depth);
                 score += APPLICABLE_INSTRUCTION_BOOST + depth as f32 * INSTRUCTION_DEPTH_BOOST;
             }
+            if let Some(metadata) = &memory {
+                score += if metadata.workspace_root.is_some() && applicable_memory {
+                    EXACT_PROJECT_MEMORY_BOOST
+                } else {
+                    GLOBAL_MEMORY_BOOST
+                };
+                score += f32::from(metadata.layer.summary_priority()) * MEMORY_LAYER_BOOST;
+                score += memory_recency_boost(metadata.observed_at_ms);
+            }
             let content_hash = file.content_hash.clone();
             ranked_hits.push((
                 SearchHit {
@@ -308,6 +441,7 @@ impl WorkspaceIndex {
                     matched_lanes: candidate.lanes,
                     preview: candidate.preview,
                     agent,
+                    memory,
                 },
                 content_hash,
             ));
@@ -319,13 +453,19 @@ impl WorkspaceIndex {
                 .then_with(|| left.path.cmp(&right.path))
         });
         let mut agent_hashes = HashSet::new();
+        let mut memory_hashes = HashSet::new();
         ranked_hits.retain(|(hit, content_hash)| {
-            let Some(agent) = &hit.agent else {
-                return true;
-            };
-            content_hash.as_ref().is_none_or(|hash| {
-                agent_hashes.insert((agent.role.as_str().to_owned(), hash.clone()))
-            })
+            if let Some(agent) = &hit.agent {
+                return content_hash.as_ref().is_none_or(|hash| {
+                    agent_hashes.insert((agent.role.as_str().to_owned(), hash.clone()))
+                });
+            }
+            if hit.memory.is_some() {
+                return content_hash
+                    .as_ref()
+                    .is_none_or(|hash| memory_hashes.insert(hash.clone()));
+            }
+            true
         });
         Ok(ranked_hits
             .into_iter()
@@ -360,12 +500,14 @@ impl WorkspaceIndex {
         let symbols = self.catalog.symbols_for(file.id)?;
         let dataset = self.catalog.dataset_profile_for(file.id)?;
         let agent = self.catalog.agent_document_for(file.id)?;
+        let memory = self.catalog.agent_memory_for(file.id)?;
         let content = content_excerpt(&path, &file, start_line, max_lines, max_chars)?;
         Ok(InspectResult {
             file,
             symbols,
             dataset,
             agent,
+            memory,
             content,
         })
     }
@@ -422,6 +564,27 @@ impl WorkspaceIndex {
             .latest_completed_generation()?
             .context("cannot publish an index without a completed generation")?;
         publish(&self.index_dir, publish_dir.as_ref(), generation)
+    }
+
+    fn apply_search_changes(
+        &self,
+        documents: &[SearchDocument],
+        deleted_paths: &[String],
+    ) -> Result<()> {
+        let (memory, regular): (Vec<_>, Vec<_>) = documents
+            .iter()
+            .cloned()
+            .partition(|document| document.kind == FileKind::AgentMemory.as_str());
+        let mut regular_deleted = deleted_paths.to_vec();
+        regular_deleted.extend(memory.iter().map(|document| document.path.clone()));
+        regular_deleted.sort();
+        regular_deleted.dedup();
+        let mut memory_deleted = deleted_paths.to_vec();
+        memory_deleted.extend(regular.iter().map(|document| document.path.clone()));
+        memory_deleted.sort();
+        memory_deleted.dedup();
+        self.search.apply_changes(&regular, &regular_deleted)?;
+        self.memory_search.apply_changes(&memory, &memory_deleted)
     }
 
     fn index_root_inner(
@@ -498,7 +661,7 @@ impl WorkspaceIndex {
 
         let deleted_paths = self.catalog.mark_missing_deleted(root_id, generation)?;
         report.deleted = deleted_paths.len() as u64;
-        self.search.apply_changes(&documents, &deleted_paths)?;
+        self.apply_search_changes(&documents, &deleted_paths)?;
         self.catalog.complete_generation(root_id, generation)?;
         Ok(report)
     }
@@ -607,7 +770,7 @@ impl WorkspaceIndex {
             }
         }
 
-        self.search.apply_changes(&documents, &deleted_paths)?;
+        self.apply_search_changes(&documents, &deleted_paths)?;
         self.catalog.complete_generation(root_id, generation)?;
         Ok(report)
     }
@@ -628,7 +791,12 @@ impl WorkspaceIndex {
             fs::metadata(path).with_context(|| format!("read metadata for {}", path.display()))?;
         let size_bytes = metadata.len();
         let mtime_ns = mtime_ns(&metadata);
-        let kind = classify(path);
+        let memory_source = self.catalog.agent_memory_source_for_path(path)?;
+        let kind = if memory_source.is_some() {
+            FileKind::AgentMemory
+        } else {
+            classify(path)
+        };
         let absolute_path = path.to_string_lossy().into_owned();
         let relative_path = if root.is_file() {
             path.file_name()
@@ -669,16 +837,31 @@ impl WorkspaceIndex {
                 status: "metadata_only".to_owned(),
             }
         };
-        if matches!(kind, FileKind::AgentInstructions | FileKind::AgentSkill)
-            && text
-                .content
-                .as_deref()
-                .is_some_and(contains_sensitive_agent_content)
+        if matches!(
+            kind,
+            FileKind::AgentInstructions | FileKind::AgentSkill | FileKind::AgentMemory
+        ) && text
+            .content
+            .as_deref()
+            .is_some_and(contains_sensitive_agent_content)
         {
             text.content = None;
             text.content_hash = None;
             text.preview.clear();
             text.status = "metadata_only_sensitive_content".to_owned();
+        }
+        if kind == FileKind::AgentMemory
+            && let Some(content) = text.content.take()
+        {
+            let normalized = normalize_agent_memory_content(
+                path,
+                &content,
+                memory_source
+                    .as_ref()
+                    .is_some_and(|source| source.raw_history),
+            );
+            text.preview = index_preview(&normalized);
+            text.content = Some(normalized);
         }
 
         if existing.as_ref().is_some_and(|state| {
@@ -713,9 +896,20 @@ impl WorkspaceIndex {
         } else {
             (None, None)
         };
-        let profile = profiler.profile(path, size_bytes);
-        let extraction_status =
-            combined_status(&text.status, &code_status, profile.as_ref(), agent_status);
+        let memory = memory_source
+            .as_ref()
+            .map(|source| memory_metadata(source, path, text.content.as_deref(), mtime_ns));
+        let memory_status = memory.as_ref().map(|_| "memory_parsed");
+        let profile = (kind != FileKind::AgentMemory)
+            .then(|| profiler.profile(path, size_bytes))
+            .flatten();
+        let extraction_status = combined_status(
+            &text.status,
+            &code_status,
+            profile.as_ref(),
+            agent_status,
+            memory_status,
+        );
         let input = CatalogFileInput {
             root_id,
             absolute_path: absolute_path.clone(),
@@ -737,6 +931,8 @@ impl WorkspaceIndex {
             .replace_dataset_profile(file_id, profile.as_ref())?;
         self.catalog
             .replace_agent_document(file_id, agent.as_ref())?;
+        self.catalog
+            .replace_agent_memory(file_id, memory.as_ref())?;
 
         let mut symbols_text = symbols
             .iter()
@@ -753,6 +949,12 @@ impl WorkspaceIndex {
                 symbols_text.push(' ');
             }
             symbols_text.push_str(&agent.search_text());
+        }
+        if let Some(memory) = &memory {
+            if !symbols_text.is_empty() {
+                symbols_text.push(' ');
+            }
+            symbols_text.push_str(&memory.search_text());
         }
         let schema = profile
             .as_ref()
@@ -904,6 +1106,7 @@ fn combined_status(
     code_status: &str,
     profile: Option<&DatasetProfile>,
     agent_status: Option<&str>,
+    memory_status: Option<&str>,
 ) -> String {
     let mut parts = vec![text_status, code_status];
     if let Some(profile) = profile {
@@ -912,5 +1115,20 @@ fn combined_status(
     if let Some(agent_status) = agent_status {
         parts.push(agent_status);
     }
+    if let Some(memory_status) = memory_status {
+        parts.push(memory_status);
+    }
     parts.join(",")
+}
+
+fn memory_recency_boost(observed_at_ms: i64) -> f32 {
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    let now_ms = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .ok()
+        .and_then(|duration| i64::try_from(duration.as_millis()).ok())
+        .unwrap_or(observed_at_ms);
+    let age_days = now_ms.saturating_sub(observed_at_ms).max(0) as f32 / 86_400_000.0;
+    MAX_MEMORY_RECENCY_BOOST / (1.0 + age_days / 30.0)
 }

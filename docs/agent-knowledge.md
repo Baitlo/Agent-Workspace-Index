@@ -3,6 +3,9 @@
 AWI indexes Agent operating instructions alongside source code and data without
 adding another MCP tool.
 
+Cross-Agent project history is handled separately as `agent_memory`; see
+[Cross-Agent memory indexing](agent-memory.md).
+
 ## Document Types
 
 | File | AWI kind | Structured metadata |

@@ -75,6 +75,10 @@ pub(crate) fn publish(
             &staging.join("catalog.sqlite3"),
         )?;
         copy_tree(&index_dir.join("tantivy"), &staging.join("tantivy"))?;
+        copy_tree(
+            &index_dir.join("memory-tantivy"),
+            &staging.join("memory-tantivy"),
+        )?;
         let files = snapshot_files(&staging)?;
         let manifest = SnapshotManifest {
             format_version: SNAPSHOT_FORMAT_VERSION,
@@ -439,17 +443,23 @@ mod tests {
         let publish_dir = fixture.path().join("publish");
         let cache = fixture.path().join("cache");
         fs::create_dir_all(index.join("tantivy")).unwrap();
+        fs::create_dir_all(index.join("memory-tantivy")).unwrap();
         fs::write(index.join("catalog.sqlite3"), b"catalog").unwrap();
         fs::write(index.join("tantivy/meta.json"), b"index").unwrap();
+        fs::write(index.join("memory-tantivy/meta.json"), b"memory").unwrap();
 
         let manifest = publish(&index, &publish_dir, 7).unwrap();
         assert_eq!(manifest.generation, 7);
-        assert_eq!(manifest.files.len(), 2);
+        assert_eq!(manifest.files.len(), 3);
         let activated = materialize_latest(&publish_dir, &cache).unwrap();
         assert_eq!(activated.generation, 7);
         assert_eq!(
             fs::read(activated.path.join("catalog.sqlite3")).unwrap(),
             b"catalog"
+        );
+        assert_eq!(
+            fs::read(activated.path.join("memory-tantivy/meta.json")).unwrap(),
+            b"memory"
         );
     }
 
@@ -459,8 +469,10 @@ mod tests {
         let index = fixture.path().join("index");
         let publish_dir = fixture.path().join("publish");
         fs::create_dir_all(index.join("tantivy")).unwrap();
+        fs::create_dir_all(index.join("memory-tantivy")).unwrap();
         fs::write(index.join("catalog.sqlite3"), b"catalog").unwrap();
         fs::write(index.join("tantivy/meta.json"), b"index").unwrap();
+        fs::write(index.join("memory-tantivy/meta.json"), b"memory").unwrap();
 
         for generation in 1..=4 {
             publish(&index, &publish_dir, generation).unwrap();

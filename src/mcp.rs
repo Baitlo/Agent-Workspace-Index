@@ -50,6 +50,7 @@ pub struct WorkspaceSearchRequest {
     pub roots: Option<Vec<PathBuf>>,
     /// Optional file kinds. Use source for code; text for SQL/Markdown/logs;
     /// agent_instructions for AGENTS.md; agent_skill for SKILL.md;
+    /// agent_memory for project-scoped cross-Agent memory;
     /// semi_structured for .json; tabular for .csv/.tsv/.jsonl/.ndjson/.parquet.
     /// Omit this filter when the file kind is uncertain.
     pub kinds: Option<Vec<String>>,
@@ -502,13 +503,14 @@ impl ServerHandler for AwiMcpServer {
                 Implementation::new("awi", env!("CARGO_PKG_VERSION"))
                     .with_title("AWI: Agent Workspace Index")
                     .with_description(
-                        "Hybrid retrieval over indexed workspace code, data, and Agent knowledge",
+                        "Hybrid retrieval over indexed workspace code, data, Agent knowledge, and memory",
                     ),
             )
             .with_instructions(
-                "For any code, symbol, document, Agent instruction, skill, or dataset lookup inside \
+                "For any code, symbol, document, Agent instruction, skill, memory, or dataset lookup inside \
                  an indexed workspace, use workspace_search first, before shell grep or file \
-                 walking. Pass context_path when resolving applicable AGENTS.md instructions. \
+                 walking. Pass context_path when resolving applicable AGENTS.md instructions or \
+                 project-scoped Agent memory. \
                  Non-empty previews are direct excerpts from the indexed generation and are \
                  sufficient evidence when they contain the required facts. Once an authoritative \
                  path is selected, do not repeat discovery searches. Use one workspace_inspect \

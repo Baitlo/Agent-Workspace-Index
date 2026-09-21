@@ -269,6 +269,9 @@ fn start_watcher(local_roots: &[PathBuf]) -> Result<(Receiver<()>, Option<Recomm
         } else {
             (root.parent().unwrap_or(root).to_owned(), false)
         };
+        if !target.exists() {
+            continue;
+        }
         targets
             .entry(target)
             .and_modify(|value| *value |= recursive)
@@ -440,6 +443,13 @@ mod tests {
         }
         assert!(!is_deferred_realtime_path(Path::new("src/main.rs")));
         assert!(!is_deferred_realtime_path(Path::new("docs/plan.md")));
+    }
+
+    #[test]
+    fn watcher_skips_missing_registered_roots() {
+        let missing = PathBuf::from("/tmp/awi-missing-root-parent/SKILL.md");
+        let result = start_watcher(&[missing]);
+        assert!(result.is_ok());
     }
 
     #[test]
