@@ -5,7 +5,7 @@ use std::thread;
 use std::time::{Duration, Instant};
 
 use anyhow::{Context, Result};
-use notify::{EventKind, RecommendedWatcher, RecursiveMode, Watcher};
+use notify::{EventKind, RecommendedWatcher, RecursiveMode, Watcher, event::ModifyKind};
 use serde::Serialize;
 
 use crate::WorkspaceIndex;
@@ -241,11 +241,7 @@ fn start_watcher(local_roots: &[PathBuf]) -> Result<(Receiver<()>, Option<Recomm
         // roots; reacting to those would self-trigger an endless reconcile loop.
         // Also drop events confined to excluded paths (VCS/cache/build churn).
         if let Ok(event) = result {
-            let content_change = matches!(
-                event.kind,
-                EventKind::Create(_) | EventKind::Modify(_) | EventKind::Remove(_)
-            );
-            if !content_change {
+            if !is_content_change(&event.kind) {
                 return;
             }
             let relevant =
@@ -262,6 +258,17 @@ fn start_watcher(local_roots: &[PathBuf]) -> Result<(Receiver<()>, Option<Recomm
             .with_context(|| format!("watch root {}", root.display()))?;
     }
     Ok((receiver, Some(watcher)))
+}
+
+fn is_content_change(kind: &EventKind) -> bool {
+    matches!(
+        kind,
+        EventKind::Create(_)
+            | EventKind::Remove(_)
+            | EventKind::Modify(
+                ModifyKind::Any | ModifyKind::Data(_) | ModifyKind::Name(_) | ModifyKind::Other
+            )
+    )
 }
 
 /// After the first event, keep absorbing events until the filesystem stays
@@ -359,7 +366,29 @@ fn unescape_mount(value: &str) -> String {
 
 #[cfg(test)]
 mod tests {
+    use notify::event::{AccessKind, DataChange, MetadataKind};
+
     use super::*;
+
+    #[test]
+    fn watcher_accepts_content_changes_but_ignores_reads_and_metadata() {
+        assert!(is_content_change(&EventKind::Create(
+            notify::event::CreateKind::File
+        )));
+        assert!(is_content_change(&EventKind::Modify(ModifyKind::Data(
+            DataChange::Content
+        ))));
+        assert!(is_content_change(&EventKind::Modify(ModifyKind::Name(
+            notify::event::RenameMode::Any
+        ))));
+        assert!(is_content_change(&EventKind::Remove(
+            notify::event::RemoveKind::File
+        )));
+        assert!(!is_content_change(&EventKind::Access(AccessKind::Any)));
+        assert!(!is_content_change(&EventKind::Modify(
+            ModifyKind::Metadata(MetadataKind::AccessTime)
+        )));
+    }
 
     #[test]
     fn classifies_remote_and_local_mounts_by_longest_prefix() {

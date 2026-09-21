@@ -120,10 +120,11 @@ no stable external stdio MCP registration surface. Gemini workspaces marked
 untrusted are reported as `needs_attention` because Gemini suppresses all MCP
 servers until the user explicitly trusts the workspace.
 
-By default, AWI uses an executable `awi-mcp` next to the current `awi` binary
-when present; otherwise it registers the current binary as
-`awi --index-dir <absolute-path> mcp`. Production deployments can override this
-with `--server-command` and repeated `--server-arg` options.
+By default, AWI registers the current binary as
+`awi --index-dir <absolute-path> mcp`, which is self-contained for a local
+mutable index. Snapshot-based production deployments must explicitly select
+their wrapper with `--server-command`; repeated `--server-arg` options are
+available for custom launchers.
 
 ## Safety
 

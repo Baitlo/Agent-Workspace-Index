@@ -134,17 +134,6 @@ pub fn default_server_spec(
     }
 
     let current_exe = env::current_exe().context("locate current AWI executable")?;
-    let sibling_wrapper = current_exe
-        .parent()
-        .context("AWI executable has no parent directory")?
-        .join("awi-mcp");
-    if is_executable(&sibling_wrapper) {
-        return Ok(McpServerSpec {
-            command: sibling_wrapper,
-            args: explicit_args.to_vec(),
-        });
-    }
-
     let index_dir = absolute_path(index_dir)?;
     let mut args = if explicit_args.is_empty() {
         vec![
@@ -806,5 +795,33 @@ mod tests {
             fs::metadata(&path).unwrap().permissions().mode() & 0o777,
             0o600
         );
+    }
+
+    #[test]
+    fn default_server_uses_current_binary_and_absolute_index() {
+        let fixture = tempdir().unwrap();
+        let index = fixture.path().join("index");
+        let server = default_server_spec(&index, None, &[]).unwrap();
+        assert_eq!(server.command, env::current_exe().unwrap());
+        assert_eq!(
+            server.args,
+            vec![
+                "--index-dir".to_owned(),
+                index.to_string_lossy().into_owned(),
+                "mcp".to_owned()
+            ]
+        );
+    }
+
+    #[test]
+    fn explicit_server_command_keeps_only_explicit_arguments() {
+        let server = default_server_spec(
+            Path::new("ignored"),
+            Some(Path::new("/bin/sh")),
+            &["wrapper.sh".to_owned()],
+        )
+        .unwrap();
+        assert_eq!(server.command, PathBuf::from("/bin/sh"));
+        assert_eq!(server.args, vec!["wrapper.sh"]);
     }
 }

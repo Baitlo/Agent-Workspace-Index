@@ -222,8 +222,8 @@ enum Command {
         #[arg(long = "client", value_delimiter = ',')]
         clients: Vec<String>,
 
-        /// Override the MCP server command. Defaults to a sibling awi-mcp wrapper
-        /// when present, otherwise this AWI executable.
+        /// Override the MCP server command. Defaults to this AWI executable with
+        /// the absolute --index-dir and mcp arguments.
         #[arg(long)]
         server_command: Option<PathBuf>,
 
