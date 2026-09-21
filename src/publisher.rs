@@ -1,8 +1,8 @@
-use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::mpsc::{Receiver, RecvTimeoutError, channel};
 use std::thread;
 use std::time::{Duration, Instant};
+use std::{env, fs};
 
 use anyhow::{Context, Result};
 use notify::{EventKind, RecommendedWatcher, RecursiveMode, Watcher, event::ModifyKind};
@@ -241,11 +241,20 @@ fn start_watcher(local_roots: &[PathBuf]) -> Result<(Receiver<()>, Option<Recomm
         // roots; reacting to those would self-trigger an endless reconcile loop.
         // Also drop events confined to excluded paths (VCS/cache/build churn).
         if let Ok(event) = result {
+            if env::var_os("AWI_WATCH_DEBUG").is_some() {
+                eprintln!(
+                    "AWI watcher event kind={:?} paths={:?}",
+                    event.kind, event.paths
+                );
+            }
             if !is_content_change(&event.kind) {
                 return;
             }
-            let relevant =
-                event.paths.is_empty() || event.paths.iter().any(|path| !is_default_excluded(path));
+            let relevant = event.paths.is_empty()
+                || event
+                    .paths
+                    .iter()
+                    .any(|path| !is_default_excluded(path) && !is_deferred_realtime_path(path));
             if relevant {
                 let _ = sender.send(());
             }
@@ -265,9 +274,14 @@ fn is_content_change(kind: &EventKind) -> bool {
         kind,
         EventKind::Create(_)
             | EventKind::Remove(_)
-            | EventKind::Modify(
-                ModifyKind::Any | ModifyKind::Data(_) | ModifyKind::Name(_) | ModifyKind::Other
-            )
+            | EventKind::Modify(ModifyKind::Data(_) | ModifyKind::Name(_))
+    )
+}
+
+fn is_deferred_realtime_path(path: &Path) -> bool {
+    matches!(
+        path.extension().and_then(|extension| extension.to_str()),
+        Some("log" | "jsonl" | "ndjson" | "csv" | "tsv" | "parquet")
     )
 }
 
@@ -385,9 +399,27 @@ mod tests {
             notify::event::RemoveKind::File
         )));
         assert!(!is_content_change(&EventKind::Access(AccessKind::Any)));
+        assert!(!is_content_change(&EventKind::Modify(ModifyKind::Any)));
+        assert!(!is_content_change(&EventKind::Modify(ModifyKind::Other)));
         assert!(!is_content_change(&EventKind::Modify(
             ModifyKind::Metadata(MetadataKind::AccessTime)
         )));
+    }
+
+    #[test]
+    fn realtime_watch_defers_append_heavy_data_files() {
+        for path in [
+            "run.log",
+            "events.jsonl",
+            "events.ndjson",
+            "rows.csv",
+            "rows.tsv",
+            "part.parquet",
+        ] {
+            assert!(is_deferred_realtime_path(Path::new(path)));
+        }
+        assert!(!is_deferred_realtime_path(Path::new("src/main.rs")));
+        assert!(!is_deferred_realtime_path(Path::new("docs/plan.md")));
     }
 
     #[test]

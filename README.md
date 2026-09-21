@@ -69,7 +69,10 @@ Local-disk roots are watched in real time (inotify), so edits publish within the
 debounce window. Remote roots (NFS and similar, detected via `/proc/mounts`) and
 a periodic safety-net tick every `--interval-ms` drive the rest, because
 filesystem events are not reliable for remote writes. If the watcher cannot
-start, the producer degrades cleanly to pure periodic reconcile.
+start, the producer degrades cleanly to pure periodic reconcile. Access and
+metadata-only events are ignored to prevent self-triggered scans; append-heavy
+`.log`, `.jsonl`, `.ndjson`, `.csv`, `.tsv`, and `.parquet` updates are deferred
+to the periodic pass instead of rebuilding a snapshot for every write.
 
 ```bash
 # Producer: watch local roots live, reconcile every root at most every 5s,

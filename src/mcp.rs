@@ -43,7 +43,7 @@ pub struct WorkspaceSearchRequest {
     #[schemars(length(min = 1, max = 4_096))]
     pub query: String,
     /// Maximum number of ranked results. Defaults to 10 and cannot exceed 50.
-    #[schemars(range(min = 1, max = 50))]
+    #[schemars(schema_with = "optional_integer_schema", range(min = 1, max = 50))]
     pub limit: Option<usize>,
     /// Optional search scopes. A registered root or an existing parent directory
     /// containing one or more registered roots is accepted.
@@ -61,16 +61,16 @@ pub struct WorkspaceInspectRequest {
     /// Absolute or current-workspace-relative path already present in the index.
     pub path: PathBuf,
     /// Maximum number of symbols to return. Defaults to 200 and cannot exceed 1000.
-    #[schemars(range(min = 1, max = 1_000))]
+    #[schemars(schema_with = "optional_integer_schema", range(min = 1, max = 1_000))]
     pub max_symbols: Option<usize>,
     /// First one-based source line to return. Defaults to 1.
-    #[schemars(range(min = 1))]
+    #[schemars(schema_with = "optional_integer_schema", range(min = 1))]
     pub start_line: Option<usize>,
     /// Maximum source lines to return. Defaults to 120 and cannot exceed 500.
-    #[schemars(range(min = 1, max = 500))]
+    #[schemars(schema_with = "optional_integer_schema", range(min = 1, max = 500))]
     pub max_lines: Option<usize>,
     /// Maximum source characters to return. Defaults to 32768 and cannot exceed 65536.
-    #[schemars(range(min = 1, max = 65_536))]
+    #[schemars(schema_with = "optional_integer_schema", range(min = 1, max = 65_536))]
     pub max_chars: Option<usize>,
 }
 
@@ -92,14 +92,23 @@ pub struct WorkspaceQueryRequest {
     /// Explicit input files exposed as SQL relations.
     pub inputs: Vec<WorkspaceQueryInput>,
     /// Maximum returned rows. Defaults to 100 and cannot exceed 1000.
-    #[schemars(range(min = 1, max = 1_000))]
+    #[schemars(schema_with = "optional_integer_schema", range(min = 1, max = 1_000))]
     pub max_rows: Option<usize>,
     /// Maximum serialized result bytes. Defaults to 1 MiB and cannot exceed 2 MiB.
-    #[schemars(range(min = 1_024, max = 2_097_152))]
+    #[schemars(
+        schema_with = "optional_integer_schema",
+        range(min = 1_024, max = 2_097_152)
+    )]
     pub max_bytes: Option<usize>,
     /// Query timeout in milliseconds. Defaults to 10 seconds and cannot exceed 30 seconds.
-    #[schemars(range(min = 1, max = 30_000))]
+    #[schemars(schema_with = "optional_integer_schema", range(min = 1, max = 30_000))]
     pub timeout_ms: Option<u64>,
+}
+
+fn optional_integer_schema(_: &mut schemars::SchemaGenerator) -> schemars::Schema {
+    schemars::json_schema!({
+        "type": ["integer", "null"]
+    })
 }
 
 #[derive(Debug, Clone)]
@@ -627,5 +636,20 @@ mod tests {
             result.structured_content.unwrap()["error"]["code"],
             "response_too_large"
         );
+    }
+
+    #[test]
+    fn numeric_tool_parameters_use_portable_integer_schemas() {
+        for schema in [
+            schemars::schema_for!(WorkspaceSearchRequest),
+            schemars::schema_for!(WorkspaceInspectRequest),
+            schemars::schema_for!(WorkspaceQueryRequest),
+        ] {
+            let encoded = serde_json::to_value(schema).unwrap();
+            assert!(
+                !encoded.to_string().contains("\"format\":\"uint"),
+                "MCP schema must not expose Rust-specific unsigned integer formats"
+            );
+        }
     }
 }
