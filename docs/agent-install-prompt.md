@@ -5,7 +5,7 @@ repository that you want AWI to index:
 
 ```text
 Install Agent Workspace Index (AWI) for this repository from
-https://github.com/Baitlo/Agent-Workerspace-Index.
+https://github.com/Baitlo/Agent-Workspace-Index.
 
 1. Resolve the current repository root and keep it as the target workspace.
 2. Clone or fast-forward the AWI source into
