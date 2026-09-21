@@ -3,6 +3,7 @@ mod catalog;
 pub mod daemon;
 mod data;
 mod extract;
+pub mod integration;
 pub mod mcp;
 mod mcp_audit;
 mod model;
@@ -12,6 +13,10 @@ mod search;
 pub mod snapshot;
 mod workspace;
 
+pub use integration::{
+    ClientIntegration, IntegrationClient, IntegrationOptions, IntegrationReport, IntegrationStatus,
+    McpServerSpec, default_server_spec, integrate, render_human,
+};
 pub use model::{
     ContentExcerpt, DatasetColumn, DatasetProfile, FileKind, FileRecord, IndexOptions, IndexReport,
     IndexStatus, InspectResult, NotifyReport, QueryColumn, QueryInput, QueryRequest, QueryResult,

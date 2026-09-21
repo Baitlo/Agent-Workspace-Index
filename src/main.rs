@@ -6,8 +6,10 @@ use awi::benchmark::{evaluate as evaluate_retrieval, load_gold};
 use awi::daemon::{default_socket_path, serve_with_snapshots, try_request};
 use awi::protocol::Request;
 use awi::{
-    IndexOptions, IndexReport, IndexStatus, InspectResult, NotifyReport, PublisherConfig,
-    QueryInput, QueryRequest, QueryResult, SearchHit, WorkspaceIndex, watch as watch_publisher,
+    IndexOptions, IndexReport, IndexStatus, InspectResult, IntegrationClient, IntegrationOptions,
+    NotifyReport, PublisherConfig, QueryInput, QueryRequest, QueryResult, SearchHit,
+    WorkspaceIndex, default_server_spec, integrate as integrate_clients, render_human,
+    watch as watch_publisher,
 };
 use clap::{Parser, Subcommand};
 use serde::Serialize;
@@ -209,6 +211,34 @@ enum Command {
 
     /// Stop the AWI daemon cleanly.
     Stop {
+        #[arg(long)]
+        json: bool,
+    },
+
+    /// Register AWI as an MCP server across supported Agent clients.
+    Integrate {
+        /// Client(s) to configure: all, codex, gemini, claude, trae, zcode, kimi.
+        /// Defaults to all detected clients.
+        #[arg(long = "client", value_delimiter = ',')]
+        clients: Vec<String>,
+
+        /// Override the MCP server command. Defaults to a sibling awi-mcp wrapper
+        /// when present, otherwise this AWI executable.
+        #[arg(long)]
+        server_command: Option<PathBuf>,
+
+        /// Argument passed to the overridden MCP server command. Repeat as needed.
+        #[arg(long = "server-arg", allow_hyphen_values = true)]
+        server_args: Vec<String>,
+
+        /// Project root used for TraeCode's .trae/mcp.json.
+        #[arg(long, default_value = ".")]
+        project_root: PathBuf,
+
+        /// Report intended changes without modifying client configuration.
+        #[arg(long)]
+        dry_run: bool,
+
         #[arg(long)]
         json: bool,
     },
@@ -549,6 +579,40 @@ fn main() -> Result<()> {
                 print_json(&response)?;
             } else {
                 println!("AWI daemon stopped");
+            }
+        }
+        Command::Integrate {
+            clients,
+            server_command,
+            server_args,
+            project_root,
+            dry_run,
+            json,
+        } => {
+            let clients = clients
+                .iter()
+                .map(|client| client.parse::<IntegrationClient>())
+                .collect::<Result<Vec<_>>>()?;
+            let server =
+                default_server_spec(&cli.index_dir, server_command.as_deref(), &server_args)?;
+            let project_root = if project_root.is_absolute() {
+                project_root
+            } else {
+                std::env::current_dir()?.join(project_root)
+            };
+            let report = integrate_clients(&IntegrationOptions {
+                clients,
+                server,
+                project_root,
+                dry_run,
+            })?;
+            if json {
+                print_json(&report)?;
+            } else {
+                println!("{}", render_human(&report));
+            }
+            if report.has_failures() {
+                anyhow::bail!("one or more MCP client integrations failed");
             }
         }
         Command::Mcp { audit_log } => {

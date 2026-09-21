@@ -93,6 +93,38 @@ snapshot daemon before launching the stdio adapter. Configure
 `AWI_SNAPSHOT_SOURCE` and `AWI_MCP_AUDIT_LOG`, then register the wrapper as a
 global MCP server.
 
+### One-command Agent Integration
+
+`awi integrate` detects installed Agent clients and registers AWI with every
+supported MCP host in one pass:
+
+```bash
+# Preview without modifying configuration.
+awi integrate --project-root /path/to/workspace --dry-run --json
+
+# Configure every detected supported client.
+awi integrate --project-root /path/to/workspace
+
+# Restrict the operation to selected clients.
+awi integrate --client codex,gemini,trae --project-root /path/to/workspace
+```
+
+The command is idempotent and reports one status per client:
+`configured`, `already_configured`, `would_configure`, `needs_attention`,
+`not_installed`, `unsupported`, or `failed`. It currently uses the official MCP
+CLI for Codex, Gemini, and Claude Code. For TraeCode, it atomically merges
+`<project>/.trae/mcp.json`, which is shared by TraeCode IDE and TraeCode CLI;
+project-level MCP must be enabled once in TraeCode settings. Zcode and Kimi Code
+are detected but reported as unsupported when their installed version exposes
+no stable external stdio MCP registration surface. Gemini workspaces marked
+untrusted are reported as `needs_attention` because Gemini suppresses all MCP
+servers until the user explicitly trusts the workspace.
+
+By default, AWI uses an executable `awi-mcp` next to the current `awi` binary
+when present; otherwise it registers the current binary as
+`awi --index-dir <absolute-path> mcp`. Production deployments can override this
+with `--server-command` and repeated `--server-arg` options.
+
 ## Safety
 
 `workspace_query` accepts only one read-only `SELECT` or `WITH` statement over
