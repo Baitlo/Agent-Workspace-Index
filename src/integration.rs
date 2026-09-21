@@ -164,19 +164,8 @@ pub fn integrate(options: &IntegrationOptions) -> Result<IntegrationReport> {
             IntegrationClient::Trae => {
                 integrate_trae(&options.project_root, &options.server, options.dry_run)
             }
-            IntegrationClient::Zcode => unsupported_client(
-                client,
-                is_installed(&["zcode"], &[home_path(".zcode")]),
-                "this Zcode installation has no stable user-level external MCP registration API",
-            ),
-            IntegrationClient::Kimi => unsupported_client(
-                client,
-                is_installed(
-                    &["kimi", "kimi-code"],
-                    &[home_path(".kimi-code/bin/kimi"), home_path(".kimi-code")],
-                ),
-                "the installed Kimi Code CLI exposes ACP and built-in services but no MCP client",
-            ),
+            IntegrationClient::Zcode => integrate_zcode(&options.server, options.dry_run),
+            IntegrationClient::Kimi => integrate_kimi(&options.server, options.dry_run),
             IntegrationClient::All => unreachable!("all is expanded before integration"),
         };
         results.push(result);
@@ -493,16 +482,148 @@ fn integrate_trae(project_root: &Path, server: &McpServerSpec, dry_run: bool) ->
     )
 }
 
-fn unsupported_client(
-    client: IntegrationClient,
-    installed: bool,
-    detail: &str,
-) -> ClientIntegration {
-    if installed {
-        success(client, IntegrationStatus::Unsupported, detail, None)
-    } else {
-        not_installed(client)
+fn integrate_zcode(server: &McpServerSpec, dry_run: bool) -> ClientIntegration {
+    let client = IntegrationClient::Zcode;
+    if !is_installed(&["zcode"], &[home_path(".zcode")]) {
+        return not_installed(client);
     }
+    let path = home_path(".zcode/cli/config.json");
+    let existing = match read_optional_json(&path) {
+        Ok(value) => value,
+        Err(error) => return failed(client, error),
+    };
+    if zcode_server_matches(existing.pointer("/mcp/servers/awi"), server) {
+        return success(
+            client,
+            IntegrationStatus::AlreadyConfigured,
+            "native user-scope MCP entry already matches",
+            Some(path),
+        );
+    }
+    if dry_run {
+        return success(
+            client,
+            IntegrationStatus::WouldConfigure,
+            "would merge ~/.zcode/cli/config.json at mcp.servers.awi",
+            Some(path),
+        );
+    }
+    let merged = match merge_zcode_mcp(existing, server) {
+        Ok(value) => value,
+        Err(error) => return failed(client, error),
+    };
+    if let Err(error) = write_json_atomic(&path, &merged) {
+        return failed(client, error);
+    }
+    success(
+        client,
+        IntegrationStatus::Configured,
+        "native user-scope MCP entry added; new Zcode sessions auto-connect",
+        Some(path),
+    )
+}
+
+fn integrate_kimi(server: &McpServerSpec, dry_run: bool) -> ClientIntegration {
+    let client = IntegrationClient::Kimi;
+    let home = kimi_home_path();
+    if !is_installed(
+        &["kimi", "kimi-code"],
+        &[home.join("bin/kimi"), home.clone()],
+    ) {
+        return not_installed(client);
+    }
+    let path = home.join("mcp.json");
+    let existing = match read_optional_json(&path) {
+        Ok(value) => value,
+        Err(error) => return failed(client, error),
+    };
+    if kimi_server_matches(existing.pointer("/mcpServers/awi"), server) {
+        return success(
+            client,
+            IntegrationStatus::AlreadyConfigured,
+            "user-scope mcp.json entry already matches",
+            Some(path),
+        );
+    }
+    if dry_run {
+        return success(
+            client,
+            IntegrationStatus::WouldConfigure,
+            "would merge the user-level Kimi Code mcp.json",
+            Some(path),
+        );
+    }
+    let merged = match merge_kimi_mcp(existing, server) {
+        Ok(value) => value,
+        Err(error) => return failed(client, error),
+    };
+    if let Err(error) = write_json_atomic(&path, &merged) {
+        return failed(client, error);
+    }
+    success(
+        client,
+        IntegrationStatus::Configured,
+        "user-scope MCP entry added; start a new Kimi Code session to load it",
+        Some(path),
+    )
+}
+
+fn merge_zcode_mcp(mut root: Value, server: &McpServerSpec) -> Result<Value> {
+    if !root.is_object() {
+        anyhow::bail!("Zcode config root must be a JSON object");
+    }
+    let root_object = root.as_object_mut().expect("checked above");
+    let mcp = root_object.entry("mcp").or_insert_with(|| json!({}));
+    if !mcp.is_object() {
+        anyhow::bail!("Zcode mcp config must be a JSON object");
+    }
+    let servers = mcp
+        .as_object_mut()
+        .expect("checked above")
+        .entry("servers")
+        .or_insert_with(|| json!({}));
+    if !servers.is_object() {
+        anyhow::bail!("Zcode mcp.servers must be a JSON object");
+    }
+    servers.as_object_mut().expect("checked above").insert(
+        SERVER_NAME.to_owned(),
+        json!({
+            "type": "stdio",
+            "command": server.command,
+            "args": server.args,
+            "env": {},
+            "enabled": true,
+            "timeoutMs": MCP_TIMEOUT_MS
+        }),
+    );
+    Ok(root)
+}
+
+fn merge_kimi_mcp(mut root: Value, server: &McpServerSpec) -> Result<Value> {
+    if !root.is_object() {
+        anyhow::bail!("Kimi Code MCP config root must be a JSON object");
+    }
+    let servers = root
+        .as_object_mut()
+        .expect("checked above")
+        .entry("mcpServers")
+        .or_insert_with(|| json!({}));
+    if !servers.is_object() {
+        anyhow::bail!("Kimi Code mcpServers must be a JSON object");
+    }
+    servers.as_object_mut().expect("checked above").insert(
+        SERVER_NAME.to_owned(),
+        json!({
+            "transport": "stdio",
+            "command": server.command,
+            "args": server.args,
+            "env": {},
+            "enabled": true,
+            "startupTimeoutMs": MCP_TIMEOUT_MS,
+            "toolTimeoutMs": MCP_TIMEOUT_MS
+        }),
+    );
+    Ok(root)
 }
 
 fn merge_json_mcp(mut root: Value, server: &McpServerSpec) -> Result<Value> {
@@ -560,9 +681,37 @@ fn json_server_matches(value: Option<&Value>, server: &McpServerSpec) -> bool {
         && args == server.args.iter().map(String::as_str).collect::<Vec<_>>()
 }
 
+fn zcode_server_matches(value: Option<&Value>, server: &McpServerSpec) -> bool {
+    json_server_matches(value, server)
+        && value.is_some_and(|value| {
+            matches!(
+                value.get("type").and_then(Value::as_str),
+                None | Some("stdio")
+            ) && value.get("enabled").and_then(Value::as_bool) != Some(false)
+        })
+}
+
+fn kimi_server_matches(value: Option<&Value>, server: &McpServerSpec) -> bool {
+    json_server_matches(value, server)
+        && value.is_some_and(|value| {
+            matches!(
+                value.get("transport").and_then(Value::as_str),
+                None | Some("stdio")
+            ) && value.get("enabled").and_then(Value::as_bool) != Some(false)
+        })
+}
+
 fn read_json(path: &Path) -> Result<Value> {
     let bytes = fs::read(path).with_context(|| format!("read {}", path.display()))?;
     serde_json::from_slice(&bytes).with_context(|| format!("decode {}", path.display()))
+}
+
+fn read_optional_json(path: &Path) -> Result<Value> {
+    if path.exists() {
+        read_json(path)
+    } else {
+        Ok(json!({}))
+    }
 }
 
 fn write_json_atomic(path: &Path, value: &Value) -> Result<()> {
@@ -709,6 +858,13 @@ fn home_path(path: impl AsRef<Path>) -> PathBuf {
         .join(path)
 }
 
+fn kimi_home_path() -> PathBuf {
+    env::var_os("KIMI_CODE_HOME")
+        .filter(|path| !path.is_empty())
+        .map(PathBuf::from)
+        .unwrap_or_else(|| home_path(".kimi-code"))
+}
+
 fn shell_join(args: &[String]) -> String {
     args.iter()
         .map(|arg| {
@@ -785,7 +941,103 @@ mod tests {
     }
 
     #[test]
-    fn writes_private_atomic_trae_config() {
+    fn merges_zcode_mcp_without_overwriting_other_config() {
+        let server = McpServerSpec {
+            command: PathBuf::from("/opt/awi"),
+            args: vec!["--index-dir".into(), "/data/index".into(), "mcp".into()],
+        };
+        let merged = merge_zcode_mcp(
+            json!({
+                "mcp": {
+                    "servers": {
+                        "other": {
+                            "type": "http",
+                            "url": "https://example.invalid/mcp"
+                        }
+                    }
+                },
+                "plugins": {
+                    "example": true
+                }
+            }),
+            &server,
+        )
+        .unwrap();
+        let merged_again = merge_zcode_mcp(merged.clone(), &server).unwrap();
+        assert_eq!(merged_again, merged);
+        assert_eq!(merged["plugins"]["example"], true);
+        assert_eq!(
+            merged["mcp"]["servers"]["other"]["url"],
+            "https://example.invalid/mcp"
+        );
+        assert!(zcode_server_matches(
+            merged.pointer("/mcp/servers/awi"),
+            &server
+        ));
+        assert_eq!(merged["mcp"]["servers"]["awi"]["timeoutMs"], 45_000);
+    }
+
+    #[test]
+    fn merges_kimi_mcp_idempotently_without_overwriting_other_servers() {
+        let server = McpServerSpec {
+            command: PathBuf::from("/opt/awi"),
+            args: vec!["--index-dir".into(), "/data/index".into(), "mcp".into()],
+        };
+        let existing = json!({
+            "mcpServers": {
+                "other": {
+                    "url": "https://example.invalid/mcp"
+                }
+            },
+            "preserved": true
+        });
+        let merged = merge_kimi_mcp(existing, &server).unwrap();
+        let merged_again = merge_kimi_mcp(merged.clone(), &server).unwrap();
+        assert_eq!(merged_again, merged);
+        assert_eq!(merged["preserved"], true);
+        assert_eq!(
+            merged["mcpServers"]["other"]["url"],
+            "https://example.invalid/mcp"
+        );
+        assert!(kimi_server_matches(
+            merged.pointer("/mcpServers/awi"),
+            &server
+        ));
+        assert_eq!(merged["mcpServers"]["awi"]["startupTimeoutMs"], 45_000);
+        assert_eq!(merged["mcpServers"]["awi"]["toolTimeoutMs"], 45_000);
+    }
+
+    #[test]
+    fn native_client_matches_reject_disabled_or_wrong_transport_entries() {
+        let server = McpServerSpec {
+            command: PathBuf::from("/opt/awi"),
+            args: vec!["mcp".into()],
+        };
+        let disabled = json!({
+            "command": "/opt/awi",
+            "args": ["mcp"],
+            "enabled": false
+        });
+        let remote = json!({
+            "type": "http",
+            "command": "/opt/awi",
+            "args": ["mcp"]
+        });
+        assert!(!zcode_server_matches(Some(&disabled), &server));
+        assert!(!zcode_server_matches(Some(&remote), &server));
+        assert!(!kimi_server_matches(Some(&disabled), &server));
+        assert!(kimi_server_matches(
+            Some(&json!({
+                "transport": "stdio",
+                "command": "/opt/awi",
+                "args": ["mcp"]
+            })),
+            &server
+        ));
+    }
+
+    #[test]
+    fn writes_private_atomic_json_config() {
         let fixture = tempdir().unwrap();
         let path = fixture.path().join(".trae/mcp.json");
         let value = json!({"mcpServers": {"awi": {"command": "/opt/awi"}}});

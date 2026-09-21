@@ -109,7 +109,8 @@ awi integrate --project-root /path/to/workspace --dry-run --json
 awi integrate --project-root /path/to/workspace
 
 # Restrict the operation to selected clients.
-awi integrate --client codex,gemini,trae --project-root /path/to/workspace
+awi integrate --client codex,gemini,trae,zcode,kimi \
+  --project-root /path/to/workspace
 ```
 
 The command is idempotent and reports one status per client:
@@ -117,11 +118,13 @@ The command is idempotent and reports one status per client:
 `not_installed`, `unsupported`, or `failed`. It currently uses the official MCP
 CLI for Codex, Gemini, and Claude Code. For TraeCode, it atomically merges
 `<project>/.trae/mcp.json`, which is shared by TraeCode IDE and TraeCode CLI;
-project-level MCP must be enabled once in TraeCode settings. Zcode and Kimi Code
-are detected but reported as unsupported when their installed version exposes
-no stable external stdio MCP registration surface. Gemini workspaces marked
-untrusted are reported as `needs_attention` because Gemini suppresses all MCP
-servers until the user explicitly trusts the workspace.
+project-level MCP must be enabled once in TraeCode settings. It also writes the
+native user-level configurations for Zcode (`~/.zcode/cli/config.json` at
+`mcp.servers`) and Kimi Code (`$KIMI_CODE_HOME/mcp.json`, falling back to
+`~/.kimi-code/mcp.json`); packaging AWI as a client-specific plugin is optional,
+not required. New Zcode and Kimi Code sessions load these entries automatically.
+Gemini workspaces marked untrusted are reported as `needs_attention` because
+Gemini suppresses all MCP servers until the user explicitly trusts the workspace.
 
 By default, AWI registers the current binary as
 `awi --index-dir <absolute-path> mcp`, which is self-contained for a local
