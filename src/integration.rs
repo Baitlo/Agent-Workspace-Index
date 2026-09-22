@@ -450,12 +450,24 @@ fn integrate_claude(server: &McpServerSpec, dry_run: bool) -> ClientIntegration 
     let Some(executable) = find_executable("claude") else {
         return not_installed(client);
     };
+    let config_path = home_path(".claude.json");
+    if read_json(&config_path)
+        .ok()
+        .is_some_and(|value| json_server_matches(value.pointer("/mcpServers/awi"), server))
+    {
+        return success(
+            client,
+            IntegrationStatus::AlreadyConfigured,
+            "user-scope MCP entry already matches",
+            Some(config_path),
+        );
+    }
     if dry_run {
         return success(
             client,
             IntegrationStatus::WouldConfigure,
             "would register through `claude mcp add --scope user`",
-            Some(home_path(".claude.json")),
+            Some(config_path),
         );
     }
     let _ = run(
@@ -479,7 +491,7 @@ fn integrate_claude(server: &McpServerSpec, dry_run: bool) -> ClientIntegration 
             client,
             IntegrationStatus::Configured,
             "registered through `claude mcp add --scope user`",
-            Some(home_path(".claude.json")),
+            Some(config_path),
         ),
         Err(error) => failed(client, error),
     }
@@ -745,16 +757,29 @@ fn integrate_qwen(server: &McpServerSpec, dry_run: bool) -> ClientIntegration {
 
 fn integrate_cline(server: &McpServerSpec, dry_run: bool) -> ClientIntegration {
     let client = IntegrationClient::Cline;
-    let path = home_path(".cline/mcp.json");
+    let cli_installed = find_executable("cline").is_some();
+    let path = if cli_installed {
+        home_path(".cline/data/settings/cline_mcp_settings.json")
+    } else {
+        home_path(".cline/mcp.json")
+    };
     integrate_json_config(
         client,
-        is_installed(&["cline"], &[home_path(".cline")]),
+        cli_installed || home_path(".cline").exists(),
         path,
         "/mcpServers/awi",
         server,
         dry_run,
-        merge_cline_mcp,
-        cline_server_matches,
+        if cli_installed {
+            merge_cline_cli_mcp
+        } else {
+            merge_cline_mcp
+        },
+        if cli_installed {
+            cline_cli_server_matches
+        } else {
+            cline_server_matches
+        },
         "native CLI MCP entry added; restart Cline or start a new session",
     )
 }
@@ -1035,6 +1060,20 @@ fn merge_cline_mcp(root: Value, server: &McpServerSpec) -> Result<Value> {
     )
 }
 
+fn merge_cline_cli_mcp(root: Value, server: &McpServerSpec) -> Result<Value> {
+    merge_server_entry(
+        root,
+        "mcpServers",
+        json!({
+            "transport": {
+                "type": "stdio",
+                "command": server.command,
+                "args": server.args
+            }
+        }),
+    )
+}
+
 fn merge_zed_mcp(root: Value, server: &McpServerSpec) -> Result<Value> {
     merge_server_entry(
         root,
@@ -1188,6 +1227,15 @@ fn cline_server_matches(value: Option<&Value>, server: &McpServerSpec) -> bool {
         && value.is_some_and(|value| value.get("disabled").and_then(Value::as_bool) != Some(true))
 }
 
+fn cline_cli_server_matches(value: Option<&Value>, server: &McpServerSpec) -> bool {
+    value
+        .and_then(|value| value.get("transport"))
+        .is_some_and(|transport| {
+            transport.get("type").and_then(Value::as_str) == Some("stdio")
+                && json_server_matches(Some(transport), server)
+        })
+}
+
 fn crush_server_matches(value: Option<&Value>, server: &McpServerSpec) -> bool {
     json_server_matches(value, server)
         && value.is_some_and(|value| {
@@ -1200,7 +1248,19 @@ fn crush_server_matches(value: Option<&Value>, server: &McpServerSpec) -> bool {
 
 fn read_json(path: &Path) -> Result<Value> {
     let bytes = fs::read(path).with_context(|| format!("read {}", path.display()))?;
-    serde_json::from_slice(&bytes).with_context(|| format!("decode {}", path.display()))
+    match serde_json::from_slice(&bytes) {
+        Ok(value) => Ok(value),
+        Err(json_error) => {
+            let text = std::str::from_utf8(&bytes)
+                .with_context(|| format!("decode {} as UTF-8", path.display()))?;
+            json5::from_str(text).with_context(|| {
+                format!(
+                    "decode {} as JSON or JSONC (JSON error: {json_error})",
+                    path.display()
+                )
+            })
+        }
+    }
 }
 
 fn read_optional_json(path: &Path) -> Result<Value> {
@@ -1695,6 +1755,21 @@ mod tests {
     }
 
     #[test]
+    fn merges_current_cline_cli_transport_shape() {
+        let server = McpServerSpec {
+            command: PathBuf::from("/opt/awi"),
+            args: vec!["mcp".into()],
+        };
+        let merged = merge_cline_cli_mcp(json!({"preserved": true}), &server).unwrap();
+        assert_eq!(merged["preserved"], true);
+        assert_eq!(merged["mcpServers"]["awi"]["transport"]["type"], "stdio");
+        assert!(cline_cli_server_matches(
+            merged.pointer("/mcpServers/awi"),
+            &server
+        ));
+    }
+
+    #[test]
     fn merges_zed_context_server_without_overwriting_settings() {
         let server = McpServerSpec {
             command: PathBuf::from("/opt/awi"),
@@ -1799,6 +1874,19 @@ mod tests {
             fs::metadata(&path).unwrap().permissions().mode() & 0o777,
             0o600
         );
+    }
+
+    #[test]
+    fn reads_jsonc_config_with_comments_and_trailing_commas() {
+        let fixture = tempdir().unwrap();
+        let path = fixture.path().join("settings.jsonc");
+        fs::write(
+            &path,
+            "{\n  // user preference\n  \"theme\": \"dark\",\n}\n",
+        )
+        .unwrap();
+        let value = read_json(&path).unwrap();
+        assert_eq!(value["theme"], "dark");
     }
 
     #[test]

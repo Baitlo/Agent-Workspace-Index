@@ -46,7 +46,7 @@ class. Raw chats remain excluded unless `--include-raw-memory` is supplied.
 Rust and Cargo are required when building from source.
 
 If Pi is detected, the installer also installs the pinned
-`pi-mcp-adapter@2.34.0`, because Pi intentionally has no built-in MCP client.
+`pi-mcp-adapter@2.36.0`, because Pi intentionally has no built-in MCP client.
 This is a third-party Pi package; pass `--skip-pi-adapter` to review or install
 it separately, or set `AWI_PI_MCP_ADAPTER_SPEC` to select another reviewed
 version. Run `scripts/install.sh --help` for custom binary, index, and client
@@ -194,7 +194,7 @@ other clients:
 | [Cursor](https://cursor.com/help/customization/mcp) | `~/.cursor/mcp.json` |
 | [Windsurf](https://docs.windsurf.com/windsurf/cascade/mcp) | `~/.codeium/windsurf/mcp_config.json` |
 | [Qwen Code](https://qwenlm.github.io/qwen-code-docs/en/users/features/mcp/) | `~/.qwen/settings.json` |
-| [Cline CLI](https://docs.cline.bot/mcp/mcp-overview) | `~/.cline/mcp.json` |
+| [Cline CLI](https://docs.cline.bot/mcp/mcp-overview) | `~/.cline/data/settings/cline_mcp_settings.json` (current CLI); `~/.cline/mcp.json` (legacy IDE-only fallback) |
 | [Zed](https://zed.dev/docs/ai/mcp) | `${XDG_CONFIG_HOME:-~/.config}/zed/settings.json` at `context_servers` |
 | [Amazon Q Developer](https://docs.aws.amazon.com/amazonq/latest/qdeveloper-ug/command-line-mcp-configuration.html) | `~/.aws/amazonq/mcp.json` |
 | [Crush](https://www.mintlify.com/charmbracelet/crush/configuration/mcp) | `${XDG_CONFIG_HOME:-~/.config}/crush/crush.json` |

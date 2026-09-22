@@ -30,7 +30,7 @@ fn configures_new_clients_privately_and_idempotently() {
 
     let paths = [
         home.join(".qwen/settings.json"),
-        home.join(".cline/mcp.json"),
+        home.join(".cline/data/settings/cline_mcp_settings.json"),
         config_home.join("zed/settings.json"),
         home.join(".aws/amazonq/mcp.json"),
         config_home.join("crush/crush.json"),
@@ -45,7 +45,10 @@ fn configures_new_clients_privately_and_idempotently() {
     }
 
     assert_eq!(read_json(&paths[0])["mcpServers"]["awi"]["timeout"], 45_000);
-    assert_eq!(read_json(&paths[1])["mcpServers"]["awi"]["disabled"], false);
+    assert_eq!(
+        read_json(&paths[1])["mcpServers"]["awi"]["transport"]["type"],
+        "stdio"
+    );
     assert_eq!(
         read_json(&paths[2])["context_servers"]["awi"]["command"],
         "/bin/echo"
@@ -61,6 +64,46 @@ fn configures_new_clients_privately_and_idempotently() {
     );
     let second_report: Value = serde_json::from_slice(&second.stdout).unwrap();
     assert_statuses(&second_report, "already_configured");
+}
+
+#[test]
+fn configures_clients_with_existing_jsonc_files() {
+    let fixture = tempdir().unwrap();
+    let home = fixture.path().join("home");
+    let config_home = fixture.path().join("config");
+    let bin = fixture.path().join("bin");
+    fs::create_dir_all(&bin).unwrap();
+    fs::create_dir_all(config_home.join("opencode")).unwrap();
+    fs::create_dir_all(config_home.join("zed")).unwrap();
+    symlink("/bin/true", bin.join("opencode")).unwrap();
+    symlink("/bin/true", bin.join("zed")).unwrap();
+    fs::write(
+        config_home.join("opencode/opencode.jsonc"),
+        "{\n  // keep the setting\n  \"theme\": \"dark\",\n}\n",
+    )
+    .unwrap();
+    fs::write(
+        config_home.join("zed/settings.json"),
+        "{\n  // keep the setting\n  \"theme\": \"One Dark\",\n}\n",
+    )
+    .unwrap();
+
+    let output = run_integrate_clients(fixture.path(), &home, &config_home, &bin, "opencode,zed");
+    assert!(
+        output.status.success(),
+        "integration failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let report: Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_statuses_count(&report, "configured", 2);
+    assert_eq!(
+        read_json(&config_home.join("opencode/opencode.jsonc"))["theme"],
+        "dark"
+    );
+    assert_eq!(
+        read_json(&config_home.join("zed/settings.json"))["theme"],
+        "One Dark"
+    );
 }
 
 #[test]
@@ -224,11 +267,105 @@ fn installer_indexes_ancestor_instructions_and_allowlisted_skill_manifests() {
     assert_eq!(raw.as_array().unwrap().len(), 0);
 }
 
+#[test]
+fn installer_falls_back_to_a_user_writable_pi_adapter_install() {
+    let fixture = tempdir().unwrap();
+    let home = fixture.path().join("home");
+    let workspace = fixture.path().join("workspace");
+    let index = fixture.path().join("index");
+    let installed_bin = fixture.path().join("installed");
+    let test_bin = fixture.path().join("test-bin");
+    let pi_home = home.join(".pi/agent");
+    fs::create_dir_all(&workspace).unwrap();
+    fs::create_dir_all(&test_bin).unwrap();
+    fs::write(workspace.join("readme.txt"), "Pi fallback fixture.\n").unwrap();
+
+    let pi = test_bin.join("pi");
+    fs::write(
+        &pi,
+        r#"#!/usr/bin/env bash
+set -euo pipefail
+case "${1:-}" in
+  list)
+    [[ -f "$PI_CODING_AGENT_DIR/adapter-installed" ]] &&
+      printf 'npm/node_modules/pi-mcp-adapter\n'
+    ;;
+  install)
+    [[ "${2:-}" != npm:* ]] || exit 1
+    [[ -d "${2:-}" ]]
+    mkdir -p "$PI_CODING_AGENT_DIR"
+    touch "$PI_CODING_AGENT_DIR/adapter-installed"
+    ;;
+  *) exit 2 ;;
+esac
+"#,
+    )
+    .unwrap();
+    fs::set_permissions(&pi, fs::Permissions::from_mode(0o755)).unwrap();
+
+    let npm = test_bin.join("npm");
+    fs::write(
+        &npm,
+        r#"#!/usr/bin/env bash
+set -euo pipefail
+prefix=
+while (($# > 0)); do
+  if [[ "$1" == "--prefix" ]]; then
+    prefix="$2"
+    shift 2
+  else
+    shift
+  fi
+done
+mkdir -p "$prefix/node_modules/pi-mcp-adapter"
+"#,
+    )
+    .unwrap();
+    fs::set_permissions(&npm, fs::Permissions::from_mode(0o755)).unwrap();
+
+    let script = Path::new(env!("CARGO_MANIFEST_DIR")).join("scripts/install.sh");
+    let output = Command::new("bash")
+        .arg(script)
+        .args(["--workspace", workspace.to_str().unwrap()])
+        .args(["--index-dir", index.to_str().unwrap()])
+        .args(["--bin-dir", installed_bin.to_str().unwrap()])
+        .args(["--source-binary", env!("CARGO_BIN_EXE_awi")])
+        .args(["--clients", "pi"])
+        .args(["--skip-agent-knowledge", "--skip-agent-memory"])
+        .env("HOME", &home)
+        .env("PI_CODING_AGENT_DIR", &pi_home)
+        .env("PATH", format!("{}:/usr/bin:/bin", test_bin.display()))
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "installer failed: stdout={}, stderr={}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(pi_home.join("adapter-installed").is_file());
+    assert!(pi_home.join("npm/node_modules/pi-mcp-adapter").is_dir());
+    assert_eq!(
+        read_json(&pi_home.join("mcp.json"))["mcpServers"]["awi"]["transport"],
+        "stdio"
+    );
+}
+
 fn run_integrate(
     fixture: &Path,
     home: &Path,
     config_home: &Path,
     bin: &Path,
+) -> std::process::Output {
+    run_integrate_clients(fixture, home, config_home, bin, NEW_CLIENTS)
+}
+
+fn run_integrate_clients(
+    fixture: &Path,
+    home: &Path,
+    config_home: &Path,
+    bin: &Path,
+    clients: &str,
 ) -> std::process::Output {
     let path = format!("{}:/usr/bin:/bin", bin.display());
     Command::new(env!("CARGO_BIN_EXE_awi"))
@@ -237,7 +374,7 @@ fn run_integrate(
             fixture.join("index").to_str().unwrap(),
             "integrate",
             "--client",
-            NEW_CLIENTS,
+            clients,
             "--server-command",
             "/bin/echo",
             "--server-arg",
@@ -254,8 +391,12 @@ fn run_integrate(
 }
 
 fn assert_statuses(report: &Value, expected: &str) {
+    assert_statuses_count(report, expected, 5);
+}
+
+fn assert_statuses_count(report: &Value, expected: &str, count: usize) {
     let clients = report["clients"].as_array().unwrap();
-    assert_eq!(clients.len(), 5);
+    assert_eq!(clients.len(), count);
     assert!(
         clients.iter().all(|client| client["status"] == expected),
         "unexpected report: {report}"

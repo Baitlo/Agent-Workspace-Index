@@ -118,7 +118,7 @@ install_pi_adapter=true
 index_agent_knowledge=true
 index_agent_memory=true
 include_raw_memory=false
-pi_adapter_spec="${AWI_PI_MCP_ADAPTER_SPEC:-npm:pi-mcp-adapter@2.34.0}"
+pi_adapter_spec="${AWI_PI_MCP_ADAPTER_SPEC:-npm:pi-mcp-adapter@2.36.0}"
 
 while (($# > 0)); do
     case "$1" in
@@ -269,7 +269,21 @@ fi
 if client_requested pi && command_exists pi && "$install_pi_adapter"; then
     if ! pi list 2>/dev/null | grep -Fq "pi-mcp-adapter"; then
         printf 'Installing Pi MCP adapter (third-party package %s)...\n' "$pi_adapter_spec"
-        pi install "$pi_adapter_spec"
+        if ! pi install "$pi_adapter_spec"; then
+            case "$pi_adapter_spec" in
+                npm:pi-mcp-adapter*)
+                    pi_home="${PI_CODING_AGENT_DIR:-$HOME/.pi/agent}"
+                    pi_npm_root="$pi_home/npm"
+                    printf 'Global npm install failed; retrying under %s...\n' "$pi_npm_root"
+                    npm install --prefix "$pi_npm_root" --no-audit --no-fund \
+                        "${pi_adapter_spec#npm:}"
+                    pi install "$pi_npm_root/node_modules/pi-mcp-adapter"
+                    ;;
+                *)
+                    fail "Pi MCP adapter install failed: $pi_adapter_spec"
+                    ;;
+            esac
+        fi
         pi list 2>/dev/null | grep -Fq "pi-mcp-adapter" ||
             fail "Pi reported success but pi-mcp-adapter is not listed"
     fi
