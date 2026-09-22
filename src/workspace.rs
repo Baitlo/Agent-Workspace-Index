@@ -31,6 +31,8 @@ const EXACT_PROJECT_MEMORY_BOOST: f32 = 0.08;
 const GLOBAL_MEMORY_BOOST: f32 = 0.01;
 const MEMORY_LAYER_BOOST: f32 = 0.004;
 const MAX_MEMORY_RECENCY_BOOST: f32 = 0.005;
+const SAME_DIRECTORY_MMR_PENALTY: f32 = 0.00125;
+const MATCH_PREVIEW_CHARS: usize = 1_000;
 
 pub struct WorkspaceIndex {
     index_dir: PathBuf,
@@ -439,7 +441,7 @@ impl WorkspaceIndex {
                     generation: file.generation,
                     score,
                     matched_lanes: candidate.lanes,
-                    preview: candidate.preview,
+                    preview: String::new(),
                     agent,
                     memory,
                 },
@@ -467,11 +469,9 @@ impl WorkspaceIndex {
             }
             true
         });
-        Ok(ranked_hits
-            .into_iter()
-            .map(|(hit, _)| hit)
-            .take(limit)
-            .collect())
+        let mut ranked_hits = rerank_for_directory_diversity(ranked_hits, limit);
+        self.focus_search_previews(query, &mut ranked_hits);
+        Ok(ranked_hits.into_iter().map(|(hit, _)| hit).collect())
     }
 
     pub fn inspect(&self, path: impl AsRef<Path>) -> Result<InspectResult> {
@@ -589,6 +589,37 @@ impl WorkspaceIndex {
         memory_deleted.dedup();
         self.search.apply_changes(&regular, &regular_deleted)?;
         self.memory_search.apply_changes(&memory, &memory_deleted)
+    }
+
+    fn focus_search_previews(&self, query: &str, hits: &mut [(SearchHit, Option<String>)]) {
+        let regular_ids = hits
+            .iter()
+            .filter(|(hit, _)| hit.kind != FileKind::AgentMemory)
+            .map(|(hit, _)| hit.file_id)
+            .collect::<Vec<_>>();
+        let memory_ids = hits
+            .iter()
+            .filter(|(hit, _)| hit.kind == FileKind::AgentMemory)
+            .map(|(hit, _)| hit.file_id)
+            .collect::<Vec<_>>();
+        let regular_previews = self
+            .search
+            .previews(query, &regular_ids, MATCH_PREVIEW_CHARS)
+            .unwrap_or_default();
+        let memory_previews = self
+            .memory_search
+            .previews(query, &memory_ids, MATCH_PREVIEW_CHARS)
+            .unwrap_or_default();
+        for (hit, _) in hits {
+            let previews = if hit.kind == FileKind::AgentMemory {
+                &memory_previews
+            } else {
+                &regular_previews
+            };
+            if let Some(preview) = previews.get(&hit.file_id) {
+                hit.preview.clone_from(preview);
+            }
+        }
     }
 
     fn index_root_inner(
@@ -1135,4 +1166,87 @@ fn memory_recency_boost(observed_at_ms: i64) -> f32 {
         .unwrap_or(observed_at_ms);
     let age_days = now_ms.saturating_sub(observed_at_ms).max(0) as f32 / 86_400_000.0;
     MAX_MEMORY_RECENCY_BOOST / (1.0 + age_days / 30.0)
+}
+
+fn rerank_for_directory_diversity(
+    mut candidates: Vec<(SearchHit, Option<String>)>,
+    limit: usize,
+) -> Vec<(SearchHit, Option<String>)> {
+    let mut selected = Vec::with_capacity(limit.min(candidates.len()));
+    let mut selected_parents = HashSet::new();
+    while selected.len() < limit && !candidates.is_empty() {
+        let mut best_index = 0;
+        for index in 1..candidates.len() {
+            let candidate = &candidates[index].0;
+            let best = &candidates[best_index].0;
+            let candidate_score = candidate.score
+                - if selected_parents.contains(parent_path(&candidate.path)) {
+                    SAME_DIRECTORY_MMR_PENALTY
+                } else {
+                    0.0
+                };
+            let best_score = best.score
+                - if selected_parents.contains(parent_path(&best.path)) {
+                    SAME_DIRECTORY_MMR_PENALTY
+                } else {
+                    0.0
+                };
+            if candidate_score > best_score
+                || (candidate_score == best_score && candidate.path < best.path)
+            {
+                best_index = index;
+            }
+        }
+        let mut candidate = candidates.swap_remove(best_index);
+        let parent = parent_path(&candidate.0.path).to_owned();
+        if selected_parents.contains(&parent) {
+            candidate.0.score -= SAME_DIRECTORY_MMR_PENALTY;
+        }
+        selected_parents.insert(parent);
+        selected.push(candidate);
+    }
+    selected
+}
+
+fn parent_path(path: &str) -> &Path {
+    Path::new(path).parent().unwrap_or_else(|| Path::new(""))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn ranked_hit(path: &str, score: f32) -> (SearchHit, Option<String>) {
+        (
+            SearchHit {
+                file_id: 1,
+                path: path.to_owned(),
+                relative_path: path.to_owned(),
+                kind: FileKind::Text,
+                experiment: None,
+                size_bytes: 0,
+                mtime_ns: 0,
+                generation: 1,
+                score,
+                matched_lanes: vec!["content".to_owned()],
+                preview: String::new(),
+                agent: None,
+                memory: None,
+            },
+            None,
+        )
+    }
+
+    #[test]
+    fn directory_diversity_prevents_one_folder_from_filling_results() {
+        let candidates = vec![
+            ranked_hit("/workspace/a/first.json", 0.100),
+            ranked_hit("/workspace/a/second.json", 0.096),
+            ranked_hit("/workspace/b/implementation.sql", 0.095),
+        ];
+
+        let selected = rerank_for_directory_diversity(candidates, 2);
+        assert_eq!(selected[0].0.path, "/workspace/a/first.json");
+        assert_eq!(selected[1].0.path, "/workspace/b/implementation.sql");
+    }
 }

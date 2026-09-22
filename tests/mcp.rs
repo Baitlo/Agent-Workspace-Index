@@ -118,6 +118,15 @@ fn mcp_stdio_exposes_search_inspect_and_query() {
     let hits = searched["result"]["structuredContent"]["hits"]
         .as_array()
         .unwrap();
+    let search_text = searched["result"]["content"][0]["text"].as_str().unwrap();
+    assert!(search_text.contains("Top paths:"));
+    assert!(search_text.contains("service.rs"));
+    assert!(
+        search_text.len()
+            < serde_json::to_string(&searched["result"]["structuredContent"])
+                .unwrap()
+                .len()
+    );
     assert_eq!(
         searched["result"]["structuredContent"]["format"],
         "compact_v2"
@@ -285,9 +294,16 @@ fn mcp_stdio_exposes_search_inspect_and_query() {
         .collect::<Vec<_>>();
     assert_eq!(records.len(), 7);
     assert_eq!(records[0]["tool"], "workspace_search");
+    assert_eq!(records[0]["schema_version"], 3);
     assert_eq!(records[0]["status"], "ok");
     assert_eq!(records[0]["result_count_kind"], "hits");
     assert_eq!(records[0]["result_count"], 1);
+    assert_eq!(records[0]["preview_truncated"], false);
+    assert_eq!(records[0]["limit_compacted"], false);
+    assert!(
+        records[0]["text_content_bytes"].as_u64().unwrap()
+            < records[0]["structured_content_bytes"].as_u64().unwrap()
+    );
     assert_eq!(records[1]["tool"], "workspace_search");
     assert_eq!(records[1]["status"], "ok");
     assert_eq!(

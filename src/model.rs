@@ -303,7 +303,6 @@ pub(crate) struct SearchDocument {
 pub(crate) struct SearchCandidate {
     pub file_id: i64,
     pub path: String,
-    pub preview: String,
     pub generation: i64,
     pub score: f32,
     pub lanes: Vec<String>,

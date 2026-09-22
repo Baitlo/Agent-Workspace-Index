@@ -5,7 +5,7 @@ use anyhow::{Context, Result};
 use rmcp::{
     ErrorData as McpError, ServerHandler, ServiceExt,
     handler::server::{router::tool::ToolRouter, wrapper::Parameters},
-    model::{CallToolResult, Implementation, ServerCapabilities, ServerConfig},
+    model::{CallToolResult, ContentBlock, Implementation, ServerCapabilities, ServerConfig},
     schemars, tool, tool_handler, tool_router,
 };
 use serde::Deserialize;
@@ -16,11 +16,12 @@ use crate::mcp_audit::{McpAuditLogger, McpAuditSpan};
 use crate::protocol::Request;
 use crate::{InspectResult, QueryInput, QueryRequest, QueryResult, SearchHit, WorkspaceIndex};
 
-const DEFAULT_SEARCH_LIMIT: usize = 8;
+const DEFAULT_SEARCH_LIMIT: usize = 5;
 const MAX_SEARCH_LIMIT: usize = 50;
 const MAX_RETURNED_SEARCH_HITS: usize = 20;
 const MAX_QUERY_CHARS: usize = 4_096;
 const MAX_PREVIEW_CHARS: usize = 1_000;
+const MAX_TEXT_FALLBACK_CHARS: usize = 2_000;
 const DEFAULT_SYMBOL_LIMIT: usize = 200;
 const MAX_SYMBOL_LIMIT: usize = 1_000;
 const DEFAULT_INSPECT_LINES: usize = 80;
@@ -43,8 +44,9 @@ pub struct WorkspaceSearchRequest {
     /// Terms, path fragments, symbol names, or dataset columns to find.
     #[schemars(length(min = 1, max = 4_096))]
     pub query: String,
-    /// Requested ranked results. Defaults to 8; values above 20 are accepted for
-    /// compatibility but compacted to 20. Prefer 5-10 and refine the query.
+    /// Requested ranked results. Defaults to 5; values above 20 are accepted for
+    /// compatibility but compacted to 20. Expand only when the first result set
+    /// lacks the needed evidence.
     #[serde(default)]
     #[schemars(schema_with = "optional_integer_schema", range(min = 1, max = 50))]
     pub limit: Option<usize>,
@@ -180,10 +182,12 @@ impl AwiMcpServer {
 
 #[tool_router]
 impl AwiMcpServer {
-    /// Preferred first step for locating code, symbols, docs, Agent instructions,
-    /// Skills, memory, or dataset schemas in an indexed workspace. For prior
-    /// decisions/history, set kinds=["agent_memory"] and pass context_path. Prefer
-    /// limit 5-10, use previews as evidence, and inspect only selected paths.
+    /// Preferred discovery step for code, symbols, docs, Agent instructions,
+    /// Skills, memory, or dataset schemas in an indexed workspace. Start with one
+    /// identifier-rich query and limit 5; do not issue parallel near-synonym
+    /// searches. Inspect the best hit, then refine once only if evidence is
+    /// missing. For prior decisions/history, set kinds=["agent_memory"] and pass
+    /// context_path. If the exact path is already known, use a file reader directly.
     #[tool(
         name = "workspace_search",
         annotations(
@@ -534,14 +538,16 @@ impl ServerHandler for AwiMcpServer {
                  an indexed workspace, use workspace_search first, before shell grep or file \
                  walking. For prior decisions, history, or cross-Agent memory, set \
                  kinds=[\"agent_memory\"] and pass context_path. Pass context_path when resolving \
-                 applicable AGENTS.md instructions. Prefer limit 5-10 and refine the query instead \
-                 of requesting broad 20-50 result lists. \
+                 applicable AGENTS.md instructions. Start with one identifier-rich query and \
+                 limit 5; do not issue parallel near-synonym searches. Inspect the best hit, \
+                 then refine once only if the first result set lacks evidence. \
                  Non-empty previews are direct excerpts from the indexed generation and are \
                  sufficient evidence when they contain the required facts. Once an authoritative \
                  path is selected, do not repeat discovery searches. Use one workspace_inspect \
                  call, with up to 500 lines for long text, only for missing details; use \
                  workspace_query directly for structured aggregation. If a path is not in an \
-                 indexed root, fall back to ordinary file tools instead of passing it here.",
+                 indexed root, fall back to ordinary file tools instead of passing it here. When \
+                 the user already supplied an exact path, read that path directly.",
             )
     }
 }
@@ -631,13 +637,16 @@ fn tool_error(code: &str, error: &anyhow::Error) -> CallToolResult {
         ),
         _ => None,
     };
-    CallToolResult::structured_error(json!({
-        "error": {
-            "code": code,
-            "message": format!("{error:#}"),
-            "recovery": recovery
-        }
-    }))
+    structured_result(
+        json!({
+            "error": {
+                "code": code,
+                "message": format!("{error:#}"),
+                "recovery": recovery
+            }
+        }),
+        true,
+    )
 }
 
 fn compact_search_hit(hit: SearchHit) -> Value {
@@ -677,19 +686,97 @@ fn effective_search_limit(requested: usize) -> usize {
 fn bounded_result(value: Value) -> CallToolResult {
     match serde_json::to_vec(&value) {
         Ok(encoded) if encoded.len() <= MAX_STRUCTURED_RESPONSE_BYTES => {
-            CallToolResult::structured(value)
+            structured_result(value, false)
         }
-        Ok(encoded) => CallToolResult::structured_error(json!({
-            "error": {
-                "code": "response_too_large",
-                "message": format!(
-                    "response is {} bytes; maximum is {MAX_STRUCTURED_RESPONSE_BYTES} bytes",
-                    encoded.len()
-                )
-            }
-        })),
+        Ok(encoded) => structured_result(
+            json!({
+                "error": {
+                    "code": "response_too_large",
+                    "message": format!(
+                        "response is {} bytes; maximum is {MAX_STRUCTURED_RESPONSE_BYTES} bytes",
+                        encoded.len()
+                    )
+                }
+            }),
+            true,
+        ),
         Err(error) => tool_error("response_serialization_failed", &error.into()),
     }
+}
+
+fn structured_result(value: Value, is_error: bool) -> CallToolResult {
+    let content = vec![ContentBlock::text(text_fallback(&value))];
+    let mut result = if is_error {
+        CallToolResult::error(content)
+    } else {
+        CallToolResult::success(content)
+    };
+    result.structured_content = Some(value);
+    result
+}
+
+fn text_fallback(value: &Value) -> String {
+    let mut summary = if let Some(error) = value.get("error") {
+        let code = error
+            .get("code")
+            .and_then(Value::as_str)
+            .unwrap_or("unknown");
+        let message = error
+            .get("message")
+            .and_then(Value::as_str)
+            .unwrap_or("AWI tool error");
+        let recovery = error
+            .get("recovery")
+            .and_then(Value::as_str)
+            .map(|value| format!("\nRecovery: {value}"))
+            .unwrap_or_default();
+        format!("AWI error [{code}]: {message}{recovery}")
+    } else if let Some(hits) = value.get("hits").and_then(Value::as_array) {
+        let paths = hits
+            .iter()
+            .take(5)
+            .filter_map(|hit| hit.get("path").and_then(Value::as_str))
+            .collect::<Vec<_>>();
+        if paths.is_empty() {
+            "AWI search returned no hits.".to_owned()
+        } else {
+            format!(
+                "AWI search returned {} hit(s). Top paths:\n{}",
+                hits.len(),
+                paths.join("\n")
+            )
+        }
+    } else if let Some(file) = value.get("file") {
+        let path = file
+            .get("absolute_path")
+            .and_then(Value::as_str)
+            .unwrap_or("unknown path");
+        let symbol_count = value
+            .get("symbols")
+            .and_then(Value::as_array)
+            .map_or(0, Vec::len);
+        let excerpt = value
+            .pointer("/content/text")
+            .and_then(Value::as_str)
+            .map(|text| format!("\nExcerpt:\n{text}"))
+            .unwrap_or_default();
+        format!("AWI inspect: {path} ({symbol_count} symbol(s)){excerpt}")
+    } else if let Some(row_count) = value.get("row_count").and_then(Value::as_u64) {
+        let columns = value.get("columns").cloned().unwrap_or(Value::Null);
+        let rows = value
+            .get("rows")
+            .and_then(Value::as_array)
+            .map(|rows| rows.iter().take(3).cloned().collect::<Vec<_>>())
+            .unwrap_or_default();
+        format!(
+            "AWI query returned {row_count} row(s). Columns: {columns}. First rows: {}",
+            Value::Array(rows)
+        )
+    } else {
+        "AWI result is available in structuredContent.".to_owned()
+    };
+    truncate_chars(&mut summary, MAX_TEXT_FALLBACK_CHARS);
+    summary
 }
 
 fn truncate_chars(value: &mut String, max_chars: usize) -> bool {
@@ -721,6 +808,23 @@ mod tests {
         assert_eq!(
             result.structured_content.unwrap()["error"]["code"],
             "response_too_large"
+        );
+    }
+
+    #[test]
+    fn structured_result_uses_a_bounded_text_fallback_without_duplicating_json() {
+        let payload = "x".repeat(16_000);
+        let result = bounded_result(json!({
+            "payload": payload
+        }));
+        let text = result.content[0].as_text().unwrap().text.as_str();
+        assert_eq!(text, "AWI result is available in structuredContent.");
+        assert_eq!(
+            result.structured_content.unwrap()["payload"]
+                .as_str()
+                .unwrap()
+                .len(),
+            16_000
         );
     }
 

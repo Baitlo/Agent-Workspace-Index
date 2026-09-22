@@ -5,10 +5,11 @@ use std::path::Path;
 use anyhow::{Context, Result};
 use rayon::prelude::*;
 use tantivy::collector::TopDocs;
-use tantivy::query::{BooleanQuery, Query, QueryParser, TermQuery};
+use tantivy::query::{BooleanQuery, Query, QueryParser, TermQuery, TermSetQuery};
 use tantivy::schema::{
     Field, INDEXED, IndexRecordOption, STORED, STRING, Schema, TantivyDocument, Value,
 };
+use tantivy::snippet::SnippetGenerator;
 use tantivy::{Index, Term, doc};
 
 use crate::model::{SearchCandidate, SearchDocument};
@@ -35,7 +36,7 @@ struct SearchFields {
     content: Field,
     symbols: Field,
     schema: Field,
-    preview: Field,
+    stored_content: Field,
     generation: Field,
 }
 
@@ -51,7 +52,6 @@ struct LaneSpec {
 struct LaneHit {
     file_id: i64,
     path: String,
-    preview: String,
     generation: i64,
 }
 
@@ -77,7 +77,8 @@ impl SearchIndex {
             content: schema.get_field("content")?,
             symbols: schema.get_field("symbols")?,
             schema: schema.get_field("schema")?,
-            preview: schema.get_field("preview")?,
+            // Keep the original field name so existing snapshots remain readable.
+            stored_content: schema.get_field("preview")?,
             generation: schema.get_field("generation")?,
         };
         Ok(Self { index, fields })
@@ -115,7 +116,7 @@ impl SearchIndex {
                 self.fields.content => document.content.as_str(),
                 self.fields.symbols => document.symbols.as_str(),
                 self.fields.schema => document.schema.as_str(),
-                self.fields.preview => document.preview.as_str(),
+                self.fields.stored_content => document.preview.as_str(),
                 self.fields.generation => u64::try_from(document.generation)
                     .context("negative generation")?,
             ))?;
@@ -200,7 +201,6 @@ impl SearchIndex {
                 let entry = fused.entry(hit.file_id).or_insert_with(|| SearchCandidate {
                     file_id: hit.file_id,
                     path: hit.path,
-                    preview: hit.preview,
                     generation: hit.generation,
                     score: 0.0,
                     lanes: Vec::new(),
@@ -229,6 +229,63 @@ impl SearchIndex {
         });
         candidates.truncate(result_limit);
         Ok(candidates)
+    }
+
+    pub(crate) fn previews(
+        &self,
+        query_text: &str,
+        file_ids: &[i64],
+        max_chars: usize,
+    ) -> Result<HashMap<i64, String>> {
+        if file_ids.is_empty() {
+            return Ok(HashMap::new());
+        }
+        let reader = self.index.reader().context("open Tantivy reader")?;
+        let searcher = reader.searcher();
+        let parser = QueryParser::for_index(&self.index, vec![self.fields.content]);
+        let (query, _errors) = parser.parse_query_lenient(query_text);
+        let mut generator = SnippetGenerator::create(&searcher, &*query, self.fields.content)
+            .context("create content snippet generator")?;
+        generator.set_max_num_chars(max_chars);
+
+        let file_id_query = TermSetQuery::new(
+            file_ids
+                .iter()
+                .filter_map(|file_id| u64::try_from(*file_id).ok())
+                .map(|file_id| Term::from_field_u64(self.fields.file_id, file_id)),
+        );
+        let documents = searcher.search(
+            &file_id_query,
+            &TopDocs::with_limit(file_ids.len()).order_by_score(),
+        )?;
+        let mut previews = HashMap::with_capacity(documents.len());
+        for (_score, address) in documents {
+            let document: TantivyDocument = searcher.doc(address)?;
+            let file_id = document
+                .get_first(self.fields.file_id)
+                .and_then(|value| value.as_u64())
+                .context("indexed document missing file_id")?;
+            let source = document
+                .get_first(self.fields.stored_content)
+                .and_then(|value| value.as_str())
+                .unwrap_or_default();
+            let preview =
+                if let Some(preview) = centered_exact_excerpt(source, query_text, max_chars) {
+                    preview
+                } else {
+                    let snippet = generator.snippet(source);
+                    if snippet.is_empty() {
+                        source.chars().take(max_chars).collect()
+                    } else {
+                        snippet.fragment().trim().to_owned()
+                    }
+                };
+            previews.insert(
+                i64::try_from(file_id).context("file_id exceeds i64")?,
+                preview,
+            );
+        }
+        Ok(previews)
     }
 
     fn search_lane(
@@ -290,15 +347,9 @@ impl SearchIndex {
                     .and_then(|value| value.as_str())
                     .context("indexed document missing path")?
                     .to_owned();
-                let preview = document
-                    .get_first(self.fields.preview)
-                    .and_then(|value| value.as_str())
-                    .unwrap_or_default()
-                    .to_owned();
                 Ok(LaneHit {
                     file_id: i64::try_from(file_id).context("file_id exceeds i64")?,
                     path,
-                    preview,
                     generation: i64::try_from(generation).context("generation exceeds i64")?,
                 })
             })
@@ -360,6 +411,29 @@ fn lexical_tokens(value: &str) -> HashSet<String> {
     tokens
 }
 
+fn centered_exact_excerpt(source: &str, query: &str, max_chars: usize) -> Option<String> {
+    let match_chars = query.chars().count();
+    if match_chars == 0 || match_chars > max_chars {
+        return None;
+    }
+    let match_start = source.find(query)?;
+    let match_start_chars = source[..match_start].chars().count();
+    let total_chars = source.chars().count();
+    let context_chars = max_chars.saturating_sub(match_chars);
+    let mut start = match_start_chars.saturating_sub(context_chars / 2);
+    let end = (start + max_chars).min(total_chars);
+    start = start.min(end.saturating_sub(max_chars));
+    Some(
+        source
+            .chars()
+            .skip(start)
+            .take(end - start)
+            .collect::<String>()
+            .trim()
+            .to_owned(),
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -371,5 +445,19 @@ mod tests {
             "/workspace/sql/tongyong_train_v2_show500_play500_28d_optimized.sql",
         );
         assert!(coverage > 0.5, "coverage={coverage}");
+    }
+
+    #[test]
+    fn exact_excerpt_keeps_the_complete_identifier() {
+        let source = format!(
+            "{}fn _patch_deepspeed_load_checkpoint() {{}}\n{}",
+            "prefix\n".repeat(500),
+            "suffix\n".repeat(500)
+        );
+        let excerpt =
+            centered_exact_excerpt(&source, "_patch_deepspeed_load_checkpoint", 200).unwrap();
+        assert!(excerpt.contains("_patch_deepspeed_load_checkpoint"));
+        assert!(!excerpt.starts_with("prefix"));
+        assert!(excerpt.chars().count() <= 200);
     }
 }

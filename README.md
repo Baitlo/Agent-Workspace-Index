@@ -100,8 +100,13 @@ awi --index-dir /tmp/my-awi-index mcp \
 Memory uses a separate Tantivy index and is searched only when
 `--kind agent_memory` is requested, so adding memory cannot change ordinary
 code/data ranking. MCP search uses the compact `compact_v2` shape with a
-1,000-character preview, defaults to 8 hits, and compacts requests above 20 to
-20. Use `workspace_inspect` only after selecting a returned path.
+1,000-character preview, defaults to 5 hits, and compacts requests above 20 to
+20. Start with one identifier-rich query instead of parallel near-synonym
+searches, and expand only when the first result set lacks evidence. Use
+`workspace_inspect` only after selecting a returned path; when the exact path is
+already known, read it directly with the host's file tools. Search snippets are
+generated from bounded stored source windows, and light directory-diversity
+reranking prevents one artifact folder from filling the result set.
 
 For NFS-backed workspaces, build mutable indexes on local storage and publish
 immutable snapshots:
@@ -235,8 +240,10 @@ allowlist entries.
 
 MCP audit logging is optional. When enabled, AWI writes private (`0600`) JSONL
 records containing bounded and credential-redacted arguments, caller process,
-duration, outcome, error detail, response bytes, and hit/row counts. The active
-log rotates at 64 MiB and retains one previous file.
+duration, outcome, error detail, response bytes, text/structured payload bytes,
+hit/row counts, and separate preview-truncation and limit-compaction flags.
+Schema v3 retains the aggregate `result_truncated` field for compatibility. The
+active log rotates at 64 MiB and retains one previous file.
 
 ## Evaluation
 

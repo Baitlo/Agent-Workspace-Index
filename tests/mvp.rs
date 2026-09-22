@@ -133,6 +133,35 @@ fn indexes_code_text_and_tabular_metadata_incrementally() {
 }
 
 #[test]
+fn search_preview_is_centered_on_a_late_content_match() {
+    let fixture = tempdir().unwrap();
+    let root = fixture.path().join("workspace");
+    let index_dir = fixture.path().join("index");
+    fs::create_dir_all(&root).unwrap();
+
+    let document = root.join("notes.txt");
+    let mut source = String::from("prefix_only_marker\n");
+    for offset in 0..400 {
+        source.push_str(&format!("ordinary filler line {offset}\n"));
+    }
+    source.push_str("late_match_anchor is the relevant evidence\n");
+    fs::write(&document, source).unwrap();
+
+    let mut workspace = WorkspaceIndex::open(&index_dir).unwrap();
+    workspace
+        .index_root(&root, &IndexOptions::default())
+        .unwrap();
+
+    let hits = workspace.search("late_match_anchor", 5).unwrap();
+    let hit = hits
+        .iter()
+        .find(|hit| hit.path.ends_with("notes.txt"))
+        .unwrap();
+    assert!(hit.preview.contains("late_match_anchor"));
+    assert!(!hit.preview.contains("prefix_only_marker"));
+}
+
+#[test]
 fn indexes_agent_knowledge_with_scope_metadata_and_deduplication() {
     let fixture = tempdir().unwrap();
     let parent = fixture.path().join("parent");
@@ -468,6 +497,7 @@ fn indexes_project_scoped_agent_memory_safely_and_incrementally() {
         )
         .unwrap();
     assert_eq!(refreshed[0].path, session);
+    assert!(refreshed[0].preview.contains("fresh appendix token"));
     assert!(!refreshed[0].preview.contains("message_id"));
 
     fs::remove_file(&session).unwrap();

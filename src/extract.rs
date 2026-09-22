@@ -13,7 +13,7 @@ use tree_sitter::{Language, Node, Parser as TreeSitterParser};
 
 use crate::model::{AgentDocumentMetadata, AgentDocumentRole, FileKind, SymbolRecord};
 
-const INDEX_PREVIEW_CHARS: usize = 2_000;
+const INDEX_PREVIEW_CHARS: usize = 64 * 1024;
 const MAX_MEMORY_INDEX_CHARS: usize = 1_000_000;
 const MAX_AGENT_HEADINGS: usize = 64;
 const MAX_AGENT_REFERENCES: usize = 64;
@@ -109,7 +109,7 @@ pub(crate) fn extract_text(path: &Path, max_bytes: u64) -> Result<TextExtraction
             });
         }
     };
-    let preview = content.chars().take(INDEX_PREVIEW_CHARS).collect();
+    let preview = index_preview(&content);
     Ok(TextExtraction {
         content: Some(content),
         content_hash: Some(content_hash),
@@ -637,6 +637,14 @@ Read [architecture](references/architecture.md) before changes.
         assert!(normalized.contains("outcome: fixed"));
         assert!(!normalized.contains("secret-id"));
         assert!(!normalized.contains("digest"));
+    }
+
+    #[test]
+    fn stored_preview_is_bounded_without_splitting_unicode() {
+        let source = format!("{}tail", "数".repeat(INDEX_PREVIEW_CHARS + 1));
+        let preview = index_preview(&source);
+        assert_eq!(preview.chars().count(), INDEX_PREVIEW_CHARS);
+        assert!(!preview.contains("tail"));
     }
 
     #[test]

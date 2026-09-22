@@ -13,7 +13,7 @@ use rmcp::{ErrorData as McpError, model::CallToolResult};
 use serde::Serialize;
 use serde_json::{Map, Value, json};
 
-const AUDIT_SCHEMA_VERSION: u8 = 2;
+const AUDIT_SCHEMA_VERSION: u8 = 3;
 const DEFAULT_MAX_LOG_BYTES: u64 = 64 * 1024 * 1024;
 const MAX_RECORD_BYTES: usize = 16 * 1024;
 const MAX_STRING_CHARS: usize = 2_048;
@@ -172,9 +172,13 @@ impl McpAuditSpan {
             error_code: metrics.error_code,
             error_message: metrics.error_message,
             response_bytes: metrics.response_bytes,
+            text_content_bytes: metrics.text_content_bytes,
+            structured_content_bytes: metrics.structured_content_bytes,
             result_count: metrics.result_count,
             result_count_kind: metrics.result_count_kind,
             result_truncated: metrics.result_truncated,
+            preview_truncated: metrics.preview_truncated,
+            limit_compacted: metrics.limit_compacted,
         };
         if let Err(error) = self.logger.write(&record) {
             eprintln!(
@@ -204,11 +208,19 @@ struct AuditRecord<'a> {
     error_message: Option<String>,
     response_bytes: usize,
     #[serde(skip_serializing_if = "Option::is_none")]
+    text_content_bytes: Option<usize>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    structured_content_bytes: Option<usize>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     result_count: Option<usize>,
     #[serde(skip_serializing_if = "Option::is_none")]
     result_count_kind: Option<&'a str>,
     #[serde(skip_serializing_if = "Option::is_none")]
     result_truncated: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    preview_truncated: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    limit_compacted: Option<bool>,
 }
 
 struct ResponseMetrics {
@@ -216,9 +228,13 @@ struct ResponseMetrics {
     error_code: Option<String>,
     error_message: Option<String>,
     response_bytes: usize,
+    text_content_bytes: Option<usize>,
+    structured_content_bytes: Option<usize>,
     result_count: Option<usize>,
     result_count_kind: Option<&'static str>,
     result_truncated: Option<bool>,
+    preview_truncated: Option<bool>,
+    limit_compacted: Option<bool>,
 }
 
 fn response_metrics(
@@ -234,9 +250,13 @@ fn response_metrics(
                 .map(|value| value.to_string()),
             error_message: Some(sanitize_text(error.message.as_ref())),
             response_bytes: serde_json::to_vec(error).map_or(0, |value| value.len()),
+            text_content_bytes: None,
+            structured_content_bytes: None,
             result_count: None,
             result_count_kind: None,
             result_truncated: None,
+            preview_truncated: None,
+            limit_compacted: None,
         },
         Ok(result) => {
             let content = result.structured_content.as_ref();
@@ -284,9 +304,34 @@ fn response_metrics(
                     None
                 },
                 response_bytes: serde_json::to_vec(result).map_or(0, |value| value.len()),
+                text_content_bytes: Some(
+                    result
+                        .content
+                        .iter()
+                        .filter_map(|block| block.as_text())
+                        .map(|text| text.text.len())
+                        .sum(),
+                ),
+                structured_content_bytes: content
+                    .and_then(|value| serde_json::to_vec(value).ok())
+                    .map(|value| value.len()),
                 result_count,
                 result_count_kind,
                 result_truncated: content.and_then(|value| truncation_flag(tool, value)),
+                preview_truncated: (tool == "workspace_search")
+                    .then(|| {
+                        content
+                            .and_then(|value| value.get("previews_truncated"))
+                            .and_then(Value::as_bool)
+                    })
+                    .flatten(),
+                limit_compacted: (tool == "workspace_search")
+                    .then(|| {
+                        content
+                            .and_then(|value| value.get("limit_compacted"))
+                            .and_then(Value::as_bool)
+                    })
+                    .flatten(),
             }
         }
     }
@@ -482,7 +527,8 @@ mod tests {
         );
         let result = Ok(CallToolResult::structured(json!({
             "hits": [{"path": "result.rs"}],
-            "previews_truncated": false
+            "previews_truncated": false,
+            "limit_compacted": false
         })));
         span.finish(&result);
 
@@ -491,12 +537,17 @@ mod tests {
         assert!(!text.contains("top-secret"));
         let record: Value = serde_json::from_str(text.trim()).unwrap();
         assert_eq!(record["tool"], "workspace_search");
+        assert_eq!(record["schema_version"], 3);
         assert_eq!(record["status"], "ok");
         assert_eq!(record["result_count"], 1);
         assert_eq!(record["result_count_kind"], "hits");
         assert_eq!(record["result_truncated"], false);
+        assert_eq!(record["preview_truncated"], false);
+        assert_eq!(record["limit_compacted"], false);
         assert!(record["client_process"].as_str().is_some());
         assert!(record["response_bytes"].as_u64().unwrap() > 0);
+        assert!(record["text_content_bytes"].as_u64().unwrap() > 0);
+        assert!(record["structured_content_bytes"].as_u64().unwrap() > 0);
         assert_eq!(
             fs::metadata(&path).unwrap().permissions().mode() & 0o777,
             0o600
@@ -515,7 +566,8 @@ mod tests {
             );
             let result = Ok(CallToolResult::structured(json!({
                 "hits": [],
-                "previews_truncated": false
+                "previews_truncated": false,
+                "limit_compacted": false
             })));
             span.finish(&result);
         }
