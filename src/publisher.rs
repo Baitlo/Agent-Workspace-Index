@@ -6,6 +6,7 @@ use std::time::{Duration, Instant};
 use std::{env, fs};
 
 use anyhow::{Context, Result};
+use ignore::WalkBuilder;
 use notify::{EventKind, RecommendedWatcher, RecursiveMode, Watcher, event::ModifyKind};
 use serde::Serialize;
 
@@ -149,7 +150,7 @@ pub fn watch(index_dir: &Path, roots: &[PathBuf], config: &PublisherConfig) -> R
     let (local, remote) = partition_roots(&resolved);
 
     // Keep the watcher alive for the whole loop; dropping it stops events.
-    let (events, _watcher) = match start_watcher(&local) {
+    let (mut events, mut _watcher) = match start_watcher(&local) {
         Ok(handle) => handle,
         Err(error) => {
             eprintln!("AWI producer real-time watch unavailable; using periodic only: {error:#}");
@@ -193,6 +194,13 @@ pub fn watch(index_dir: &Path, roots: &[PathBuf], config: &PublisherConfig) -> R
                     thread::sleep(config.debounce - since);
                     drain_debounced(&events, Duration::ZERO);
                 }
+                // A directory create event is observed by its watched parent,
+                // but later writes beneath that new directory need their own
+                // non-recursive watch.
+                if let Ok((refreshed_events, refreshed_watcher)) = start_watcher(&local) {
+                    events = refreshed_events;
+                    _watcher = refreshed_watcher;
+                }
                 &local
             }
             Err(RecvTimeoutError::Timeout) => &resolved,
@@ -226,11 +234,9 @@ fn run_cycle(workspace: &mut WorkspaceIndex, roots: &[PathBuf], config: &Publish
     }
 }
 
-/// Start a recursive watcher over the local roots. Returns the event receiver
-/// and the watcher handle, which must be kept alive for events to flow. Events
-/// whose every path lies under a default-excluded directory (`.git`, caches,
-/// build output, and similar) are dropped so churn there cannot wake the
-/// reconcile loop.
+/// Start non-recursive watches on every indexed directory. Enumerating with the
+/// same ignore rules as indexing avoids notify's recursive traversal through
+/// excluded trees and symlinked mounts.
 fn start_watcher(local_roots: &[PathBuf]) -> Result<(Receiver<()>, Option<RecommendedWatcher>)> {
     if local_roots.is_empty() {
         return Ok((channel().1, None));
@@ -262,34 +268,40 @@ fn start_watcher(local_roots: &[PathBuf]) -> Result<(Receiver<()>, Option<Recomm
         }
     })
     .context("create filesystem watcher")?;
-    let mut targets = BTreeMap::<PathBuf, bool>::new();
-    for root in local_roots {
-        let (target, recursive) = if root.is_dir() {
-            (root.clone(), true)
-        } else {
-            (root.parent().unwrap_or(root).to_owned(), false)
-        };
-        if !target.exists() {
-            continue;
-        }
-        targets
-            .entry(target)
-            .and_modify(|value| *value |= recursive)
-            .or_insert(recursive);
-    }
-    for (target, recursive) in targets {
+    for target in watcher_targets(local_roots) {
         watcher
-            .watch(
-                &target,
-                if recursive {
-                    RecursiveMode::Recursive
-                } else {
-                    RecursiveMode::NonRecursive
-                },
-            )
+            .watch(&target, RecursiveMode::NonRecursive)
             .with_context(|| format!("watch root {}", target.display()))?;
     }
     Ok((receiver, Some(watcher)))
+}
+
+fn watcher_targets(local_roots: &[PathBuf]) -> Vec<PathBuf> {
+    let mut targets = BTreeMap::<PathBuf, ()>::new();
+    for root in local_roots {
+        if root.is_dir() {
+            let mut builder = WalkBuilder::new(root);
+            builder
+                .hidden(false)
+                .git_ignore(true)
+                .git_exclude(true)
+                .parents(true)
+                .follow_links(false)
+                .add_custom_ignore_filename(".awiignore");
+            for entry in builder
+                .filter_entry(|entry| !is_default_excluded(entry.path()))
+                .build()
+                .filter_map(|entry| entry.ok())
+            {
+                if entry.file_type().is_some_and(|kind| kind.is_dir()) {
+                    targets.insert(entry.into_path(), ());
+                }
+            }
+        } else if root.exists() {
+            targets.insert(root.parent().unwrap_or(root).to_owned(), ());
+        }
+    }
+    targets.into_keys().collect()
 }
 
 fn is_content_change(kind: &EventKind) -> bool {
@@ -403,7 +415,10 @@ fn unescape_mount(value: &str) -> String {
 
 #[cfg(test)]
 mod tests {
+    use std::fs;
+
     use notify::event::{AccessKind, DataChange, MetadataKind};
+    use tempfile::tempdir;
 
     use super::*;
 
@@ -450,6 +465,31 @@ mod tests {
         let missing = PathBuf::from("/tmp/awi-missing-root-parent/SKILL.md");
         let result = start_watcher(&[missing]);
         assert!(result.is_ok());
+    }
+
+    #[test]
+    fn watcher_targets_skip_generated_directories_and_symlinks() {
+        let fixture = tempdir().unwrap();
+        let root = fixture.path().join("workspace");
+        fs::create_dir_all(root.join("src")).unwrap();
+        fs::create_dir_all(root.join(".codex-work/task/src")).unwrap();
+        fs::create_dir_all(root.join(".worktrees/feature/src")).unwrap();
+        std::os::unix::fs::symlink("/tmp", root.join("external")).unwrap();
+
+        let targets = watcher_targets(std::slice::from_ref(&root));
+        assert!(targets.contains(&root));
+        assert!(targets.contains(&root.join("src")));
+        assert!(
+            !targets
+                .iter()
+                .any(|path| path.starts_with(root.join(".codex-work")))
+        );
+        assert!(
+            !targets
+                .iter()
+                .any(|path| path.starts_with(root.join(".worktrees")))
+        );
+        assert!(!targets.contains(&root.join("external")));
     }
 
     #[test]
