@@ -310,7 +310,7 @@ impl WorkspaceIndex {
         let overfetch = if filtered {
             limit.saturating_mul(20).clamp(200, 1_000)
         } else {
-            limit.saturating_mul(4).max(20)
+            limit.saturating_mul(10).max(100)
         };
         let include_agent_lane = context_path.is_some()
             || kind_filter

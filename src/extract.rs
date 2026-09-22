@@ -278,6 +278,8 @@ pub(crate) fn is_default_excluded(path: &Path) -> bool {
                     | ".idea"
                     | ".vscode"
                     | ".cache"
+                    | ".codex-work"
+                    | ".worktrees"
             )
         )
     })
@@ -681,6 +683,8 @@ Read [architecture](references/architecture.md) before changes.
             "repo/.idea/workspace.xml",
             "repo/.vscode/settings.json",
             "repo/.cache/blob",
+            "repo/.codex-work/task/src/lib.rs",
+            "repo/.worktrees/feature/src/lib.rs",
             "repo/.awi-index/catalog.sqlite3",
         ] {
             assert!(
