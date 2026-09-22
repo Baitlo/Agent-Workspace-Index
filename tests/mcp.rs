@@ -118,10 +118,24 @@ fn mcp_stdio_exposes_search_inspect_and_query() {
     let hits = searched["result"]["structuredContent"]["hits"]
         .as_array()
         .unwrap();
+    assert_eq!(
+        searched["result"]["structuredContent"]["format"],
+        "compact_v2"
+    );
+    assert_eq!(
+        searched["result"]["structuredContent"]["requested_limit"],
+        5
+    );
+    assert_eq!(
+        searched["result"]["structuredContent"]["effective_limit"],
+        5
+    );
     assert!(
         hits.iter()
             .any(|hit| hit["path"].as_str().unwrap().ends_with("service.rs"))
     );
+    assert!(hits.iter().all(|hit| hit.get("file_id").is_none()));
+    assert!(hits.iter().all(|hit| hit.get("size_bytes").is_none()));
 
     let agent_search = mcp.request(
         31,
@@ -241,6 +255,12 @@ fn mcp_stdio_exposes_search_inspect_and_query() {
             .as_str()
             .unwrap()
             .contains("not an indexed workspace root")
+    );
+    assert!(
+        escaped["result"]["structuredContent"]["error"]["recovery"]
+            .as_str()
+            .unwrap()
+            .contains("exact registered root")
     );
 
     let invalid = mcp.request(

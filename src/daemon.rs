@@ -3,6 +3,8 @@ use std::io::{BufRead, BufReader, BufWriter, Write};
 use std::os::unix::fs::{FileTypeExt, PermissionsExt};
 use std::os::unix::net::{UnixListener, UnixStream};
 use std::path::{Path, PathBuf};
+use std::sync::mpsc::{self, Receiver, TryRecvError};
+use std::thread;
 use std::time::{Duration, Instant};
 
 use anyhow::{Context, Result};
@@ -11,7 +13,7 @@ use serde_json::{Value, json};
 
 use crate::WorkspaceIndex;
 use crate::protocol::{PROTOCOL_VERSION, Request, RequestEnvelope, ResponseEnvelope};
-use crate::snapshot::{materialize_latest, read_pointer};
+use crate::snapshot::{ActivatedSnapshot, materialize_latest, read_pointer};
 
 const MAX_REQUEST_BYTES: usize = 1024 * 1024;
 const MAX_RESPONSE_BYTES: usize = 16 * 1024 * 1024;
@@ -67,7 +69,7 @@ pub fn serve_with_snapshots(
                         "AWI snapshot refresh failed; keeping last valid snapshot: {error:#}"
                     );
                 }
-                if handle_connection(stream, &mut workspace, follower.is_some())? {
+                if handle_connection_resilient(stream, &mut workspace, follower.is_some()) {
                     break;
                 }
             }
@@ -76,6 +78,20 @@ pub fn serve_with_snapshots(
         }
     }
     Ok(())
+}
+
+fn handle_connection_resilient(
+    stream: UnixStream,
+    workspace: &mut WorkspaceIndex,
+    snapshot_read_only: bool,
+) -> bool {
+    match handle_connection(stream, workspace, snapshot_read_only) {
+        Ok(shutdown) => shutdown,
+        Err(error) => {
+            eprintln!("AWI daemon connection failed; continuing: {error:#}");
+            false
+        }
+    }
 }
 
 pub fn try_request(socket_path: &Path, request: &Request) -> Result<Option<Value>> {
@@ -233,6 +249,7 @@ struct SnapshotFollower {
     active_path: PathBuf,
     poll_interval: Duration,
     next_poll: Instant,
+    pending: Option<Receiver<Result<Option<ActivatedSnapshot>>>>,
 }
 
 impl SnapshotFollower {
@@ -245,27 +262,56 @@ impl SnapshotFollower {
             active_path: activated.path,
             poll_interval,
             next_poll: Instant::now() + poll_interval,
+            pending: None,
         })
     }
 
     fn refresh(&mut self, workspace: &mut WorkspaceIndex) -> Result<()> {
+        if let Some(receiver) = self.pending.take() {
+            match receiver.try_recv() {
+                Ok(Ok(Some(activated))) => {
+                    let replacement = WorkspaceIndex::open(&activated.path)?;
+                    *workspace = replacement;
+                    self.active_generation = activated.generation;
+                    self.active_path = activated.path;
+                    eprintln!(
+                        "AWI daemon activated snapshot generation {}",
+                        self.active_generation
+                    );
+                }
+                Ok(Ok(None)) => {}
+                Ok(Err(error)) => return Err(error),
+                Err(TryRecvError::Empty) => {
+                    self.pending = Some(receiver);
+                    return Ok(());
+                }
+                Err(TryRecvError::Disconnected) => {
+                    anyhow::bail!("AWI snapshot refresh worker disconnected");
+                }
+            }
+        }
         if Instant::now() < self.next_poll {
             return Ok(());
         }
         self.next_poll = Instant::now() + self.poll_interval;
-        let pointer = read_pointer(&self.publish_dir)?;
-        if pointer.generation == self.active_generation {
-            return Ok(());
-        }
-        let activated = materialize_latest(&self.publish_dir, &self.cache_dir)?;
-        let replacement = WorkspaceIndex::open(&activated.path)?;
-        *workspace = replacement;
-        self.active_generation = activated.generation;
-        self.active_path = activated.path;
-        eprintln!(
-            "AWI daemon activated snapshot generation {}",
-            self.active_generation
-        );
+        let publish_dir = self.publish_dir.clone();
+        let cache_dir = self.cache_dir.clone();
+        let active_generation = self.active_generation;
+        let (sender, receiver) = mpsc::channel();
+        thread::Builder::new()
+            .name("awi-snapshot-refresh".to_owned())
+            .spawn(move || {
+                let result = (|| {
+                    let pointer = read_pointer(&publish_dir)?;
+                    if pointer.generation == active_generation {
+                        return Ok(None);
+                    }
+                    materialize_latest(&publish_dir, &cache_dir).map(Some)
+                })();
+                let _ = sender.send(result);
+            })
+            .context("spawn AWI snapshot refresh worker")?;
+        self.pending = Some(receiver);
         Ok(())
     }
 }
@@ -305,5 +351,50 @@ struct SocketGuard(PathBuf);
 impl Drop for SocketGuard {
     fn drop(&mut self) {
         let _ = fs::remove_file(&self.0);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::time::Duration;
+
+    use tempfile::tempdir;
+
+    use super::*;
+    use crate::IndexOptions;
+
+    #[test]
+    fn snapshot_refresh_is_scheduled_without_blocking_the_request_path() {
+        let fixture = tempdir().unwrap();
+        let root = fixture.path().join("workspace");
+        let writer_index = fixture.path().join("writer");
+        let publish_dir = fixture.path().join("published");
+        let cache_dir = fixture.path().join("cache");
+        let source = root.join("service.rs");
+        fs::create_dir_all(&root).unwrap();
+        fs::write(&source, "fn version_one() {}\n").unwrap();
+
+        let mut writer = WorkspaceIndex::open(&writer_index).unwrap();
+        writer.index_root(&root, &IndexOptions::default()).unwrap();
+        writer.publish_snapshot(&publish_dir).unwrap();
+
+        let mut follower = SnapshotFollower::new(&publish_dir, &cache_dir, Duration::ZERO).unwrap();
+        let mut reader = WorkspaceIndex::open(&follower.active_path).unwrap();
+        fs::write(&source, "fn version_two() {}\n").unwrap();
+        writer.index_root(&root, &IndexOptions::default()).unwrap();
+        writer.publish_snapshot(&publish_dir).unwrap();
+
+        follower.refresh(&mut reader).unwrap();
+        assert_eq!(follower.active_generation, 1);
+        assert!(follower.pending.is_some());
+
+        let deadline = Instant::now() + Duration::from_secs(5);
+        while follower.active_generation == 1 {
+            follower.refresh(&mut reader).unwrap();
+            assert!(Instant::now() < deadline);
+            thread::sleep(Duration::from_millis(10));
+        }
+        assert_eq!(follower.active_generation, 2);
+        assert_eq!(reader.search("version_two", 5).unwrap().len(), 1);
     }
 }

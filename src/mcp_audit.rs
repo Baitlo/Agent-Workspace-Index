@@ -13,7 +13,7 @@ use rmcp::{ErrorData as McpError, model::CallToolResult};
 use serde::Serialize;
 use serde_json::{Map, Value, json};
 
-const AUDIT_SCHEMA_VERSION: u8 = 1;
+const AUDIT_SCHEMA_VERSION: u8 = 2;
 const DEFAULT_MAX_LOG_BYTES: u64 = 64 * 1024 * 1024;
 const MAX_RECORD_BYTES: usize = 16 * 1024;
 const MAX_STRING_CHARS: usize = 2_048;
@@ -27,6 +27,7 @@ pub(crate) struct McpAuditLogger {
     lock_path: PathBuf,
     sequence: AtomicU64,
     max_log_bytes: u64,
+    client_process: Option<String>,
 }
 
 impl McpAuditLogger {
@@ -49,6 +50,7 @@ impl McpAuditLogger {
             lock_path,
             sequence: AtomicU64::new(0),
             max_log_bytes,
+            client_process: parent_process_name(),
         }))
     }
 
@@ -160,6 +162,7 @@ impl McpAuditSpan {
             schema_version: AUDIT_SCHEMA_VERSION,
             timestamp_unix_ms: self.started_at_unix_ms,
             pid: std::process::id(),
+            client_process: self.logger.client_process.as_deref(),
             sequence: self.sequence,
             tool: self.tool,
             arguments: self.arguments,
@@ -167,6 +170,7 @@ impl McpAuditSpan {
             duration_ms: self.started.elapsed().as_millis(),
             status: metrics.status,
             error_code: metrics.error_code,
+            error_message: metrics.error_message,
             response_bytes: metrics.response_bytes,
             result_count: metrics.result_count,
             result_count_kind: metrics.result_count_kind,
@@ -186,6 +190,8 @@ struct AuditRecord<'a> {
     schema_version: u8,
     timestamp_unix_ms: u64,
     pid: u32,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    client_process: Option<&'a str>,
     sequence: u64,
     tool: &'a str,
     arguments: Value,
@@ -194,6 +200,8 @@ struct AuditRecord<'a> {
     status: &'a str,
     #[serde(skip_serializing_if = "Option::is_none")]
     error_code: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    error_message: Option<String>,
     response_bytes: usize,
     #[serde(skip_serializing_if = "Option::is_none")]
     result_count: Option<usize>,
@@ -206,6 +214,7 @@ struct AuditRecord<'a> {
 struct ResponseMetrics {
     status: &'static str,
     error_code: Option<String>,
+    error_message: Option<String>,
     response_bytes: usize,
     result_count: Option<usize>,
     result_count_kind: Option<&'static str>,
@@ -223,6 +232,7 @@ fn response_metrics(
                 .ok()
                 .and_then(|value| value.as_i64())
                 .map(|value| value.to_string()),
+            error_message: Some(sanitize_text(error.message.as_ref())),
             response_bytes: serde_json::to_vec(error).map_or(0, |value| value.len()),
             result_count: None,
             result_count_kind: None,
@@ -265,6 +275,14 @@ fn response_metrics(
                 } else {
                     None
                 },
+                error_message: if is_error {
+                    content
+                        .and_then(|value| value.pointer("/error/message"))
+                        .map(value_string)
+                        .map(|message| sanitize_text(&message))
+                } else {
+                    None
+                },
                 response_bytes: serde_json::to_vec(result).map_or(0, |value| value.len()),
                 result_count,
                 result_count_kind,
@@ -276,7 +294,10 @@ fn response_metrics(
 
 fn truncation_flag(tool: &str, content: &Value) -> Option<bool> {
     match tool {
-        "workspace_search" => content.get("previews_truncated").and_then(Value::as_bool),
+        "workspace_search" => ["previews_truncated", "limit_compacted"]
+            .into_iter()
+            .filter_map(|key| content.get(key).and_then(Value::as_bool))
+            .reduce(|left, right| left || right),
         "workspace_inspect" => content.get("coverage").and_then(|coverage| {
             [
                 "symbols_truncated",
@@ -337,6 +358,7 @@ fn sanitize_text(value: &str) -> String {
     let value = bearer_regex().replace_all(value, "${1}[REDACTED]");
     let value = assignment_regex().replace_all(&value, "$1$2[REDACTED]");
     let value = sk_token_regex().replace_all(&value, "[REDACTED]");
+    let value = value.replace("[REDACTED] [REDACTED]", "[REDACTED]");
     truncate_chars(&value, MAX_STRING_CHARS)
 }
 
@@ -418,6 +440,18 @@ fn unix_time_ms() -> u64 {
         .unwrap_or(u64::MAX)
 }
 
+fn parent_process_name() -> Option<String> {
+    let status = fs::read_to_string("/proc/self/status").ok()?;
+    let parent_pid = status.lines().find_map(|line| {
+        line.strip_prefix("PPid:")
+            .map(str::trim)
+            .and_then(|value| value.parse::<u32>().ok())
+    })?;
+    let name = fs::read_to_string(format!("/proc/{parent_pid}/comm")).ok()?;
+    let name = sanitize_text(name.trim());
+    (!name.is_empty()).then_some(name)
+}
+
 fn value_string(value: &Value) -> String {
     value
         .as_str()
@@ -461,6 +495,7 @@ mod tests {
         assert_eq!(record["result_count"], 1);
         assert_eq!(record["result_count_kind"], "hits");
         assert_eq!(record["result_truncated"], false);
+        assert!(record["client_process"].as_str().is_some());
         assert!(record["response_bytes"].as_u64().unwrap() > 0);
         assert_eq!(
             fs::metadata(&path).unwrap().permissions().mode() & 0o777,
@@ -489,5 +524,25 @@ mod tests {
         assert!(rotated.is_file());
         assert!(fs::metadata(&path).unwrap().len() <= 1_200);
         assert!(fs::metadata(&rotated).unwrap().len() <= 1_200);
+    }
+
+    #[test]
+    fn records_redacted_tool_error_message() {
+        let fixture = tempdir().unwrap();
+        let path = fixture.path().join("calls.jsonl");
+        let logger = McpAuditLogger::open(&path).unwrap();
+        let span = logger.span("workspace_inspect", json!({"path": "/missing"}));
+        let result = Ok(CallToolResult::structured_error(json!({
+            "error": {
+                "code": "inspect_failed",
+                "message": "authorization: Bearer abcdefghijk"
+            }
+        })));
+        span.finish(&result);
+
+        let record: Value =
+            serde_json::from_str(fs::read_to_string(&path).unwrap().trim()).unwrap();
+        assert_eq!(record["error_code"], "inspect_failed");
+        assert_eq!(record["error_message"], "authorization: [REDACTED]");
     }
 }

@@ -99,7 +99,9 @@ awi --index-dir /tmp/my-awi-index mcp \
 
 Memory uses a separate Tantivy index and is searched only when
 `--kind agent_memory` is requested, so adding memory cannot change ordinary
-code/data ranking.
+code/data ranking. MCP search uses the compact `compact_v2` shape with a
+1,000-character preview, defaults to 8 hits, and compacts requests above 20 to
+20. Use `workspace_inspect` only after selecting a returned path.
 
 For NFS-backed workspaces, build mutable indexes on local storage and publish
 immutable snapshots:
@@ -120,6 +122,12 @@ publishes a new immutable snapshot only when content changed; the
 snapshot-following reader atomically switches to each new generation on its next
 request. This closes the loop end to end: edit a file, and the reader reflects
 it automatically.
+
+Snapshot download and checksum validation run on a background refresh worker.
+Requests continue against the last valid generation while a new snapshot is
+materialized, avoiding NFS refresh pauses on the query path.
+An individual client disconnect or write failure is logged without terminating
+the shared daemon.
 
 Local-disk roots are watched in real time (inotify), so edits publish within the
 debounce window. Remote roots (NFS and similar, detected via `/proc/mounts`) and
@@ -226,9 +234,9 @@ parent scope that contains indexed roots. Structured-query roots remain exact
 allowlist entries.
 
 MCP audit logging is optional. When enabled, AWI writes private (`0600`) JSONL
-records containing bounded and credential-redacted arguments, duration, outcome,
-response bytes, and hit/row counts. The active log rotates at 64 MiB and retains
-one previous file.
+records containing bounded and credential-redacted arguments, caller process,
+duration, outcome, error detail, response bytes, and hit/row counts. The active
+log rotates at 64 MiB and retains one previous file.
 
 ## Evaluation
 

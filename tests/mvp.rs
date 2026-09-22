@@ -1,4 +1,7 @@
 use std::fs;
+use std::io::Write;
+use std::net::Shutdown;
+use std::os::unix::net::UnixStream;
 use std::path::Path;
 use std::process::{Child, Command, Output, Stdio};
 use std::thread;
@@ -564,6 +567,16 @@ fn daemon_serves_cli_requests_and_stops_cleanly() {
     let ping = run_json(&index_dir, &socket, &["ping", "--json"]);
     assert_eq!(ping["service"], "awi");
     assert_eq!(ping["protocol_version"], 3);
+
+    let mut disconnected = UnixStream::connect(&socket).unwrap();
+    disconnected
+        .write_all(b"{\"protocol_version\":3,\"request\":{\"method\":\"ping\"}}\n")
+        .unwrap();
+    disconnected.shutdown(Shutdown::Both).unwrap();
+    drop(disconnected);
+    thread::sleep(Duration::from_millis(20));
+    let ping_after_disconnect = run_json(&index_dir, &socket, &["ping", "--json"]);
+    assert_eq!(ping_after_disconnect["service"], "awi");
 
     let report = run_json(&index_dir, &socket, &["index", path(&root), "--json"]);
     assert_eq!(report["indexed"], 1);

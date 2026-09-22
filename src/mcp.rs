@@ -16,15 +16,16 @@ use crate::mcp_audit::{McpAuditLogger, McpAuditSpan};
 use crate::protocol::Request;
 use crate::{InspectResult, QueryInput, QueryRequest, QueryResult, SearchHit, WorkspaceIndex};
 
-const DEFAULT_SEARCH_LIMIT: usize = 10;
+const DEFAULT_SEARCH_LIMIT: usize = 8;
 const MAX_SEARCH_LIMIT: usize = 50;
+const MAX_RETURNED_SEARCH_HITS: usize = 20;
 const MAX_QUERY_CHARS: usize = 4_096;
-const MAX_PREVIEW_CHARS: usize = 2_000;
+const MAX_PREVIEW_CHARS: usize = 1_000;
 const DEFAULT_SYMBOL_LIMIT: usize = 200;
 const MAX_SYMBOL_LIMIT: usize = 1_000;
-const DEFAULT_INSPECT_LINES: usize = 120;
+const DEFAULT_INSPECT_LINES: usize = 80;
 const MAX_INSPECT_LINES: usize = 500;
-const DEFAULT_INSPECT_CHARS: usize = 32 * 1024;
+const DEFAULT_INSPECT_CHARS: usize = 16 * 1024;
 const MAX_INSPECT_CHARS: usize = 64 * 1024;
 const MAX_DATASET_COLUMNS: usize = 500;
 const MAX_DATASET_COLUMN_NAME_CHARS: usize = 256;
@@ -42,22 +43,28 @@ pub struct WorkspaceSearchRequest {
     /// Terms, path fragments, symbol names, or dataset columns to find.
     #[schemars(length(min = 1, max = 4_096))]
     pub query: String,
-    /// Maximum number of ranked results. Defaults to 10 and cannot exceed 50.
+    /// Requested ranked results. Defaults to 8; values above 20 are accepted for
+    /// compatibility but compacted to 20. Prefer 5-10 and refine the query.
+    #[serde(default)]
     #[schemars(schema_with = "optional_integer_schema", range(min = 1, max = 50))]
     pub limit: Option<usize>,
     /// Optional search scopes. A registered root or an existing parent directory
     /// containing one or more registered roots is accepted.
+    #[serde(default)]
     pub roots: Option<Vec<PathBuf>>,
     /// Optional file kinds. Use source for code; text for SQL/Markdown/logs;
     /// agent_instructions for AGENTS.md; agent_skill for SKILL.md;
     /// agent_memory for project-scoped cross-Agent memory;
     /// semi_structured for .json; tabular for .csv/.tsv/.jsonl/.ndjson/.parquet.
     /// Omit this filter when the file kind is uncertain.
+    #[serde(default)]
     pub kinds: Option<Vec<String>>,
     /// Optional absolute or root-relative path prefix.
+    #[serde(default)]
     pub path_prefix: Option<String>,
     /// Optional workspace file or directory whose applicable AGENTS.md hierarchy
-    /// should be included and ranked from broadest to nearest scope.
+    /// and project-scoped Agent memory should be included and ranked.
+    #[serde(default)]
     pub context_path: Option<PathBuf>,
 }
 
@@ -66,15 +73,19 @@ pub struct WorkspaceInspectRequest {
     /// Absolute or current-workspace-relative path already present in the index.
     pub path: PathBuf,
     /// Maximum number of symbols to return. Defaults to 200 and cannot exceed 1000.
+    #[serde(default)]
     #[schemars(schema_with = "optional_integer_schema", range(min = 1, max = 1_000))]
     pub max_symbols: Option<usize>,
     /// First one-based source line to return. Defaults to 1.
+    #[serde(default)]
     #[schemars(schema_with = "optional_integer_schema", range(min = 1))]
     pub start_line: Option<usize>,
-    /// Maximum source lines to return. Defaults to 120 and cannot exceed 500.
+    /// Maximum source lines to return. Defaults to 80 and cannot exceed 500.
+    #[serde(default)]
     #[schemars(schema_with = "optional_integer_schema", range(min = 1, max = 500))]
     pub max_lines: Option<usize>,
-    /// Maximum source characters to return. Defaults to 32768 and cannot exceed 65536.
+    /// Maximum source characters to return. Defaults to 16384 and cannot exceed 65536.
+    #[serde(default)]
     #[schemars(schema_with = "optional_integer_schema", range(min = 1, max = 65_536))]
     pub max_chars: Option<usize>,
 }
@@ -84,6 +95,7 @@ pub struct WorkspaceQueryInput {
     /// CSV, TSV, JSON, JSONL, NDJSON, or Parquet file beneath an allowed root.
     pub path: PathBuf,
     /// SQL relation name. Defaults to data_0, data_1, and so on.
+    #[serde(default)]
     pub alias: Option<String>,
 }
 
@@ -97,15 +109,18 @@ pub struct WorkspaceQueryRequest {
     /// Explicit input files exposed as SQL relations.
     pub inputs: Vec<WorkspaceQueryInput>,
     /// Maximum returned rows. Defaults to 100 and cannot exceed 1000.
+    #[serde(default)]
     #[schemars(schema_with = "optional_integer_schema", range(min = 1, max = 1_000))]
     pub max_rows: Option<usize>,
     /// Maximum serialized result bytes. Defaults to 1 MiB and cannot exceed 2 MiB.
+    #[serde(default)]
     #[schemars(
         schema_with = "optional_integer_schema",
         range(min = 1_024, max = 2_097_152)
     )]
     pub max_bytes: Option<usize>,
     /// Query timeout in milliseconds. Defaults to 10 seconds and cannot exceed 30 seconds.
+    #[serde(default)]
     #[schemars(schema_with = "optional_integer_schema", range(min = 1, max = 30_000))]
     pub timeout_ms: Option<u64>,
 }
@@ -165,11 +180,10 @@ impl AwiMcpServer {
 
 #[tool_router]
 impl AwiMcpServer {
-    /// Preferred first step for locating code, symbols, docs, or dataset schemas in
-    /// an indexed workspace: use this before shell grep or file walking. Hybrid
-    /// ranking over indexed paths, source text, symbols, and dataset columns. Each
-    /// non-empty preview is a direct excerpt from the same indexed generation; use
-    /// it as evidence and inspect only when the required detail is absent.
+    /// Preferred first step for locating code, symbols, docs, Agent instructions,
+    /// Skills, memory, or dataset schemas in an indexed workspace. For prior
+    /// decisions/history, set kinds=["agent_memory"] and pass context_path. Prefer
+    /// limit 5-10, use previews as evidence, and inspect only selected paths.
     #[tool(
         name = "workspace_search",
         annotations(
@@ -212,8 +226,8 @@ impl AwiMcpServer {
             );
         }
 
-        let limit = arguments.limit.unwrap_or(DEFAULT_SEARCH_LIMIT);
-        if !(1..=MAX_SEARCH_LIMIT).contains(&limit) {
+        let requested_limit = arguments.limit.unwrap_or(DEFAULT_SEARCH_LIMIT);
+        if !(1..=MAX_SEARCH_LIMIT).contains(&requested_limit) {
             return audited(
                 audit,
                 Err(McpError::invalid_params(
@@ -222,6 +236,7 @@ impl AwiMcpServer {
                 )),
             );
         }
+        let limit = effective_search_limit(requested_limit);
 
         let value = match self
             .execute(Request::Search {
@@ -252,19 +267,26 @@ impl AwiMcpServer {
         for hit in &mut hits {
             previews_truncated |= truncate_chars(&mut hit.preview, MAX_PREVIEW_CHARS);
         }
+        let hits = hits.into_iter().map(compact_search_hit).collect::<Vec<_>>();
+        let returned = hits.len();
 
         audited(
             audit,
             Ok(bounded_result(json!({
                 "hits": hits,
-                "previews_truncated": previews_truncated
+                "returned": returned,
+                "requested_limit": requested_limit,
+                "effective_limit": limit,
+                "limit_compacted": requested_limit > limit,
+                "previews_truncated": previews_truncated,
+                "format": "compact_v2"
             }))),
         )
     }
 
-    /// Inspect metadata, symbols, schema, and a bounded line-numbered text excerpt.
-    /// For long text with facts spread across the file, request up to 500 lines in the
-    /// first call instead of paging through several smaller excerpts.
+    /// Inspect one path returned by workspace_search. Returns metadata, symbols,
+    /// schema, and a bounded line-numbered excerpt. If a path was not returned by
+    /// search, use ordinary file tools instead of probing unindexed paths.
     #[tool(
         name = "workspace_inspect",
         annotations(
@@ -390,6 +412,7 @@ impl AwiMcpServer {
                 "symbols": result.symbols,
                 "dataset": result.dataset,
                 "agent": result.agent,
+                "memory": result.memory,
                 "content": result.content,
                 "coverage": {
                     "total_symbols": total_symbols,
@@ -509,8 +532,10 @@ impl ServerHandler for AwiMcpServer {
             .with_instructions(
                 "For any code, symbol, document, Agent instruction, skill, memory, or dataset lookup inside \
                  an indexed workspace, use workspace_search first, before shell grep or file \
-                 walking. Pass context_path when resolving applicable AGENTS.md instructions or \
-                 project-scoped Agent memory. \
+                 walking. For prior decisions, history, or cross-Agent memory, set \
+                 kinds=[\"agent_memory\"] and pass context_path. Pass context_path when resolving \
+                 applicable AGENTS.md instructions. Prefer limit 5-10 and refine the query instead \
+                 of requesting broad 20-50 result lists. \
                  Non-empty previews are direct excerpts from the indexed generation and are \
                  sufficient evidence when they contain the required facts. Once an authoritative \
                  path is selected, do not repeat discovery searches. Use one workspace_inspect \
@@ -594,12 +619,59 @@ fn execute_request(index_dir: &Path, socket_path: &Path, request: Request) -> Re
 }
 
 fn tool_error(code: &str, error: &anyhow::Error) -> CallToolResult {
+    let recovery = match code {
+        "search_failed" => Some(
+            "Omit roots or use a registered root/parent scope; use a short query and retry once.",
+        ),
+        "inspect_failed" => Some(
+            "Call workspace_search first and inspect only a returned path; otherwise use ordinary file tools.",
+        ),
+        "query_failed" => Some(
+            "Use an exact registered root and explicit structured input files with one read-only SELECT/WITH statement.",
+        ),
+        _ => None,
+    };
     CallToolResult::structured_error(json!({
         "error": {
             "code": code,
-            "message": format!("{error:#}")
+            "message": format!("{error:#}"),
+            "recovery": recovery
         }
     }))
+}
+
+fn compact_search_hit(hit: SearchHit) -> Value {
+    let mut value = json!({
+        "path": hit.path,
+        "kind": hit.kind,
+        "score": hit.score,
+        "matched_lanes": hit.matched_lanes,
+        "preview": hit.preview,
+        "generation": hit.generation
+    });
+    let object = value.as_object_mut().expect("search hit is an object");
+    if let Some(experiment) = hit.experiment {
+        object.insert("experiment".to_owned(), Value::String(experiment));
+    }
+    if let Some(agent) = hit.agent {
+        object.insert(
+            "agent".to_owned(),
+            json!({
+                "role": agent.role,
+                "name": agent.name,
+                "description": agent.description,
+                "scope_root": agent.scope_root
+            }),
+        );
+    }
+    if let Some(memory) = hit.memory {
+        object.insert("memory".to_owned(), json!(memory));
+    }
+    value
+}
+
+fn effective_search_limit(requested: usize) -> usize {
+    requested.min(MAX_RETURNED_SEARCH_HITS)
 }
 
 fn bounded_result(value: Value) -> CallToolResult {
@@ -665,5 +737,18 @@ mod tests {
                 "MCP schema must not expose Rust-specific unsigned integer formats"
             );
         }
+    }
+
+    #[test]
+    fn compacts_broad_search_limits_without_rejecting_compatible_requests() {
+        assert_eq!(effective_search_limit(5), 5);
+        assert_eq!(effective_search_limit(20), 20);
+        assert_eq!(effective_search_limit(50), 20);
+    }
+
+    #[test]
+    fn optional_tool_parameters_are_not_required_by_the_schema() {
+        let schema = serde_json::to_value(schemars::schema_for!(WorkspaceSearchRequest)).unwrap();
+        assert_eq!(schema["required"], json!(["query"]));
     }
 }

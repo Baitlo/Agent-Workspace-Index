@@ -495,7 +495,11 @@ impl WorkspaceIndex {
             .catalog
             .current_file_by_path(&absolute_path)?
             .with_context(|| {
-                format!("path is not present in the current index: {absolute_path}")
+                format!(
+                    "path is not present in the current index: {absolute_path}; \
+                     use workspace_search first and inspect only a returned path, or use \
+                     ordinary file tools when search has no matching hit"
+                )
             })?;
         let symbols = self.catalog.symbols_for(file.id)?;
         let dataset = self.catalog.dataset_profile_for(file.id)?;
