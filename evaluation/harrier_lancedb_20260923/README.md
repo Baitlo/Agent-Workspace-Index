@@ -2,7 +2,7 @@
 
 Date: 2026-09-23
 
-Status: exploration complete; production integration not enabled.
+Status: production integration enabled with lexical fail-open; quality gate pending dual review.
 
 ## Decision
 
@@ -13,7 +13,7 @@ single-artifact runtime.
 
 - `ffn_skip` preserved Recall@10 at 0.875, reached 2,641 tokens/s, and used
   2,150 MiB peak RSS on the test worker.
-- GGUF Q8 is the fidelity fallback: its median document cosine against the
+- GGUF Q8 is the selected production backend: its median document cosine against the
   official FP32 model was 0.99960 and its ranking metrics were effectively
   unchanged, but it was materially slower on this AMD EPYC CPU.
 - The official FP32 model remains the quality reference and was already fast
@@ -24,9 +24,9 @@ single-artifact runtime.
 - Do not use the 0.6B model as the default CPU path. A partial full-corpus run
   processed only 400 of 1,139 inputs in roughly 8.5 minutes and was stopped.
 
-This is not a release decision. The 16-query set is a development candidate
-pending dual review, Recall@10 remains below AWI's 0.95 release gate, and the
-fusion strategy still needs a clean, leakage-free evaluation.
+The operational deployment is not evidence of a quality-gated release. The
+16-query set remains a development candidate pending dual review, and semantic
+Recall@10 remains below AWI's 0.95 release gate.
 
 ## Model Contract
 
@@ -83,6 +83,30 @@ zero benchmark-artifact candidates. The raw candidate report is retained only
 to make this invalidation auditable. Production fusion should use a clean
 candidate run plus type-aware scopes and calibrated weights.
 
+## Production Integration
+
+The production-scale run evaluated local writer generation 37951 with Harrier
+270M GGUF Q8, 48 query threads, concurrent lexical and semantic retrieval, and
+full hybrid warmup. The sealed vector index contains 16,759 files and 49,241
+640-dimensional chunks in IVF_FLAT with 221 fully probed partitions. The model
+SHA256 is `fe12f3583dbbb832def4cffeb46c0d0ab49a3288542d5cdbaeb1741315a01b87`.
+
+| Development set | Lane | Recall@10 | MRR | nDCG@10 | P50 ms | P95 ms | Stale rate |
+|---|---|---:|---:|---:|---:|---:|---:|
+| Existing lexical set | Lexical | 1.000 | 0.724 | 0.789 | 75.8 | 88.8 | 0 |
+| Existing lexical set | Hybrid | 1.000 | 0.753 | 0.813 | 121.7 | 129.5 | 0 |
+| Semantic hard set | Lexical | 0.500 | 0.278 | 0.334 | 91.6 | 101.5 | 0 |
+| Semantic hard set | Hybrid | 0.875 | 0.459 | 0.560 | 133.9 | 142.3 | 0 |
+
+The interrupted bulk run resumed 11,264 already committed file generations and
+embedded only the missing set. Its successful resume phase took 1,821 seconds
+and reached 6,897,504 KiB peak sidecar RSS. Publication still required exact
+catalog/vector parity and pruned stale generations before sealing.
+
+These are development results, not release-gate evidence: both sets remain
+pending dual review, and semantic hard-set Recall@10 is below 0.95. The
+production lane is therefore additive and fail-open to the lexical result.
+
 ## LanceDB Results
 
 | Corpus | Rows | DB size | IVF_PQ build | ANN P50/P95 | Filtered P50/P95 |
@@ -97,11 +121,11 @@ be used to claim ANN recall quality.
 
 The LanceDB query timings exclude query embedding time.
 
-## Proposed AWI Architecture
+## AWI Architecture
 
 1. Keep SQLite as the authoritative file/chunk catalog and Tantivy as the
    authoritative lexical retrieval lane.
-2. Run Harrier ONNX in an optional Python sidecar. Embed structure-aware,
+2. Run Harrier GGUF Q8 in an optional persistent Python sidecar. Embed structure-aware,
    tokenizer-bounded chunks and key every vector by stable `chunk_id` plus AWI
    catalog generation.
 3. Store vectors and filterable metadata in a local mutable LanceDB generation.
@@ -115,9 +139,9 @@ The LanceDB query timings exclude query embedding time.
    or LanceDB failure, return the current Tantivy result without delaying the
    normal query path.
 
-## Release Gates
+## Quality Release Gates
 
-Before enabling semantic retrieval by default:
+Before claiming a quality-gated semantic release:
 
 - dual-review and freeze a larger representative gold set;
 - achieve Recall@10 >= 0.95 with no MRR/nDCG regression by query class;
@@ -140,4 +164,8 @@ Before enabling semantic retrieval by default:
 - `semantic_results.json`: valid dense-backend quality, fidelity, and throughput
 - `lancedb_unique_results.json`: real-vector store benchmark
 - `lancedb_results.json`: 100,000-row capacity benchmark
+- `production-lexical-standard.json`: production-scale lexical baseline
+- `production-hybrid-standard.json`: production-scale hybrid result on the existing set
+- `production-lexical-semantic.json`: production-scale semantic-set lexical baseline
+- `production-hybrid-semantic.json`: production-scale semantic-set hybrid result
 - `requirements.txt`: pinned Python environment
