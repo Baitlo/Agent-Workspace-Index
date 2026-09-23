@@ -1,0 +1,175 @@
+{
+  "name": "harrier_lancedb_semantic_retrieval_20260923_dev",
+  "asset_family": "bona_workspace",
+  "split": "dev",
+  "review_status": "candidate_pending_dual_review",
+  "reviewers": [],
+  "corpus_roots": [
+    "/home/tiger/Projects/Bona/Qianchuan102_data_process",
+    "/home/tiger/Projects/Bona/qianchuan_distill",
+    "/mnt/bn/baiweikang/qianchuan_distill/workspace_assets/evaluation/tongyong_v3bench_delivered_pair_posterior_pool_v1_20260817",
+    "/mnt/bn/baiweikang/qianchuan_distill/workspace_assets/datasets/legacy_four_model_inputs"
+  ],
+  "cases": [
+    {
+      "id": "semantic-code-001",
+      "category": "code",
+      "query": "Which program finalizes video assets, reuses cached pairwise judgments, and emits pending physical comparison jobs around a shared anchor?",
+      "relevant_paths": [
+        "/home/tiger/Projects/Bona/Qianchuan102_data_process/build_two_shot_three_models_anchor_qwen_20260917.py"
+      ],
+      "baseline_tool_calls": 2,
+      "evidence": "The module finalizes assets, resolves aliases, reuses valid judgments, and writes pending anchor comparison tasks."
+    },
+    {
+      "id": "semantic-code-002",
+      "category": "code",
+      "query": "Find the streaming builder that writes teacher requests atomically, tracks prompt hashes, and rejects duplicate product samples.",
+      "relevant_paths": [
+        "/home/tiger/Projects/Bona/Qianchuan102_data_process/build_tongyong_v6_teacher_full.py"
+      ],
+      "baseline_tool_calls": 2,
+      "evidence": "The builder streams records to a temporary file, validates unique SPU IDs, records prompt hashes, and atomically publishes output."
+    },
+    {
+      "id": "semantic-code-003",
+      "category": "code",
+      "query": "Locate the validator that opens distributed parquet parts, checks duplicate front and back material pairs, and summarizes two delivery windows.",
+      "relevant_paths": [
+        "/home/tiger/Projects/Bona/Qianchuan102_data_process/analyze_tongyong_v3bench_delivered_pair_posterior_pool_v1.py"
+      ],
+      "baseline_tool_calls": 2,
+      "evidence": "The analyzer reads HDFS Parquet parts, validates pair keys and ASR fields, then reports 14-day and 60-day delivery metrics."
+    },
+    {
+      "id": "semantic-code-004",
+      "category": "code",
+      "query": "Which evaluator compares every model's top video with a cost-based anchor and supports a tie-aware Davidson ranking?",
+      "relevant_paths": [
+        "/home/tiger/Projects/Bona/Qianchuan102_data_process/eval_two_shot_v48bench_three_models_anchor_qwen_ziti_20260918.py"
+      ],
+      "baseline_tool_calls": 2,
+      "evidence": "The experiment evaluates top-ranked videos against a shared cost anchor and implements Anchor-Elo and Davidson BT analysis."
+    },
+    {
+      "id": "semantic-sql-001",
+      "category": "sql",
+      "query": "Find the SQL that limits generated advertising material to a supplied list of product SPUs before writing the Qianchuan output.",
+      "relevant_paths": [
+        "/home/tiger/Projects/Bona/Qianchuan102_data_process/sql/qianchuan_sql_koujing4/two_shot_v48_posterior_refresh_20260917/qc102_aigc.sql"
+      ],
+      "baseline_tool_calls": 2,
+      "evidence": "The query applies a left semi join between generated-material rows and the target SPU list using product_id for the qc102 scene."
+    },
+    {
+      "id": "semantic-sql-002",
+      "category": "sql",
+      "query": "Find the SQL for non-Qianchuan campaigns that ranks materials by spend and filters them through the target list using the scene-specific string identifier.",
+      "relevant_paths": [
+        "/home/tiger/Projects/Bona/Qianchuan102_data_process/sql/qianchuan_sql_koujing4/two_shot_v48_posterior_refresh_20260917/ubx_ziti.sql"
+      ],
+      "baseline_tool_calls": 2,
+      "evidence": "The query ranks UBX materials, keeps bounded rows per advertiser and stid_v2, and semi-joins the target SPU list."
+    },
+    {
+      "id": "semantic-sql-003",
+      "category": "sql",
+      "query": "Build pair-level delivery labels by mapping original front and back clips to generated creatives and aggregating short and long posterior windows.",
+      "relevant_paths": [
+        "/home/tiger/Projects/Bona/Qianchuan102_data_process/sql/tongyong/tongyong_v3bench_delivered_pair_posterior_pool_v1.sql"
+      ],
+      "baseline_tool_calls": 2,
+      "evidence": "The SQL maps origin clip pairs through generated material IDs and aggregates 14-day and 60-day delivery statistics."
+    },
+    {
+      "id": "semantic-sql-004",
+      "category": "sql",
+      "query": "Locate the optimized training extraction that scans only required front and back materials and lowers impression and play thresholds over a 28-day posterior window.",
+      "relevant_paths": [
+        "/home/tiger/Projects/Bona/Qianchuan102_data_process/sql/tongyong/tongyong_train_v2_show500_play500_28d_optimized.sql"
+      ],
+      "baseline_tool_calls": 2,
+      "evidence": "The SQL prefilters source materials with semi joins, uses 500-count thresholds, and extends delivery statistics to 28 days."
+    },
+    {
+      "id": "semantic-result-001",
+      "category": "experiment_result",
+      "query": "Find the audit report that compares capped and uncapped outputs across scenes and dates, including completeness and retention.",
+      "relevant_paths": [
+        "/home/tiger/Projects/Bona/Qianchuan102_data_process/logs/v47_multi_output_audit_current.json"
+      ],
+      "baseline_tool_calls": 2,
+      "evidence": "The JSON audit contains scene/date entries for uncapped and capped outputs plus retention and completion status."
+    },
+    {
+      "id": "semantic-result-002",
+      "category": "experiment_result",
+      "query": "Find the corrected smoke-test summary with per-service request counts and JSON, schema, and business validity in parity and strict modes.",
+      "relevant_paths": [
+        "/home/tiger/Projects/Bona/Qianchuan102_data_process/merlin_deploy/ezreal_smoke_5services_20260914/three_scene_summary.corrected.json"
+      ],
+      "baseline_tool_calls": 2,
+      "evidence": "The corrected summary records requests, HTTP status, JSON closure, schema validity, and business validity for each service and mode."
+    },
+    {
+      "id": "semantic-result-003",
+      "category": "experiment_result",
+      "query": "Which summary reports how many products are covered by the reconstructed pair pool and how its size and overlap compare with the old pool?",
+      "relevant_paths": [
+        "/mnt/bn/baiweikang/qianchuan_distill/workspace_assets/evaluation/tongyong_v3bench_delivered_pair_posterior_pool_v1_20260817/tongyong_v3bench_delivered_pair_posterior_pool_v1_summary.json"
+      ],
+      "baseline_tool_calls": 2,
+      "evidence": "The summary reports covered SPUs, pair rows, overlap with old V3 pairs, and the new-to-old ratio."
+    },
+    {
+      "id": "semantic-result-004",
+      "category": "experiment_result",
+      "query": "Find the scene-level table of sparse pair-graph density medians for strict-positive rows in both the short and long delivery windows.",
+      "relevant_paths": [
+        "/mnt/bn/baiweikang/qianchuan_distill/workspace_assets/evaluation/tongyong_v3bench_delivered_pair_posterior_pool_v1_20260817/koujing34_strict_positive/tongyong_v3bench_strict_positive_koujing34_sparse_graph_scene_summary.tsv"
+      ],
+      "baseline_tool_calls": 2,
+      "evidence": "The TSV contains scene-level sparse-graph counts and density medians for the 14-day and 60-day windows."
+    },
+    {
+      "id": "semantic-dataset-001",
+      "category": "dataset_query",
+      "query": "Locate the human review pool with consensus-voted examples, sample-selection provenance, ranking percentiles, and empty annotation slots.",
+      "relevant_paths": [
+        "/home/tiger/Projects/Bona/qianchuan_distill/human_annotation_sample_v2/human_annotation_sample_250_enriched_flat.jsonl"
+      ],
+      "baseline_tool_calls": 2,
+      "evidence": "The records contain consensus labels, selected_by, sample_bucket, pool_rank, and an annotation object."
+    },
+    {
+      "id": "semantic-dataset-002",
+      "category": "dataset_query",
+      "query": "Find the QC102 judge input that combines front and back candidate examples with composition-level delivery performance.",
+      "relevant_paths": [
+        "/home/tiger/Projects/Bona/qianchuan_distill/scripts/4model_inference_inputs/judge300_qc102.jsonl"
+      ],
+      "baseline_tool_calls": 2,
+      "evidence": "The QC102 input records front_sample, back_sample, and composition_performance fields."
+    },
+    {
+      "id": "semantic-dataset-003",
+      "category": "dataset_query",
+      "query": "Locate the legacy UBX four-model judge input whose records pair front and back examples with delivery metrics.",
+      "relevant_paths": [
+        "/mnt/bn/baiweikang/qianchuan_distill/workspace_assets/datasets/legacy_four_model_inputs/judge300_ubx.jsonl"
+      ],
+      "baseline_tool_calls": 2,
+      "evidence": "The legacy UBX input records front_sample, back_sample, and composition_performance fields."
+    },
+    {
+      "id": "semantic-dataset-004",
+      "category": "dataset_query",
+      "query": "Find raw two-shot service responses that record completion token usage, closed JSON, validation state, and warm-up requests.",
+      "relevant_paths": [
+        "/home/tiger/Projects/Bona/Qianchuan102_data_process/merlin_deploy/ezreal_smoke_5services_20260914/two_shot_v48bench_ezreal_psm_smoke3_20260915/raw_results_two_shot.jsonl"
+      ],
+      "baseline_tool_calls": 2,
+      "evidence": "The raw records include completion_tokens, json_closed, validation, warmup, and service fields."
+    }
+  ]
+}

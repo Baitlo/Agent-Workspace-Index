@@ -1,0 +1,81 @@
+{
+  "models": [
+    {
+      "backend": "official_fp32",
+      "repo_id": "microsoft/harrier-oss-v1-270m",
+      "revision": "31de22b673913c7d658c0f03f792d77c2dcf8ebd",
+      "artifact": "model.safetensors",
+      "bytes": 536221640,
+      "sha256": "90933b6826b61afd9331e0ebe3c0598b421a32eda5fb301a114fe36f306cb51a",
+      "dimension": 640,
+      "license": "MIT"
+    },
+    {
+      "backend": "gguf_270m_q8",
+      "repo_id": "mykor/harrier-oss-v1-270m-GGUF",
+      "revision": "fe07a2a15994730f1b8f13943927bc8198bd7fa7",
+      "artifact": "harrier-oss-v1-270M-Q8_0.gguf",
+      "bytes": 291544768,
+      "sha256": "fe12f3583dbbb832def4cffeb46c0d0ab49a3288542d5cdbaeb1741315a01b87",
+      "dimension": 640,
+      "license": "MIT"
+    },
+    {
+      "backend": "gguf_270m_q5",
+      "repo_id": "mykor/harrier-oss-v1-270m-GGUF",
+      "revision": "fe07a2a15994730f1b8f13943927bc8198bd7fa7",
+      "artifact": "harrier-oss-v1-270M-Q5_K_M.gguf",
+      "bytes": 260026048,
+      "sha256": "3fc01a98085f93796936dc96199c56846a5b9c40d8429db119d1da791c822e30",
+      "dimension": 640,
+      "license": "MIT"
+    },
+    {
+      "backend": "onnx_270m_per_channel",
+      "repo_id": "Teradata/harrier-oss-v1-270m",
+      "revision": "7567d27e78e59f38068f76fa1d0ca2b8c6e14163",
+      "artifact": "onnx/model-per_channel.onnx",
+      "bytes": 274323434,
+      "sha256": "f7dc818543b8c96f776d9dc0760267732a9649486165b30402107b7105bcd2a9",
+      "dimension": 640,
+      "license": "MIT"
+    },
+    {
+      "backend": "onnx_270m_ffn_skip",
+      "repo_id": "Teradata/harrier-oss-v1-270m",
+      "revision": "7567d27e78e59f38068f76fa1d0ca2b8c6e14163",
+      "artifact": "onnx/model-ffn_skip.onnx",
+      "bytes": 482242699,
+      "sha256": "8969db65914a267a1dfd7a62d657932aa070253326eb01018df2468ca360d392",
+      "dimension": 640,
+      "license": "MIT"
+    },
+    {
+      "backend": "gguf_0_6b_q8",
+      "repo_id": "SuperPauly/harrier-oss-v1-0.6b-gguf",
+      "revision": "5283b8a315ebee0cdc65c04fd7646b3fce8e7c80",
+      "artifact": "harrier-oss-v1-0.6B-Q8_0.gguf",
+      "bytes": 639447872,
+      "sha256": "f97092bd73f6814b8b1170ca855071bc468b5fa2cf61a6de7e1d2c4a8a6a50b0",
+      "dimension": 1024,
+      "license": "MIT"
+    },
+    {
+      "backend": "gguf_0_6b_q5",
+      "repo_id": "SuperPauly/harrier-oss-v1-0.6b-gguf",
+      "revision": "5283b8a315ebee0cdc65c04fd7646b3fce8e7c80",
+      "artifact": "harrier-oss-v1-0.6B-Q5_K_M.gguf",
+      "bytes": 444415808,
+      "sha256": "e283c242a3cad5473f5559f2d1577eca9b23b5cccecd2c523483c68c5b8871df",
+      "dimension": 1024,
+      "license": "MIT"
+    }
+  ],
+  "contract": {
+    "query_prefix": "Instruct: Given a software engineering query, retrieve the workspace code, configuration, dataset, or result that best answers it\\nQuery: ",
+    "document_prefix": null,
+    "pooling": "last_token",
+    "normalization": "l2",
+    "max_tokens": 512
+  }
+}

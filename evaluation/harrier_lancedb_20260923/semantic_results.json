@@ -1,0 +1,2342 @@
+{
+  "reference": "official_fp32",
+  "backends": {
+    "gguf_270m_q5": {
+      "cases": 16,
+      "recall_at_10": 0.875,
+      "mrr": 0.6953125,
+      "ndcg_at_10": 0.7376626135915755,
+      "p50_query_ms": 0.058144330978393555,
+      "p95_query_ms": 0.21903589367866516,
+      "categories": {
+        "code": {
+          "cases": 4,
+          "recall_at_10": 1,
+          "mrr": 0.875,
+          "ndcg_at_10": 0.9077324383928644
+        },
+        "dataset_query": {
+          "cases": 4,
+          "recall_at_10": 0.75,
+          "mrr": 0.375,
+          "ndcg_at_10": 0.46405179677700553
+        },
+        "experiment_result": {
+          "cases": 4,
+          "recall_at_10": 1,
+          "mrr": 1,
+          "ndcg_at_10": 1
+        },
+        "sql": {
+          "cases": 4,
+          "recall_at_10": 0.75,
+          "mrr": 0.53125,
+          "ndcg_at_10": 0.5788662191964322
+        }
+      },
+      "results": [
+        {
+          "id": "semantic-code-001",
+          "category": "code",
+          "recall_at_10": 1,
+          "reciprocal_rank": 1,
+          "ndcg_at_10": 1,
+          "latency_ms": 0.21903589367866516,
+          "returned_paths": [
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/build_two_shot_three_models_anchor_qwen_20260917.py",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/merlin_deploy/two_shot_qwen35_selected_videos_vllm/scm_version_1.0.0.2.json",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/merlin_deploy/two_shot_qwen35_selected_videos_vllm/scm_version_1.0.0.1.json",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/merlin_deploy/two_shot_qwen35_selected_videos_vllm/two_shot_qwen35_direct_vllm_fix_summary_20260903.json",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/build_raw_all_novel_video_manifest.py",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/eval_two_shot_v48bench_three_models_latest_high_overall.py",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/eval_two_shot_v48bench_three_models_anchor_qwen_ziti_20260918.py",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/tools/two_shot_frame_sampler_go/scripts/benchmark_video_ocr_v3_rpc_two_shot.py",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/merlin_deploy/two_shot_qwen35_selected_videos_vllm/two_shot_scm_1.0.0.4_build.json",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/eval_two_shot_v48_history_reward.py"
+          ]
+        },
+        {
+          "id": "semantic-code-002",
+          "category": "code",
+          "recall_at_10": 1,
+          "reciprocal_rank": 1,
+          "ndcg_at_10": 1,
+          "latency_ms": 0.07389113306999207,
+          "returned_paths": [
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/build_tongyong_v6_teacher_full.py",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/scripts/sample_trace_ppl_20260829.py",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/prompts/tongyong_v6_teacher_v1/manifest_tongyong_v6_teacher_v1.json",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/watch_tongyong_v32bench.py",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/logs/v5_temporal_postprocess.json",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/snapshot_tongyong_v33bench_teacher_status.py",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/build_two_shot_omni_v12_train_student_no_posterior_dataset.py",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/bench_tongyong_v6_teacher_throughput.py",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/prompts/two_shot_v6_glm53_twostage_cot_v1/manifest_two_shot_v6_glm53_twostage_cot_v1.json",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/prompts/two_shot_v6_cot_restructure_v1/manifest_two_shot_v6_cot_restructure_v1.json"
+          ]
+        },
+        {
+          "id": "semantic-code-003",
+          "category": "code",
+          "recall_at_10": 1,
+          "reciprocal_rank": 0.5,
+          "ndcg_at_10": 0.6309297535714575,
+          "latency_ms": 0.06366521120071411,
+          "returned_paths": [
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/analyze_tongyong_v3bench_dual_role_delivery_posterior_material_pool_v2.py",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/analyze_tongyong_v3bench_delivered_pair_posterior_pool_v1.py",
+            "/mnt/bn/baiweikang/qianchuan_distill/workspace_assets/evaluation/tongyong_v3bench_delivered_pair_posterior_pool_v1_20260817/koujing34_strict_positive/manifest.json",
+            "/mnt/bn/baiweikang/qianchuan_distill/workspace_assets/evaluation/tongyong_v3bench_delivered_pair_posterior_pool_v1_20260817/manifest.json",
+            "/mnt/bn/baiweikang/qianchuan_distill/workspace_assets/evaluation/tongyong_v3bench_delivered_pair_posterior_pool_v1_20260817/koujing34_strict_positive/run_stdout.json",
+            "/mnt/bn/baiweikang/qianchuan_distill/workspace_assets/evaluation/tongyong_v3bench_delivered_pair_posterior_pool_v1_20260817/run_stdout.json",
+            "/mnt/bn/baiweikang/qianchuan_distill/workspace_assets/evaluation/tongyong_v3bench_delivered_pair_posterior_pool_v1_20260817/tongyong_v3bench_delivered_pair_posterior_pool_v1_summary.json",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/tools/two_shot_low_standard/test_evaluate_fornax_gemini38_annotation_two_shot.py",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/tools/two_shot_low_standard/build_qc102_external_two_shot.py",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/tools/two_shot_low_standard/report_local_windows_two_shot.py"
+          ]
+        },
+        {
+          "id": "semantic-code-004",
+          "category": "code",
+          "recall_at_10": 1,
+          "reciprocal_rank": 1,
+          "ndcg_at_10": 1,
+          "latency_ms": 0.05649402737617493,
+          "returned_paths": [
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/eval_two_shot_v48bench_three_models_anchor_qwen_ziti_20260918.py",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/eval_two_shot_v48bench_three_models_latest_high_overall.py",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/eval_two_shot_v48bench_eight_models_latest_high_overall.py",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/eval_two_shot_v48bench_five_models_latest_high_overall.py",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/eval_two_shot_v48bench_four_models_latest_high_overall.py",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/eval_two_shot_v48bench_six_industry_qwen_arena.py",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/eval_low_standard_qianchuan_two_shot_three_models_raw_all_vs_cost_top.py",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/eval_high_standard_v45_raw_all_vs_cost_top.py",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/eval_pairwise_toufang_model_prediction.py",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/eval_two_shot_v48_history_reward.py"
+          ]
+        },
+        {
+          "id": "semantic-sql-001",
+          "category": "sql",
+          "recall_at_10": 1,
+          "reciprocal_rank": 0.125,
+          "ndcg_at_10": 0.31546487678572877,
+          "latency_ms": 0.06056949496269226,
+          "returned_paths": [
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/sql/tongyong/tongyong_v3bench_candidate_inventory.sql",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/sql/tongyong/tongyong_v32bench_cost_ranked_candidate_inventory.sql",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/sql/tongyong/tongyong_v31bench_midshow_candidate_inventory.sql",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/sql/tongyong/tongyong_v3bench_show_inventory.sql",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/sql/tongyong/tongyong_v3bench_dual_role_delivery_posterior_material_pool_v2.sql",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/sql/qianchuan_sql_koujing4/qc102_aigc.sql",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/sql/tongyong/tongyong_v3bench_dual_role_midshow_material_pool_v1.sql",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/sql/qianchuan_sql_koujing4/two_shot_v48_posterior_refresh_20260917/qc102_aigc.sql",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/sql/qianchuan_sql_koujing4/qc303_aigc.sql",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/sql/qianchuan_sql_koujing4/two_shot_v48_posterior_refresh_20260917/qc303_aigc.sql"
+          ]
+        },
+        {
+          "id": "semantic-sql-002",
+          "category": "sql",
+          "recall_at_10": 0,
+          "reciprocal_rank": 0,
+          "ndcg_at_10": 0,
+          "latency_ms": 0.05891174077987671,
+          "returned_paths": [
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/sql/tongyong/tongyong_v3bench_candidate_inventory.sql",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/sql/qianchuan_sql_koujing4/v47_multi_stage1_additional_sources.sql",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/sql/tongyong/tongyong_v32bench_cost_ranked_candidate_inventory.sql",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/sql/tongyong/tongyong_v3bench_show_inventory.sql",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/sql/tongyong/tongyong_v31bench_midshow_candidate_inventory.sql",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/sql/tongyong/tongyong_v3bench_all_combinations.sql",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/sql/qianchuan_sql_koujing4/qc102_aigc_v47_stage1_pair_daily.sql",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/sql/tongyong/tongyong_v3bench_dual_role_midshow_material_pool_v1.sql",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/test_build_tongyong_v32bench_candidates.py",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/scripts/run_two_shot_v48_posterior_refresh.py"
+          ]
+        },
+        {
+          "id": "semantic-sql-003",
+          "category": "sql",
+          "recall_at_10": 1,
+          "reciprocal_rank": 1,
+          "ndcg_at_10": 1,
+          "latency_ms": 0.06447359919548035,
+          "returned_paths": [
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/sql/tongyong/tongyong_v3bench_delivered_pair_posterior_pool_v1.sql",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/sql/tongyong/tongyong_train_v2_show500_play500_28d.sql",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/sql/tongyong/tongyong_train_v2_show500_play500_28d_optimized.sql",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/build_two_shot_omni_v12_gemini37_sft.py",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/build_two_shot_consistency_pair_datasets.py",
+            "/mnt/bn/baiweikang/qianchuan_distill/workspace_assets/evaluation/tongyong_v3bench_delivered_pair_posterior_pool_v1_20260817/tongyong_v3bench_delivered_pair_posterior_pool_v1_by_spu.tsv",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/sql/tongyong/tongyong_v33_bench_stratified_all_observed_pairs.sql",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/sql/qianchuan_sql_koujing4/qc102_aigc_v47_temporal_replay.sql",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/analyze_student_posterior.py",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/tools/two_shot_omni_v13_sampler/build_omni_v13_selector_trainset_two_shot.py"
+          ]
+        },
+        {
+          "id": "semantic-sql-004",
+          "category": "sql",
+          "recall_at_10": 1,
+          "reciprocal_rank": 1,
+          "ndcg_at_10": 1,
+          "latency_ms": 0.058144330978393555,
+          "returned_paths": [
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/sql/tongyong/tongyong_train_v2_show500_play500_28d_optimized.sql",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/sql/tongyong/tongyong_train_v2_show500_play500_28d.sql",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/tools/two_shot_omni_v13_sampler/build_omni_v13_selector_trainset_two_shot.py",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/tools/two_shot_omni_v13_sampler/selector_runtime.py",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/scripts/build_two_shot_v48_posterior_legacy_index.py",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/build_two_shot_omni_v12_train_student_no_posterior_dataset.py",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/tools/two_shot_low_standard/train_acoustic_sft_two_shot.py",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/analyze_student_posterior.py",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/build_two_shot_v6_label_judge_input.py",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/scripts/compute_two_shot_v6_teacher_topk_posterior_rank.py"
+          ]
+        },
+        {
+          "id": "semantic-result-001",
+          "category": "experiment_result",
+          "recall_at_10": 1,
+          "reciprocal_rank": 1,
+          "ndcg_at_10": 1,
+          "latency_ms": 0.056937336921691895,
+          "returned_paths": [
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/logs/v47_multi_output_audit_current.json",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/logs/v47_multi_output_audit.json",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/audit_two_shot_omni_v12_no_posterior_version.py",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/tools/two_shot_low_standard/report_sft_acoustic_two_shot.py",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/logs/v5_temporal_postprocess.json",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/sql/tongyong/tongyong_v3bench_diversity_audit.sql",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/audit_omni_v1_1_benchmark.py",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/logs/history_downloads_complete.summary.json",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/tools/two_shot_low_standard/audit_native_text_reliability_two_shot.py",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/tools/two_shot_low_standard/audit_pilot_evidence_two_shot.py"
+          ]
+        },
+        {
+          "id": "semantic-result-002",
+          "category": "experiment_result",
+          "recall_at_10": 1,
+          "reciprocal_rank": 1,
+          "ndcg_at_10": 1,
+          "latency_ms": 0.05240738391876221,
+          "returned_paths": [
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/merlin_deploy/ezreal_smoke_5services_20260914/three_scene_summary.corrected.json",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/merlin_deploy/ezreal_smoke_5services_20260914/three_scene_summary.json",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/merlin_deploy/ezreal_smoke_5services_20260914/history3_three_scene_postprocessed.json",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/merlin_deploy/ezreal_smoke_5services_20260914/two_shot_v6_ranked_ezreal_psm_smoke3_v6contract_20260915/raw_results_two_shot.jsonl",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/merlin_deploy/ezreal_smoke_5services_20260914/two_shot_v6_ranked_ezreal_psm_smoke3_defaultsnapshot_20260915/raw_results_two_shot.jsonl",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/merlin_deploy/ezreal_smoke_5services_20260914/history3_parity_smoke_postprocessed.json",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/merlin_deploy/ezreal_smoke_5services_20260914/two_shot_v6_ranked_ezreal_psm_c256_serial_full2983_20260915/raw_results_two_shot.jsonl",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/merlin_deploy/ezreal_smoke_5services_20260914/two_shot_v48bench_ezreal_psm_smoke3_20260915/raw_results_two_shot.jsonl",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/merlin_deploy/ezreal_smoke_5services_20260914/v45_dpo_raw_all_postprocess_summary.json",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/merlin_deploy/ezreal_smoke_5services_20260914/two_shot_v6_ranked_ezreal_psm_c128_serial_full2983_20260915/raw_results_two_shot.jsonl"
+          ]
+        },
+        {
+          "id": "semantic-result-003",
+          "category": "experiment_result",
+          "recall_at_10": 1,
+          "reciprocal_rank": 1,
+          "ndcg_at_10": 1,
+          "latency_ms": 0.05556270480155945,
+          "returned_paths": [
+            "/mnt/bn/baiweikang/qianchuan_distill/workspace_assets/evaluation/tongyong_v3bench_delivered_pair_posterior_pool_v1_20260817/tongyong_v3bench_delivered_pair_posterior_pool_v1_summary.json",
+            "/mnt/bn/baiweikang/qianchuan_distill/workspace_assets/evaluation/tongyong_v3bench_delivered_pair_posterior_pool_v1_20260817/REPORT_tongyong_v3bench_delivered_pair_posterior_pool_v1.md",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/sql/tongyong/tongyong_v3bench_delivered_pair_posterior_pool_v1.sql",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/analyze_tongyong_v3bench_delivered_pair_posterior_pool_v1.py",
+            "/mnt/bn/baiweikang/qianchuan_distill/workspace_assets/evaluation/tongyong_v3bench_delivered_pair_posterior_pool_v1_20260817/tongyong_v3bench_delivered_pair_posterior_pool_v1_by_spu.tsv",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/sql/tongyong/tongyong_v33_bench_stratified_all_observed_pairs.sql",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/scripts/join_two_shot_v48_posterior_refresh.py",
+            "/mnt/bn/baiweikang/qianchuan_distill/workspace_assets/evaluation/tongyong_v3bench_delivered_pair_posterior_pool_v1_20260817/koujing34_strict_positive/tongyong_v3bench_strict_positive_koujing4_pair_ge5_14d_spus.tsv",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/audit_two_shot_v48bench_chengpian_gaobiao_cache.py",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/audit_v5_v3bench_semantic_overlap.py"
+          ]
+        },
+        {
+          "id": "semantic-result-004",
+          "category": "experiment_result",
+          "recall_at_10": 1,
+          "reciprocal_rank": 1,
+          "ndcg_at_10": 1,
+          "latency_ms": 0.06116926670074463,
+          "returned_paths": [
+            "/mnt/bn/baiweikang/qianchuan_distill/workspace_assets/evaluation/tongyong_v3bench_delivered_pair_posterior_pool_v1_20260817/koujing34_strict_positive/tongyong_v3bench_strict_positive_koujing34_sparse_graph_scene_summary.tsv",
+            "/mnt/bn/baiweikang/qianchuan_distill/workspace_assets/evaluation/tongyong_v3bench_delivered_pair_posterior_pool_v1_20260817/koujing34_strict_positive/tongyong_v3bench_strict_positive_koujing34_sparse_graph_summary.json",
+            "/mnt/bn/baiweikang/qianchuan_distill/workspace_assets/evaluation/tongyong_v3bench_delivered_pair_posterior_pool_v1_20260817/koujing34_strict_positive/tongyong_v3bench_strict_positive_koujing34_sparse_graph_14d_by_spu.tsv",
+            "/mnt/bn/baiweikang/qianchuan_distill/workspace_assets/evaluation/tongyong_v3bench_delivered_pair_posterior_pool_v1_20260817/koujing34_strict_positive/tongyong_v3bench_strict_positive_koujing34_sparse_graph_60d_by_spu.tsv",
+            "/mnt/bn/baiweikang/qianchuan_distill/workspace_assets/evaluation/tongyong_v3bench_delivered_pair_posterior_pool_v1_20260817/koujing34_strict_positive/tongyong_v3bench_strict_positive_koujing34_sparse_graph_distribution.tsv",
+            "/mnt/bn/baiweikang/qianchuan_distill/workspace_assets/evaluation/tongyong_v3bench_delivered_pair_posterior_pool_v1_20260817/koujing34_strict_positive/tongyong_v3bench_strict_positive_koujing4_pair_ge5_summary.json",
+            "/mnt/bn/baiweikang/qianchuan_distill/workspace_assets/evaluation/tongyong_v3bench_delivered_pair_posterior_pool_v1_20260817/koujing34_strict_positive/manifest.json",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/analyze_tongyong_v3bench_koujing34_sparse_graph.py",
+            "/mnt/bn/baiweikang/qianchuan_distill/workspace_assets/evaluation/tongyong_v3bench_delivered_pair_posterior_pool_v1_20260817/koujing34_strict_positive/tongyong_v3bench_strict_positive_koujing4_pair_ge5_14d_spus.tsv",
+            "/mnt/bn/baiweikang/qianchuan_distill/workspace_assets/evaluation/tongyong_v3bench_delivered_pair_posterior_pool_v1_20260817/koujing34_strict_positive/tongyong_v3bench_strict_positive_koujing4_pair_ge5_60d_spus.tsv"
+          ]
+        },
+        {
+          "id": "semantic-dataset-001",
+          "category": "dataset_query",
+          "recall_at_10": 1,
+          "reciprocal_rank": 0.3333333333333333,
+          "ndcg_at_10": 0.5,
+          "latency_ms": 0.0592060387134552,
+          "returned_paths": [
+            "/home/tiger/Projects/Bona/qianchuan_distill/human_annotation_sample_v1/enrich_sample.py",
+            "/home/tiger/Projects/Bona/qianchuan_distill/human_annotation_sample_v1/sample_benchmark.py",
+            "/home/tiger/Projects/Bona/qianchuan_distill/human_annotation_sample_v2/human_annotation_sample_250_enriched_flat.jsonl",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/scripts/patches/patch_v9_runner.py",
+            "/home/tiger/Projects/Bona/qianchuan_distill/human_annotation_sample_v2/human_annotation_sample_250_enriched.jsonl",
+            "/home/tiger/Projects/Bona/qianchuan_distill/human_annotation_sample_v2/scripts/build_xlsx_for_review.py",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/export_low_standard_disagreement_case_table.py",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/eval_two_shot_v48bench_five_models_latest_high_overall.py",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/eval_two_shot_v48bench_four_models_latest_high_overall.py",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/scripts/patches/patch_runner_v8.py"
+          ]
+        },
+        {
+          "id": "semantic-dataset-002",
+          "category": "dataset_query",
+          "recall_at_10": 1,
+          "reciprocal_rank": 1,
+          "ndcg_at_10": 1,
+          "latency_ms": 0.0559687614440918,
+          "returned_paths": [
+            "/home/tiger/Projects/Bona/qianchuan_distill/scripts/4model_inference_inputs/judge300_qc102.jsonl",
+            "/home/tiger/Projects/Bona/qianchuan_distill/scripts/sample_for_judge.py",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/scripts/patches/patch_judge_v7_b.py",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/scripts/patches/patch_v9_runner.py",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/scripts/judge_dataset/sample_for_judge.py",
+            "/home/tiger/Projects/Bona/qianchuan_distill/scripts/rerun_doubao_v4_length_243/manifest.json",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/scripts/batch_build/build_consensus_benchmark.py",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/eval_tongyong_v49bench_doubao21pro_asr_consistency4b.py",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/analyze_student_posterior.py",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/scripts/visualization/build_v4_html.py"
+          ]
+        },
+        {
+          "id": "semantic-dataset-003",
+          "category": "dataset_query",
+          "recall_at_10": 0,
+          "reciprocal_rank": 0,
+          "ndcg_at_10": 0,
+          "latency_ms": 0.057581812143325806,
+          "returned_paths": [
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/scripts/patches/patch_judge_v7_b.py",
+            "/home/tiger/Projects/Bona/qianchuan_distill/scripts/4model_inference_inputs/judge300_qc102.jsonl",
+            "/home/tiger/Projects/Bona/qianchuan_distill/scripts/build_judge_dataset_v4model.py",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/scripts/build_two_shot_v48_posterior_legacy_index.py",
+            "/home/tiger/Projects/Bona/qianchuan_distill/scripts/4model_inference_inputs/sid_ctx_v4m.jsonl",
+            "/home/tiger/Projects/Bona/qianchuan_distill/scripts/sample_for_judge.py",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/eval_two_shot_v48bench_ziti_5models_asr_consistency4b.py",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/scripts/judge_dataset/sample_for_judge.py",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/run_v48bench_asr_consistency_18models.py",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/select_v3_judge_samples.py"
+          ]
+        },
+        {
+          "id": "semantic-dataset-004",
+          "category": "dataset_query",
+          "recall_at_10": 1,
+          "reciprocal_rank": 0.16666666666666666,
+          "ndcg_at_10": 0.3562071871080222,
+          "latency_ms": 0.05709752440452576,
+          "returned_paths": [
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/merlin_deploy/ezreal_smoke_5services_20260914/two_shot_v6_ranked_ezreal_psm_c256_serial_full2983_20260915/raw_results_two_shot.jsonl",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/merlin_deploy/ezreal_smoke_5services_20260914/two_shot_v6_ranked_ezreal_psm_smoke3_v6contract_20260915/raw_results_two_shot.jsonl",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/merlin_deploy/ezreal_smoke_5services_20260914/two_shot_v6_ranked_ezreal_psm_c128_serial_full2983_20260915/raw_results_two_shot.jsonl",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/merlin_deploy/ezreal_smoke_5services_20260914/two_shot_v6_ranked_ezreal_psm_smoke3_defaultsnapshot_20260915/raw_results_two_shot.jsonl",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/merlin_deploy/ezreal_smoke_5services_20260914/two_shot_v48bench_ezreal_psm_c128_20260915/raw_results_two_shot.jsonl",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/merlin_deploy/ezreal_smoke_5services_20260914/two_shot_v48bench_ezreal_psm_smoke3_20260915/raw_results_two_shot.jsonl",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/merlin_deploy/ezreal_smoke_5services_20260914/two_shot_v48bench_ezreal_psm_c64_full2983_20260915/raw_results_two_shot.jsonl",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/merlin_deploy/ezreal_smoke_5services_20260914/two_shot_v48bench_ezreal_psm_c64_parity_20260915/raw_results_two_shot.jsonl",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/merlin_deploy/ezreal_smoke_5services_20260914/service_search_two_shots_v4_8_xllm.json",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/merlin_deploy/ezreal_smoke_5services_20260914/service_search_two_shots_v4_8_dapo.json"
+          ]
+        }
+      ],
+      "runtime": {
+        "backend": "gguf_270m_q5",
+        "model_path": "/mnt/bn/baiweikang/Models/harrier-oss-v1-270m-GGUF/harrier-oss-v1-270M-Q5_K_M.gguf",
+        "threads": 16,
+        "batch_size": 16,
+        "query_instruction": true,
+        "documents": 1123,
+        "documents_encoded": 1123,
+        "document_embeddings_reused_from": null,
+        "queries": 16,
+        "embedding_dimension": 640,
+        "tokens": 523773,
+        "load_seconds": 0.39121708273887634,
+        "encode_seconds": 465.2826877310872,
+        "texts_per_second": 2.447974167176174,
+        "tokens_per_second": 1125.7091953155102,
+        "peak_rss_mib": 2198.13671875,
+        "output_bytes": 4068358
+      },
+      "document_cosine_vs_reference": {
+        "min": 0.9742743968963623,
+        "p50": 0.9936400651931763,
+        "mean": 0.9929794669151306,
+        "p95": 0.9949635863304138
+      },
+      "query_cosine_vs_reference": {
+        "min": 0.9934439063072205,
+        "p50": 0.99477219581604,
+        "mean": 0.9946960210800171,
+        "p95": 0.9952701926231384
+      },
+      "top10_overlap_vs_reference": 0.90625
+    },
+    "gguf_270m_q8": {
+      "cases": 16,
+      "recall_at_10": 0.875,
+      "mrr": 0.6973958333333333,
+      "ndcg_at_10": 0.739577964849483,
+      "p50_query_ms": 0.05932152271270752,
+      "p95_query_ms": 12.516282498836517,
+      "categories": {
+        "code": {
+          "cases": 4,
+          "recall_at_10": 1,
+          "mrr": 0.875,
+          "ndcg_at_10": 0.9077324383928644
+        },
+        "dataset_query": {
+          "cases": 4,
+          "recall_at_10": 0.75,
+          "mrr": 0.3833333333333333,
+          "ndcg_at_10": 0.4717132018086354
+        },
+        "experiment_result": {
+          "cases": 4,
+          "recall_at_10": 1,
+          "mrr": 1,
+          "ndcg_at_10": 1
+        },
+        "sql": {
+          "cases": 4,
+          "recall_at_10": 0.75,
+          "mrr": 0.53125,
+          "ndcg_at_10": 0.5788662191964322
+        }
+      },
+      "results": [
+        {
+          "id": "semantic-code-001",
+          "category": "code",
+          "recall_at_10": 1,
+          "reciprocal_rank": 1,
+          "ndcg_at_10": 1,
+          "latency_ms": 0.10670721530914307,
+          "returned_paths": [
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/build_two_shot_three_models_anchor_qwen_20260917.py",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/merlin_deploy/two_shot_qwen35_selected_videos_vllm/scm_version_1.0.0.1.json",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/merlin_deploy/two_shot_qwen35_selected_videos_vllm/scm_version_1.0.0.2.json",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/merlin_deploy/two_shot_qwen35_selected_videos_vllm/two_shot_qwen35_direct_vllm_fix_summary_20260903.json",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/build_raw_all_novel_video_manifest.py",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/merlin_deploy/two_shot_qwen35_selected_videos_vllm/two_shot_scm_1.0.0.4_build.json",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/eval_two_shot_v48bench_three_models_latest_high_overall.py",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/eval_two_shot_v48bench_three_models_anchor_qwen_ziti_20260918.py",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/tools/two_shot_frame_sampler_go/scripts/benchmark_video_ocr_v3_rpc_two_shot.py",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/merlin_deploy/two_shot_qwen35_selected_videos_vllm/icm_v45_dpo_service_image_1.0.0.1.json"
+          ]
+        },
+        {
+          "id": "semantic-code-002",
+          "category": "code",
+          "recall_at_10": 1,
+          "reciprocal_rank": 1,
+          "ndcg_at_10": 1,
+          "latency_ms": 0.06611645221710205,
+          "returned_paths": [
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/build_tongyong_v6_teacher_full.py",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/prompts/tongyong_v6_teacher_v1/manifest_tongyong_v6_teacher_v1.json",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/watch_tongyong_v32bench.py",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/snapshot_tongyong_v33bench_teacher_status.py",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/logs/v5_temporal_postprocess.json",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/scripts/sample_trace_ppl_20260829.py",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/build_two_shot_omni_v12_train_student_no_posterior_dataset.py",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/bench_tongyong_v6_teacher_throughput.py",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/prompts/two_shot_v6_glm53_twostage_cot_v1/manifest_two_shot_v6_glm53_twostage_cot_v1.json",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/merlin_deploy/two_shot_qwen35_selected_videos_vllm/scm_version_1.0.0.1.json"
+          ]
+        },
+        {
+          "id": "semantic-code-003",
+          "category": "code",
+          "recall_at_10": 1,
+          "reciprocal_rank": 0.5,
+          "ndcg_at_10": 0.6309297535714575,
+          "latency_ms": 0.059660524129867554,
+          "returned_paths": [
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/analyze_tongyong_v3bench_dual_role_delivery_posterior_material_pool_v2.py",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/analyze_tongyong_v3bench_delivered_pair_posterior_pool_v1.py",
+            "/mnt/bn/baiweikang/qianchuan_distill/workspace_assets/evaluation/tongyong_v3bench_delivered_pair_posterior_pool_v1_20260817/koujing34_strict_positive/manifest.json",
+            "/mnt/bn/baiweikang/qianchuan_distill/workspace_assets/evaluation/tongyong_v3bench_delivered_pair_posterior_pool_v1_20260817/manifest.json",
+            "/mnt/bn/baiweikang/qianchuan_distill/workspace_assets/evaluation/tongyong_v3bench_delivered_pair_posterior_pool_v1_20260817/koujing34_strict_positive/run_stdout.json",
+            "/mnt/bn/baiweikang/qianchuan_distill/workspace_assets/evaluation/tongyong_v3bench_delivered_pair_posterior_pool_v1_20260817/tongyong_v3bench_delivered_pair_posterior_pool_v1_summary.json",
+            "/mnt/bn/baiweikang/qianchuan_distill/workspace_assets/evaluation/tongyong_v3bench_delivered_pair_posterior_pool_v1_20260817/run_stdout.json",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/tools/two_shot_low_standard/test_evaluate_fornax_gemini38_annotation_two_shot.py",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/tools/two_shot_low_standard/report_local_windows_two_shot.py",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/tools/two_shot_low_standard/build_qc102_external_two_shot.py"
+          ]
+        },
+        {
+          "id": "semantic-code-004",
+          "category": "code",
+          "recall_at_10": 1,
+          "reciprocal_rank": 1,
+          "ndcg_at_10": 1,
+          "latency_ms": 0.06021186709403992,
+          "returned_paths": [
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/eval_two_shot_v48bench_three_models_anchor_qwen_ziti_20260918.py",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/eval_two_shot_v48bench_eight_models_latest_high_overall.py",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/eval_two_shot_v48bench_four_models_latest_high_overall.py",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/eval_two_shot_v48bench_five_models_latest_high_overall.py",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/eval_two_shot_v48bench_three_models_latest_high_overall.py",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/eval_two_shot_v48bench_six_industry_qwen_arena.py",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/eval_low_standard_qianchuan_two_shot_three_models_raw_all_vs_cost_top.py",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/eval_pairwise_toufang_model_prediction.py",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/eval_high_standard_v45_raw_all_vs_cost_top.py",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/eval_two_shot_v48_history_reward.py"
+          ]
+        },
+        {
+          "id": "semantic-sql-001",
+          "category": "sql",
+          "recall_at_10": 1,
+          "reciprocal_rank": 0.125,
+          "ndcg_at_10": 0.31546487678572877,
+          "latency_ms": 0.058475881814956665,
+          "returned_paths": [
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/sql/tongyong/tongyong_v3bench_candidate_inventory.sql",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/sql/tongyong/tongyong_v32bench_cost_ranked_candidate_inventory.sql",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/sql/tongyong/tongyong_v3bench_show_inventory.sql",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/sql/tongyong/tongyong_v31bench_midshow_candidate_inventory.sql",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/sql/tongyong/tongyong_v3bench_dual_role_delivery_posterior_material_pool_v2.sql",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/sql/qianchuan_sql_koujing4/qc102_aigc.sql",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/sql/tongyong/tongyong_v3bench_dual_role_midshow_material_pool_v1.sql",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/sql/qianchuan_sql_koujing4/two_shot_v48_posterior_refresh_20260917/qc102_aigc.sql",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/sql/tongyong/tongyong_v3bench_delivered_pair_posterior_pool_v1.sql",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/sql/qianchuan_sql_koujing4/qc303_aigc.sql"
+          ]
+        },
+        {
+          "id": "semantic-sql-002",
+          "category": "sql",
+          "recall_at_10": 0,
+          "reciprocal_rank": 0,
+          "ndcg_at_10": 0,
+          "latency_ms": 0.05457177758216858,
+          "returned_paths": [
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/sql/tongyong/tongyong_v3bench_candidate_inventory.sql",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/sql/tongyong/tongyong_v32bench_cost_ranked_candidate_inventory.sql",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/sql/qianchuan_sql_koujing4/v47_multi_stage1_additional_sources.sql",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/sql/tongyong/tongyong_v3bench_show_inventory.sql",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/sql/tongyong/tongyong_v3bench_all_combinations.sql",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/sql/tongyong/tongyong_v31bench_midshow_candidate_inventory.sql",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/sql/tongyong/tongyong_v3bench_dual_role_midshow_material_pool_v1.sql",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/sql/qianchuan_sql_koujing4/qc102_aigc_v47_stage1_pair_daily.sql",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/test_build_tongyong_v32bench_candidates.py",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/scripts/run_two_shot_v48_posterior_refresh.py"
+          ]
+        },
+        {
+          "id": "semantic-sql-003",
+          "category": "sql",
+          "recall_at_10": 1,
+          "reciprocal_rank": 1,
+          "ndcg_at_10": 1,
+          "latency_ms": 0.05846843123435974,
+          "returned_paths": [
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/sql/tongyong/tongyong_v3bench_delivered_pair_posterior_pool_v1.sql",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/sql/tongyong/tongyong_train_v2_show500_play500_28d.sql",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/sql/tongyong/tongyong_train_v2_show500_play500_28d_optimized.sql",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/build_two_shot_omni_v12_gemini37_sft.py",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/build_two_shot_consistency_pair_datasets.py",
+            "/mnt/bn/baiweikang/qianchuan_distill/workspace_assets/evaluation/tongyong_v3bench_delivered_pair_posterior_pool_v1_20260817/tongyong_v3bench_delivered_pair_posterior_pool_v1_by_spu.tsv",
+            "/mnt/bn/baiweikang/qianchuan_distill/workspace_assets/evaluation/tongyong_v3bench_delivered_pair_posterior_pool_v1_20260817/tongyong_v3bench_delivered_pair_posterior_pool_v1_summary.json",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/sql/tongyong/tongyong_v33_bench_stratified_all_observed_pairs.sql",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/sql/tongyong/tongyong_v3bench_dual_role_delivery_posterior_material_pool_v2.sql",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/sql/qianchuan_sql_koujing4/qc102_aigc_v47_temporal_replay.sql"
+          ]
+        },
+        {
+          "id": "semantic-sql-004",
+          "category": "sql",
+          "recall_at_10": 1,
+          "reciprocal_rank": 1,
+          "ndcg_at_10": 1,
+          "latency_ms": 12.516282498836517,
+          "returned_paths": [
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/sql/tongyong/tongyong_train_v2_show500_play500_28d_optimized.sql",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/sql/tongyong/tongyong_train_v2_show500_play500_28d.sql",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/tools/two_shot_omni_v13_sampler/selector_runtime.py",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/tools/two_shot_omni_v13_sampler/build_omni_v13_selector_trainset_two_shot.py",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/build_two_shot_omni_v12_train_student_no_posterior_dataset.py",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/scripts/build_two_shot_v48_posterior_legacy_index.py",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/build_two_shot_v6_label_judge_input.py",
+            "/mnt/bn/baiweikang/qianchuan_distill/workspace_assets/evaluation/tongyong_v3bench_delivered_pair_posterior_pool_v1_20260817/koujing34_strict_positive/tongyong_v3bench_strict_positive_koujing4_pair_ge5_14d_spus.tsv",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/tools/two_shot_low_standard/train_acoustic_sft_two_shot.py",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/analyze_student_posterior.py"
+          ]
+        },
+        {
+          "id": "semantic-result-001",
+          "category": "experiment_result",
+          "recall_at_10": 1,
+          "reciprocal_rank": 1,
+          "ndcg_at_10": 1,
+          "latency_ms": 0.06484612822532654,
+          "returned_paths": [
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/logs/v47_multi_output_audit_current.json",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/logs/v47_multi_output_audit.json",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/audit_two_shot_omni_v12_no_posterior_version.py",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/tools/two_shot_low_standard/report_sft_acoustic_two_shot.py",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/logs/v5_temporal_postprocess.json",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/sql/tongyong/tongyong_v3bench_diversity_audit.sql",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/logs/history_downloads_complete.summary.json",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/audit_omni_v1_1_benchmark.py",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/tools/two_shot_low_standard/audit_native_text_reliability_two_shot.py",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/tools/two_shot_low_standard/report_local_windows_two_shot.py"
+          ]
+        },
+        {
+          "id": "semantic-result-002",
+          "category": "experiment_result",
+          "recall_at_10": 1,
+          "reciprocal_rank": 1,
+          "ndcg_at_10": 1,
+          "latency_ms": 0.06202608346939087,
+          "returned_paths": [
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/merlin_deploy/ezreal_smoke_5services_20260914/three_scene_summary.corrected.json",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/merlin_deploy/ezreal_smoke_5services_20260914/history3_three_scene_postprocessed.json",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/merlin_deploy/ezreal_smoke_5services_20260914/three_scene_summary.json",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/merlin_deploy/ezreal_smoke_5services_20260914/two_shot_v6_ranked_ezreal_psm_smoke3_v6contract_20260915/raw_results_two_shot.jsonl",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/merlin_deploy/ezreal_smoke_5services_20260914/two_shot_v6_ranked_ezreal_psm_smoke3_defaultsnapshot_20260915/raw_results_two_shot.jsonl",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/merlin_deploy/ezreal_smoke_5services_20260914/history3_parity_smoke_postprocessed.json",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/merlin_deploy/ezreal_smoke_5services_20260914/two_shot_v48bench_ezreal_psm_smoke3_20260915/raw_results_two_shot.jsonl",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/merlin_deploy/ezreal_smoke_5services_20260914/two_shot_v6_ranked_ezreal_psm_c256_serial_full2983_20260915/raw_results_two_shot.jsonl",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/merlin_deploy/ezreal_smoke_5services_20260914/two_shot_v48bench_ezreal_psm_c64_parity_20260915/raw_results_two_shot.jsonl",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/merlin_deploy/ezreal_smoke_5services_20260914/two_shot_v6_ranked_ezreal_psm_c128_serial_full2983_20260915/raw_results_two_shot.jsonl"
+          ]
+        },
+        {
+          "id": "semantic-result-003",
+          "category": "experiment_result",
+          "recall_at_10": 1,
+          "reciprocal_rank": 1,
+          "ndcg_at_10": 1,
+          "latency_ms": 0.056043267250061035,
+          "returned_paths": [
+            "/mnt/bn/baiweikang/qianchuan_distill/workspace_assets/evaluation/tongyong_v3bench_delivered_pair_posterior_pool_v1_20260817/tongyong_v3bench_delivered_pair_posterior_pool_v1_summary.json",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/sql/tongyong/tongyong_v3bench_delivered_pair_posterior_pool_v1.sql",
+            "/mnt/bn/baiweikang/qianchuan_distill/workspace_assets/evaluation/tongyong_v3bench_delivered_pair_posterior_pool_v1_20260817/REPORT_tongyong_v3bench_delivered_pair_posterior_pool_v1.md",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/analyze_tongyong_v3bench_delivered_pair_posterior_pool_v1.py",
+            "/mnt/bn/baiweikang/qianchuan_distill/workspace_assets/evaluation/tongyong_v3bench_delivered_pair_posterior_pool_v1_20260817/tongyong_v3bench_delivered_pair_posterior_pool_v1_by_spu.tsv",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/sql/tongyong/tongyong_v33_bench_stratified_all_observed_pairs.sql",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/scripts/join_two_shot_v48_posterior_refresh.py",
+            "/mnt/bn/baiweikang/qianchuan_distill/workspace_assets/evaluation/tongyong_v3bench_delivered_pair_posterior_pool_v1_20260817/koujing34_strict_positive/tongyong_v3bench_strict_positive_koujing4_pair_ge5_14d_spus.tsv",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/merlin_deploy/ezreal_smoke_5services_20260914/history3_three_scene_postprocessed.json",
+            "/mnt/bn/baiweikang/qianchuan_distill/workspace_assets/evaluation/tongyong_v3bench_delivered_pair_posterior_pool_v1_20260817/koujing34_strict_positive/tongyong_v3bench_strict_positive_koujing4_pair_ge5_60d_spus.tsv"
+          ]
+        },
+        {
+          "id": "semantic-result-004",
+          "category": "experiment_result",
+          "recall_at_10": 1,
+          "reciprocal_rank": 1,
+          "ndcg_at_10": 1,
+          "latency_ms": 0.05932152271270752,
+          "returned_paths": [
+            "/mnt/bn/baiweikang/qianchuan_distill/workspace_assets/evaluation/tongyong_v3bench_delivered_pair_posterior_pool_v1_20260817/koujing34_strict_positive/tongyong_v3bench_strict_positive_koujing34_sparse_graph_scene_summary.tsv",
+            "/mnt/bn/baiweikang/qianchuan_distill/workspace_assets/evaluation/tongyong_v3bench_delivered_pair_posterior_pool_v1_20260817/koujing34_strict_positive/tongyong_v3bench_strict_positive_koujing34_sparse_graph_summary.json",
+            "/mnt/bn/baiweikang/qianchuan_distill/workspace_assets/evaluation/tongyong_v3bench_delivered_pair_posterior_pool_v1_20260817/koujing34_strict_positive/tongyong_v3bench_strict_positive_koujing34_sparse_graph_60d_by_spu.tsv",
+            "/mnt/bn/baiweikang/qianchuan_distill/workspace_assets/evaluation/tongyong_v3bench_delivered_pair_posterior_pool_v1_20260817/koujing34_strict_positive/tongyong_v3bench_strict_positive_koujing34_sparse_graph_14d_by_spu.tsv",
+            "/mnt/bn/baiweikang/qianchuan_distill/workspace_assets/evaluation/tongyong_v3bench_delivered_pair_posterior_pool_v1_20260817/koujing34_strict_positive/tongyong_v3bench_strict_positive_koujing34_sparse_graph_distribution.tsv",
+            "/mnt/bn/baiweikang/qianchuan_distill/workspace_assets/evaluation/tongyong_v3bench_delivered_pair_posterior_pool_v1_20260817/koujing34_strict_positive/tongyong_v3bench_strict_positive_koujing4_pair_ge5_summary.json",
+            "/mnt/bn/baiweikang/qianchuan_distill/workspace_assets/evaluation/tongyong_v3bench_delivered_pair_posterior_pool_v1_20260817/koujing34_strict_positive/tongyong_v3bench_strict_positive_koujing4_pair_ge5_14d_spus.tsv",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/analyze_tongyong_v3bench_koujing34_sparse_graph.py",
+            "/mnt/bn/baiweikang/qianchuan_distill/workspace_assets/evaluation/tongyong_v3bench_delivered_pair_posterior_pool_v1_20260817/koujing34_strict_positive/tongyong_v3bench_strict_positive_koujing4_pair_ge5_60d_spus.tsv",
+            "/mnt/bn/baiweikang/qianchuan_distill/workspace_assets/evaluation/tongyong_v3bench_delivered_pair_posterior_pool_v1_20260817/koujing34_strict_positive/manifest.json"
+          ]
+        },
+        {
+          "id": "semantic-dataset-001",
+          "category": "dataset_query",
+          "recall_at_10": 1,
+          "reciprocal_rank": 0.3333333333333333,
+          "ndcg_at_10": 0.5,
+          "latency_ms": 0.05824863910675049,
+          "returned_paths": [
+            "/home/tiger/Projects/Bona/qianchuan_distill/human_annotation_sample_v1/sample_benchmark.py",
+            "/home/tiger/Projects/Bona/qianchuan_distill/human_annotation_sample_v1/enrich_sample.py",
+            "/home/tiger/Projects/Bona/qianchuan_distill/human_annotation_sample_v2/human_annotation_sample_250_enriched_flat.jsonl",
+            "/home/tiger/Projects/Bona/qianchuan_distill/human_annotation_sample_v2/human_annotation_sample_250_enriched.jsonl",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/scripts/patches/patch_v9_runner.py",
+            "/home/tiger/Projects/Bona/qianchuan_distill/human_annotation_sample_v2/scripts/build_xlsx_for_review.py",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/eval_two_shot_v48bench_five_models_latest_high_overall.py",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/eval_two_shot_v48bench_four_models_latest_high_overall.py",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/export_low_standard_disagreement_case_table.py",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/scripts/patches/patch_runner_v8.py"
+          ]
+        },
+        {
+          "id": "semantic-dataset-002",
+          "category": "dataset_query",
+          "recall_at_10": 1,
+          "reciprocal_rank": 1,
+          "ndcg_at_10": 1,
+          "latency_ms": 0.0562518835067749,
+          "returned_paths": [
+            "/home/tiger/Projects/Bona/qianchuan_distill/scripts/4model_inference_inputs/judge300_qc102.jsonl",
+            "/home/tiger/Projects/Bona/qianchuan_distill/scripts/sample_for_judge.py",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/scripts/patches/patch_judge_v7_b.py",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/scripts/judge_dataset/sample_for_judge.py",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/scripts/visualization/build_v4_html.py",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/scripts/patches/patch_v9_runner.py",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/scripts/batch_build/build_consensus_benchmark.py",
+            "/mnt/bn/baiweikang/qianchuan_distill/workspace_assets/evaluation/tongyong_v3bench_delivered_pair_posterior_pool_v1_20260817/koujing34_strict_positive/tongyong_v3bench_strict_positive_koujing4_pair_ge5_14d_spus.tsv",
+            "/mnt/bn/baiweikang/qianchuan_distill/workspace_assets/evaluation/tongyong_v3bench_delivered_pair_posterior_pool_v1_20260817/koujing34_strict_positive/tongyong_v3bench_strict_positive_koujing4_pair_ge5_60d_spus.tsv",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/analyze_student_posterior.py"
+          ]
+        },
+        {
+          "id": "semantic-dataset-003",
+          "category": "dataset_query",
+          "recall_at_10": 0,
+          "reciprocal_rank": 0,
+          "ndcg_at_10": 0,
+          "latency_ms": 0.05791708827018738,
+          "returned_paths": [
+            "/home/tiger/Projects/Bona/qianchuan_distill/scripts/build_judge_dataset_v4model.py",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/scripts/patches/patch_judge_v7_b.py",
+            "/home/tiger/Projects/Bona/qianchuan_distill/scripts/4model_inference_inputs/judge300_qc102.jsonl",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/scripts/build_two_shot_v48_posterior_legacy_index.py",
+            "/home/tiger/Projects/Bona/qianchuan_distill/scripts/4model_inference_inputs/sid_ctx_v4m.jsonl",
+            "/home/tiger/Projects/Bona/qianchuan_distill/scripts/judge_sample_v1.stats.json",
+            "/home/tiger/Projects/Bona/qianchuan_distill/scripts/sample_for_judge.py",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/eval_two_shot_v48bench_ziti_5models_asr_consistency4b.py",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/select_v3_judge_samples.py",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/eval_two_shot_model_table_asr_consistency4b.py"
+          ]
+        },
+        {
+          "id": "semantic-dataset-004",
+          "category": "dataset_query",
+          "recall_at_10": 1,
+          "reciprocal_rank": 0.2,
+          "ndcg_at_10": 0.38685280723454163,
+          "latency_ms": 0.061552971601486206,
+          "returned_paths": [
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/merlin_deploy/ezreal_smoke_5services_20260914/two_shot_v6_ranked_ezreal_psm_c256_serial_full2983_20260915/raw_results_two_shot.jsonl",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/merlin_deploy/ezreal_smoke_5services_20260914/two_shot_v6_ranked_ezreal_psm_smoke3_v6contract_20260915/raw_results_two_shot.jsonl",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/merlin_deploy/ezreal_smoke_5services_20260914/two_shot_v6_ranked_ezreal_psm_c128_serial_full2983_20260915/raw_results_two_shot.jsonl",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/merlin_deploy/ezreal_smoke_5services_20260914/two_shot_v6_ranked_ezreal_psm_smoke3_defaultsnapshot_20260915/raw_results_two_shot.jsonl",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/merlin_deploy/ezreal_smoke_5services_20260914/two_shot_v48bench_ezreal_psm_smoke3_20260915/raw_results_two_shot.jsonl",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/merlin_deploy/ezreal_smoke_5services_20260914/two_shot_v48bench_ezreal_psm_c128_20260915/raw_results_two_shot.jsonl",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/merlin_deploy/ezreal_smoke_5services_20260914/two_shot_v48bench_ezreal_psm_c64_parity_20260915/raw_results_two_shot.jsonl",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/merlin_deploy/ezreal_smoke_5services_20260914/two_shot_v48bench_ezreal_psm_c64_full2983_20260915/raw_results_two_shot.jsonl",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/merlin_deploy/ezreal_smoke_5services_20260914/service_search_two_shots_v4_8_xllm.json",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/merlin_deploy/two_shot_v6_1_qwen35_json_only/service_create_20260914.json"
+          ]
+        }
+      ],
+      "runtime": {
+        "backend": "gguf_270m_q8",
+        "model_path": "/mnt/bn/baiweikang/Models/harrier-oss-v1-270m-GGUF/harrier-oss-v1-270M-Q8_0.gguf",
+        "threads": 16,
+        "batch_size": 16,
+        "query_instruction": true,
+        "documents": 1123,
+        "documents_encoded": 1123,
+        "document_embeddings_reused_from": null,
+        "queries": 16,
+        "embedding_dimension": 640,
+        "tokens": 523773,
+        "load_seconds": 0.38544581085443497,
+        "encode_seconds": 342.1797952763736,
+        "texts_per_second": 3.328659423272044,
+        "tokens_per_second": 1530.6952871865394,
+        "peak_rss_mib": 2227.71875,
+        "output_bytes": 4068358
+      },
+      "document_cosine_vs_reference": {
+        "min": 0.9815510511398315,
+        "p50": 0.9996024966239929,
+        "mean": 0.9989062547683716,
+        "p95": 0.9996681809425354
+      },
+      "query_cosine_vs_reference": {
+        "min": 0.9995623230934143,
+        "p50": 0.9996254444122314,
+        "mean": 0.9996263980865479,
+        "p95": 0.9996665716171265
+      },
+      "top10_overlap_vs_reference": 0.94375
+    },
+    "gguf_270m_q8_no_prompt": {
+      "cases": 16,
+      "recall_at_10": 0.875,
+      "mrr": 0.6313244047619048,
+      "ndcg_at_10": 0.6900992169270896,
+      "p50_query_ms": 0.05665421485900879,
+      "p95_query_ms": 0.09845569729804993,
+      "categories": {
+        "code": {
+          "cases": 4,
+          "recall_at_10": 1,
+          "mrr": 0.75,
+          "ndcg_at_10": 0.8154648767857288
+        },
+        "dataset_query": {
+          "cases": 4,
+          "recall_at_10": 0.75,
+          "mrr": 0.3645833333333333,
+          "ndcg_at_10": 0.4538662191964322
+        },
+        "experiment_result": {
+          "cases": 4,
+          "recall_at_10": 1,
+          "mrr": 1,
+          "ndcg_at_10": 1
+        },
+        "sql": {
+          "cases": 4,
+          "recall_at_10": 0.75,
+          "mrr": 0.4107142857142857,
+          "ndcg_at_10": 0.4910657717261977
+        }
+      },
+      "results": [
+        {
+          "id": "semantic-code-001",
+          "category": "code",
+          "recall_at_10": 1,
+          "reciprocal_rank": 1,
+          "ndcg_at_10": 1,
+          "latency_ms": 0.09845569729804993,
+          "returned_paths": [
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/build_two_shot_three_models_anchor_qwen_20260917.py",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/eval_two_shot_v48bench_three_models_latest_high_overall.py",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/eval_two_shot_v48bench_three_models_anchor_qwen_ziti_20260918.py",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/merlin_deploy/two_shot_qwen35_selected_videos_vllm/two_shot_qwen35_direct_vllm_fix_summary_20260903.json",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/build_raw_all_novel_video_manifest.py",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/eval_two_shot_v48bench_eight_models_latest_high_overall.py",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/refresh_two_shot_high_reward_source_cache.py",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/refresh_front_patch0_video_cache.py",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/watch_two_shot_high_reward_cache.py",
+            "/home/tiger/Projects/Bona/qianchuan_distill/scripts/judge_sample_v1.with_ctx.jsonl"
+          ]
+        },
+        {
+          "id": "semantic-code-002",
+          "category": "code",
+          "recall_at_10": 1,
+          "reciprocal_rank": 1,
+          "ndcg_at_10": 1,
+          "latency_ms": 0.06795302033424377,
+          "returned_paths": [
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/build_tongyong_v6_teacher_full.py",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/bench_tongyong_v6_teacher_throughput.py",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/scripts/sample_trace_ppl_20260829.py",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/snapshot_tongyong_v33bench_teacher_status.py",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/watch_tongyong_v32bench.py",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/scripts/benchmark_retry/rerun_9_parse_errors/rerun_qc102_deepseek.jsonl",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/scaleup_omni_v13_selector_teacher_two_shot.py",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/prompts/tongyong_v6_teacher_v1/manifest_tongyong_v6_teacher_v1.json",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/scripts/benchmark_retry/doubao_v4_length_sids.txt",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/build_two_shot_omni_v12_train_student_no_posterior_dataset.py"
+          ]
+        },
+        {
+          "id": "semantic-code-003",
+          "category": "code",
+          "recall_at_10": 1,
+          "reciprocal_rank": 0.5,
+          "ndcg_at_10": 0.6309297535714575,
+          "latency_ms": 0.06132945418357849,
+          "returned_paths": [
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/analyze_tongyong_v3bench_dual_role_delivery_posterior_material_pool_v2.py",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/analyze_tongyong_v3bench_delivered_pair_posterior_pool_v1.py",
+            "/mnt/bn/baiweikang/qianchuan_distill/workspace_assets/evaluation/tongyong_v3bench_delivered_pair_posterior_pool_v1_20260817/koujing34_strict_positive/run_stdout.json",
+            "/mnt/bn/baiweikang/qianchuan_distill/workspace_assets/evaluation/tongyong_v3bench_delivered_pair_posterior_pool_v1_20260817/tongyong_v3bench_delivered_pair_posterior_pool_v1_summary.json",
+            "/mnt/bn/baiweikang/qianchuan_distill/workspace_assets/evaluation/tongyong_v3bench_delivered_pair_posterior_pool_v1_20260817/koujing34_strict_positive/manifest.json",
+            "/mnt/bn/baiweikang/qianchuan_distill/workspace_assets/evaluation/tongyong_v3bench_delivered_pair_posterior_pool_v1_20260817/run_stdout.json",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/sql/qianchuan_sql_koujing4/qc102_aigc_v47_temporal_replay.sql",
+            "/mnt/bn/baiweikang/qianchuan_distill/workspace_assets/evaluation/tongyong_v3bench_delivered_pair_posterior_pool_v1_20260817/manifest.json",
+            "/home/tiger/Projects/Bona/qianchuan_distill/scripts/judge_sample_v1.with_ctx.jsonl",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/remap_two_shot_v48_dapo_consistency4b_cache.py"
+          ]
+        },
+        {
+          "id": "semantic-code-004",
+          "category": "code",
+          "recall_at_10": 1,
+          "reciprocal_rank": 0.5,
+          "ndcg_at_10": 0.6309297535714575,
+          "latency_ms": 0.055789947509765625,
+          "returned_paths": [
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/eval_two_shot_v48bench_eight_models_latest_high_overall.py",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/eval_two_shot_v48bench_three_models_anchor_qwen_ziti_20260918.py",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/eval_two_shot_v48bench_three_models_latest_high_overall.py",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/test_eval_low_standard_qianchuan_two_shot_three_models.py",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/eval_two_shot_17models_history_reward.py",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/eval_high_standard_v45_raw_all_vs_cost_top.py",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/eval_two_shot_v48bench_five_models_latest_high_overall.py",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/eval_two_shot_v48bench_four_models_latest_high_overall.py",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/eval_pairwise_toufang_model_prediction.py",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/eval_two_shot_v48bench_six_industry_qwen_arena.py"
+          ]
+        },
+        {
+          "id": "semantic-sql-001",
+          "category": "sql",
+          "recall_at_10": 1,
+          "reciprocal_rank": 0.14285714285714285,
+          "ndcg_at_10": 0.3333333333333333,
+          "latency_ms": 0.06298348307609558,
+          "returned_paths": [
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/sql/tongyong/tongyong_v32bench_cost_ranked_candidate_inventory.sql",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/sql/tongyong/tongyong_v3bench_candidate_inventory.sql",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/sql/tongyong/tongyong_v3bench_show_inventory.sql",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/sql/qianchuan_sql_koujing4/qc102_aigc.sql",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/sql/tongyong/tongyong_v3bench_dual_role_delivery_posterior_material_pool_v2.sql",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/sql/tongyong/tongyong_v31bench_midshow_candidate_inventory.sql",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/sql/qianchuan_sql_koujing4/two_shot_v48_posterior_refresh_20260917/qc102_aigc.sql",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/sql/two_shot_counterfactual_industry_20260919/usable_mid_spu.sql",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/sql/qianchuan_sql_koujing4/qc303_aigc.sql",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/sql/qianchuan_sql_koujing4/two_shot_v48_posterior_refresh_20260917/qc303_aigc.sql"
+          ]
+        },
+        {
+          "id": "semantic-sql-002",
+          "category": "sql",
+          "recall_at_10": 0,
+          "reciprocal_rank": 0,
+          "ndcg_at_10": 0,
+          "latency_ms": 0.05318969488143921,
+          "returned_paths": [
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/sql/tongyong/tongyong_v32bench_cost_ranked_candidate_inventory.sql",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/sql/tongyong/tongyong_v3bench_candidate_inventory.sql",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/sql/tongyong/tongyong_v3bench_show_inventory.sql",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/test_build_tongyong_v32bench_candidates.py",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/sql/tongyong/tongyong_v3bench_dual_role_midshow_material_pool_v1.sql",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/sql/tongyong/tongyong_v31bench_midshow_candidate_inventory.sql",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/sql/qianchuan_sql_koujing4/qc102_aigc_v47_stage1_pair_daily.sql",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/sql/tongyong/tongyong_v3bench_all_combinations.sql",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/sql/two_shot_counterfactual_industry_20260919/usable_mid_spu.sql",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/sql/qianchuan_sql_koujing4/v47_multi_stage1_additional_sources.sql"
+          ]
+        },
+        {
+          "id": "semantic-sql-003",
+          "category": "sql",
+          "recall_at_10": 1,
+          "reciprocal_rank": 0.5,
+          "ndcg_at_10": 0.6309297535714575,
+          "latency_ms": 0.05380064249038696,
+          "returned_paths": [
+            "/mnt/bn/baiweikang/qianchuan_distill/workspace_assets/evaluation/tongyong_v3bench_delivered_pair_posterior_pool_v1_20260817/tongyong_v3bench_delivered_pair_posterior_pool_v1_by_spu.tsv",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/sql/tongyong/tongyong_v3bench_delivered_pair_posterior_pool_v1.sql",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/build_two_shot_omni_v12_annotation_bundle2_dataset.py",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/build_two_shot_omni_v12_annotation_bundle4_dataset.py",
+            "/mnt/bn/baiweikang/qianchuan_distill/workspace_assets/evaluation/tongyong_v3bench_delivered_pair_posterior_pool_v1_20260817/koujing34_strict_positive/tongyong_v3bench_strict_positive_koujing4_pair_ge5_60d_spus.tsv",
+            "/mnt/bn/baiweikang/qianchuan_distill/workspace_assets/evaluation/tongyong_v3bench_delivered_pair_posterior_pool_v1_20260817/koujing34_strict_positive/tongyong_v3bench_strict_positive_koujing4_pair_ge5_14d_spus.tsv",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/sql/tongyong/tongyong_train_v2_show500_play500_28d_optimized.sql",
+            "/mnt/bn/baiweikang/qianchuan_distill/workspace_assets/evaluation/tongyong_v3bench_delivered_pair_posterior_pool_v1_20260817/tongyong_v3bench_delivered_pair_posterior_pool_v1_summary.json",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/sql/tongyong/tongyong_train_v2_show500_play500_28d.sql",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/sql/qianchuan_sql_koujing4/qc102_aigc_v47_temporal_replay.sql"
+          ]
+        },
+        {
+          "id": "semantic-sql-004",
+          "category": "sql",
+          "recall_at_10": 1,
+          "reciprocal_rank": 1,
+          "ndcg_at_10": 1,
+          "latency_ms": 0.0559389591217041,
+          "returned_paths": [
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/sql/tongyong/tongyong_train_v2_show500_play500_28d_optimized.sql",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/tools/two_shot_omni_v13_sampler/selector_runtime.py",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/tools/two_shot_omni_v13_sampler/build_omni_v13_selector_trainset_two_shot.py",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/sql/tongyong/tongyong_train_v2_show500_play500_28d.sql",
+            "/mnt/bn/baiweikang/qianchuan_distill/workspace_assets/evaluation/tongyong_v3bench_delivered_pair_posterior_pool_v1_20260817/koujing34_strict_positive/tongyong_v3bench_strict_positive_koujing4_pair_ge5_60d_spus.tsv",
+            "/mnt/bn/baiweikang/qianchuan_distill/workspace_assets/evaluation/tongyong_v3bench_delivered_pair_posterior_pool_v1_20260817/koujing34_strict_positive/tongyong_v3bench_strict_positive_koujing4_pair_ge5_14d_spus.tsv",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/tools/two_shot_omni_v13_sampler/eval_omni_v13_point_recall_two_shot.py",
+            "/mnt/bn/baiweikang/qianchuan_distill/workspace_assets/evaluation/tongyong_v3bench_delivered_pair_posterior_pool_v1_20260817/koujing34_strict_positive/tongyong_v3bench_strict_positive_koujing34_sparse_graph_60d_by_spu.tsv",
+            "/mnt/bn/baiweikang/qianchuan_distill/workspace_assets/evaluation/tongyong_v3bench_delivered_pair_posterior_pool_v1_20260817/koujing34_strict_positive/tongyong_v3bench_strict_positive_koujing34_sparse_graph_14d_by_spu.tsv",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/tools/two_shot_low_standard/train_acoustic_sft_two_shot.py"
+          ]
+        },
+        {
+          "id": "semantic-result-001",
+          "category": "experiment_result",
+          "recall_at_10": 1,
+          "reciprocal_rank": 1,
+          "ndcg_at_10": 1,
+          "latency_ms": 0.05875527858734131,
+          "returned_paths": [
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/logs/v47_multi_output_audit_current.json",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/logs/v47_multi_output_audit.json",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/audit_omni_v1_1_benchmark.py",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/tools/two_shot_low_standard/audit_sft_labels_two_shot.py",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/logs/history_downloads_complete.summary.json",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/audit_v47_multi_outputs.py",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/tools/two_shot_low_standard/report_sft_acoustic_two_shot.py",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/tools/two_shot_low_standard/report_audio_audit_two_shot.py",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/sql/tongyong/tongyong_v3bench_show_inventory.sql",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/tools/two_shot_low_standard/audit_native_text_reliability_two_shot.py"
+          ]
+        },
+        {
+          "id": "semantic-result-002",
+          "category": "experiment_result",
+          "recall_at_10": 1,
+          "reciprocal_rank": 1,
+          "ndcg_at_10": 1,
+          "latency_ms": 0.0590495765209198,
+          "returned_paths": [
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/merlin_deploy/ezreal_smoke_5services_20260914/three_scene_summary.corrected.json",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/merlin_deploy/ezreal_smoke_5services_20260914/three_scene_summary.json",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/merlin_deploy/ezreal_smoke_5services_20260914/two_shot_v6_ranked_ezreal_psm_smoke3_v6contract_20260915/raw_results_two_shot.jsonl",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/merlin_deploy/ezreal_smoke_5services_20260914/two_shot_v6_ranked_ezreal_psm_smoke3_defaultsnapshot_20260915/raw_results_two_shot.jsonl",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/merlin_deploy/ezreal_smoke_5services_20260914/two_shot_v6_ranked_ezreal_psm_c256_serial_full2983_20260915/raw_results_two_shot.jsonl",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/merlin_deploy/ezreal_smoke_5services_20260914/two_shot_v6_ranked_ezreal_psm_c128_serial_full2983_20260915/raw_results_two_shot.jsonl",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/merlin_deploy/ezreal_smoke_5services_20260914/service_search_two_shots_v4_8_xllm.json",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/merlin_deploy/ezreal_smoke_5services_20260914/history3_three_scene_postprocessed.json",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/merlin_deploy/ezreal_smoke_5services_20260914/service_search_two_shots_v4_8_dapo.json",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/merlin_deploy/ezreal_smoke_5services_20260914/service_search_two_shots_v4_8_dapo.final.json"
+          ]
+        },
+        {
+          "id": "semantic-result-003",
+          "category": "experiment_result",
+          "recall_at_10": 1,
+          "reciprocal_rank": 1,
+          "ndcg_at_10": 1,
+          "latency_ms": 0.05589425563812256,
+          "returned_paths": [
+            "/mnt/bn/baiweikang/qianchuan_distill/workspace_assets/evaluation/tongyong_v3bench_delivered_pair_posterior_pool_v1_20260817/tongyong_v3bench_delivered_pair_posterior_pool_v1_summary.json",
+            "/mnt/bn/baiweikang/qianchuan_distill/workspace_assets/evaluation/tongyong_v3bench_delivered_pair_posterior_pool_v1_20260817/tongyong_v3bench_delivered_pair_posterior_pool_v1_by_spu.tsv",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/sql/tongyong/tongyong_v3bench_delivered_pair_posterior_pool_v1.sql",
+            "/mnt/bn/baiweikang/qianchuan_distill/workspace_assets/evaluation/tongyong_v3bench_delivered_pair_posterior_pool_v1_20260817/koujing34_strict_positive/tongyong_v3bench_strict_positive_koujing4_pair_ge5_60d_spus.tsv",
+            "/mnt/bn/baiweikang/qianchuan_distill/workspace_assets/evaluation/tongyong_v3bench_delivered_pair_posterior_pool_v1_20260817/koujing34_strict_positive/tongyong_v3bench_strict_positive_koujing4_pair_ge5_14d_spus.tsv",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/analyze_tongyong_v3bench_delivered_pair_posterior_pool_v1.py",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/sql/tongyong/tongyong_v33_bench_stratified_all_observed_pairs.sql",
+            "/mnt/bn/baiweikang/qianchuan_distill/workspace_assets/evaluation/tongyong_v3bench_delivered_pair_posterior_pool_v1_20260817/REPORT_tongyong_v3bench_delivered_pair_posterior_pool_v1.md",
+            "/mnt/bn/baiweikang/qianchuan_distill/workspace_assets/evaluation/tongyong_v3bench_delivered_pair_posterior_pool_v1_20260817/koujing34_strict_positive/tongyong_v3bench_strict_positive_koujing34_sparse_graph_14d_by_spu.tsv",
+            "/mnt/bn/baiweikang/qianchuan_distill/workspace_assets/evaluation/tongyong_v3bench_delivered_pair_posterior_pool_v1_20260817/koujing34_strict_positive/tongyong_v3bench_strict_positive_koujing34_sparse_graph_60d_by_spu.tsv"
+          ]
+        },
+        {
+          "id": "semantic-result-004",
+          "category": "experiment_result",
+          "recall_at_10": 1,
+          "reciprocal_rank": 1,
+          "ndcg_at_10": 1,
+          "latency_ms": 0.053860247135162354,
+          "returned_paths": [
+            "/mnt/bn/baiweikang/qianchuan_distill/workspace_assets/evaluation/tongyong_v3bench_delivered_pair_posterior_pool_v1_20260817/koujing34_strict_positive/tongyong_v3bench_strict_positive_koujing34_sparse_graph_scene_summary.tsv",
+            "/mnt/bn/baiweikang/qianchuan_distill/workspace_assets/evaluation/tongyong_v3bench_delivered_pair_posterior_pool_v1_20260817/koujing34_strict_positive/tongyong_v3bench_strict_positive_koujing34_sparse_graph_summary.json",
+            "/mnt/bn/baiweikang/qianchuan_distill/workspace_assets/evaluation/tongyong_v3bench_delivered_pair_posterior_pool_v1_20260817/koujing34_strict_positive/tongyong_v3bench_strict_positive_koujing34_sparse_graph_distribution.tsv",
+            "/mnt/bn/baiweikang/qianchuan_distill/workspace_assets/evaluation/tongyong_v3bench_delivered_pair_posterior_pool_v1_20260817/koujing34_strict_positive/tongyong_v3bench_strict_positive_koujing34_sparse_graph_60d_by_spu.tsv",
+            "/mnt/bn/baiweikang/qianchuan_distill/workspace_assets/evaluation/tongyong_v3bench_delivered_pair_posterior_pool_v1_20260817/koujing34_strict_positive/tongyong_v3bench_strict_positive_koujing34_sparse_graph_14d_by_spu.tsv",
+            "/mnt/bn/baiweikang/qianchuan_distill/workspace_assets/evaluation/tongyong_v3bench_delivered_pair_posterior_pool_v1_20260817/koujing34_strict_positive/tongyong_v3bench_strict_positive_koujing4_pair_ge5_60d_spus.tsv",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/analyze_tongyong_v3bench_koujing34_sparse_graph.py",
+            "/mnt/bn/baiweikang/qianchuan_distill/workspace_assets/evaluation/tongyong_v3bench_delivered_pair_posterior_pool_v1_20260817/koujing34_strict_positive/tongyong_v3bench_strict_positive_koujing4_pair_ge5_14d_spus.tsv",
+            "/mnt/bn/baiweikang/qianchuan_distill/workspace_assets/evaluation/tongyong_v3bench_delivered_pair_posterior_pool_v1_20260817/koujing34_strict_positive/tongyong_v3bench_strict_positive_koujing4_pair_ge5_summary.json",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/sql/tongyong/tongyong_v33_bench_stratified_all_observed_pairs.sql"
+          ]
+        },
+        {
+          "id": "semantic-dataset-001",
+          "category": "dataset_query",
+          "recall_at_10": 1,
+          "reciprocal_rank": 0.3333333333333333,
+          "ndcg_at_10": 0.5,
+          "latency_ms": 0.05665421485900879,
+          "returned_paths": [
+            "/home/tiger/Projects/Bona/qianchuan_distill/human_annotation_sample_v1/enrich_sample.py",
+            "/home/tiger/Projects/Bona/qianchuan_distill/human_annotation_sample_v1/sample_benchmark.py",
+            "/home/tiger/Projects/Bona/qianchuan_distill/human_annotation_sample_v2/human_annotation_sample_250_enriched_flat.jsonl",
+            "/home/tiger/Projects/Bona/qianchuan_distill/human_annotation_sample_v2/human_annotation_sample_250_enriched.jsonl",
+            "/home/tiger/Projects/Bona/qianchuan_distill/human_annotation_sample_v2/scripts/build_xlsx_for_review.py",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/tools/two_shot_low_standard/build_text_review_panel_two_shot.py",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/export_low_standard_disagreement_case_table.py",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/eval_two_shot_v48bench_five_models_latest_high_overall.py",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/tools/two_shot_low_standard/evaluate_native_two_shot.py",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/tools/two_shot_low_standard/audit_external_human_candidates_two_shot.py"
+          ]
+        },
+        {
+          "id": "semantic-dataset-002",
+          "category": "dataset_query",
+          "recall_at_10": 1,
+          "reciprocal_rank": 1,
+          "ndcg_at_10": 1,
+          "latency_ms": 0.05569681525230408,
+          "returned_paths": [
+            "/home/tiger/Projects/Bona/qianchuan_distill/scripts/4model_inference_inputs/judge300_qc102.jsonl",
+            "/home/tiger/Projects/Bona/qianchuan_distill/scripts/sample_for_judge.py",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/scripts/judge_dataset/sample_for_judge.py",
+            "/mnt/bn/baiweikang/qianchuan_distill/workspace_assets/datasets/legacy_four_model_inputs/judge300_qc102.jsonl",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/scripts/patches/patch_judge_v7_b.py",
+            "/mnt/bn/baiweikang/qianchuan_distill/workspace_assets/evaluation/tongyong_v3bench_delivered_pair_posterior_pool_v1_20260817/koujing34_strict_positive/tongyong_v3bench_strict_positive_koujing4_pair_ge5_60d_spus.tsv",
+            "/home/tiger/Projects/Bona/qianchuan_distill/scripts/judge_sample_v1.with_ctx.jsonl",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/scripts/prompt_evolution/judge_v5.py",
+            "/mnt/bn/baiweikang/qianchuan_distill/workspace_assets/evaluation/tongyong_v3bench_delivered_pair_posterior_pool_v1_20260817/koujing34_strict_positive/tongyong_v3bench_strict_positive_koujing4_pair_ge5_14d_spus.tsv",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/scripts/patches/patch_score_fields.py"
+          ]
+        },
+        {
+          "id": "semantic-dataset-003",
+          "category": "dataset_query",
+          "recall_at_10": 0,
+          "reciprocal_rank": 0,
+          "ndcg_at_10": 0,
+          "latency_ms": 0.05849078297615051,
+          "returned_paths": [
+            "/home/tiger/Projects/Bona/qianchuan_distill/scripts/4model_inference_inputs/judge300_qc102.jsonl",
+            "/home/tiger/Projects/Bona/qianchuan_distill/scripts/4model_inference_inputs/sid_ctx_v4m.jsonl",
+            "/home/tiger/Projects/Bona/qianchuan_distill/scripts/sample_for_judge.py",
+            "/home/tiger/Projects/Bona/qianchuan_distill/scripts/build_judge_dataset_v4model.py",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/scripts/build_two_shot_v48_posterior_legacy_index.py",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/build_v45_vs_online_empty_different_plan.py",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/eval_two_shot_v48bench_eight_models_latest_high_overall.py",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/eval_two_shot_model_table_asr_consistency4b.py",
+            "/home/tiger/Projects/Bona/qianchuan_distill/scripts/judge_sample_v1.with_ctx.jsonl",
+            "/mnt/bn/baiweikang/qianchuan_distill/workspace_assets/evaluation/tongyong_v3bench_delivered_pair_posterior_pool_v1_20260817/tongyong_v3bench_delivered_pair_posterior_pool_v1_summary.json"
+          ]
+        },
+        {
+          "id": "semantic-dataset-004",
+          "category": "dataset_query",
+          "recall_at_10": 1,
+          "reciprocal_rank": 0.125,
+          "ndcg_at_10": 0.31546487678572877,
+          "latency_ms": 0.0688210129737854,
+          "returned_paths": [
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/merlin_deploy/ezreal_smoke_5services_20260914/two_shot_v6_ranked_ezreal_psm_c256_serial_full2983_20260915/raw_results_two_shot.jsonl",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/merlin_deploy/ezreal_smoke_5services_20260914/two_shot_v6_ranked_ezreal_psm_c128_serial_full2983_20260915/raw_results_two_shot.jsonl",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/merlin_deploy/ezreal_smoke_5services_20260914/two_shot_v6_ranked_ezreal_psm_smoke3_v6contract_20260915/raw_results_two_shot.jsonl",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/merlin_deploy/ezreal_smoke_5services_20260914/two_shot_v6_ranked_ezreal_psm_smoke3_defaultsnapshot_20260915/raw_results_two_shot.jsonl",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/merlin_deploy/ezreal_smoke_5services_20260914/service_search_two_shots_v4_8_xllm.json",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/merlin_deploy/ezreal_smoke_5services_20260914/service_search_two_shots_v4_8_dapo.final.json",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/merlin_deploy/ezreal_smoke_5services_20260914/service_search_two_shots_v4_8_dapo.json",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/merlin_deploy/ezreal_smoke_5services_20260914/two_shot_v48bench_ezreal_psm_smoke3_20260915/raw_results_two_shot.jsonl",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/merlin_deploy/ezreal_smoke_5services_20260914/two_shot_v48bench_ezreal_psm_c128_20260915/raw_results_two_shot.jsonl",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/merlin_deploy/ezreal_smoke_5services_20260914/two_shot_v48bench_ezreal_psm_c64_parity_20260915/raw_results_two_shot.jsonl"
+          ]
+        }
+      ],
+      "runtime": {
+        "backend": "gguf_270m_q8",
+        "model_path": "/mnt/bn/baiweikang/Models/harrier-oss-v1-270m-GGUF/harrier-oss-v1-270M-Q8_0.gguf",
+        "threads": 16,
+        "batch_size": 16,
+        "query_instruction": false,
+        "documents": 1123,
+        "documents_encoded": 0,
+        "document_embeddings_reused_from": "/tmp/awi-harrier-final/embeddings/gguf_270m_q8.npz",
+        "queries": 16,
+        "embedding_dimension": 640,
+        "tokens": 430,
+        "load_seconds": 0.38368838652968407,
+        "encode_seconds": 0.48101118579506874,
+        "texts_per_second": 33.26325971724217,
+        "tokens_per_second": 893.9501049008834,
+        "peak_rss_mib": 2104.63671875,
+        "output_bytes": 4068358
+      },
+      "document_cosine_vs_reference": {
+        "min": 0.9815510511398315,
+        "p50": 0.9996024966239929,
+        "mean": 0.9989062547683716,
+        "p95": 0.9996681809425354
+      },
+      "query_cosine_vs_reference": {
+        "min": 0.7795164585113525,
+        "p50": 0.8564174175262451,
+        "mean": 0.8437843322753906,
+        "p95": 0.8670787811279297
+      },
+      "top10_overlap_vs_reference": 0.70625
+    },
+    "official_fp32": {
+      "cases": 16,
+      "recall_at_10": 0.875,
+      "mrr": 0.6958333333333333,
+      "ndcg_at_10": 0.737927961695243,
+      "p50_query_ms": 0.05709752440452576,
+      "p95_query_ms": 0.08634477853775024,
+      "categories": {
+        "code": {
+          "cases": 4,
+          "recall_at_10": 1,
+          "mrr": 0.875,
+          "ndcg_at_10": 0.9077324383928644
+        },
+        "dataset_query": {
+          "cases": 4,
+          "recall_at_10": 0.75,
+          "mrr": 0.3833333333333333,
+          "ndcg_at_10": 0.4717132018086354
+        },
+        "experiment_result": {
+          "cases": 4,
+          "recall_at_10": 1,
+          "mrr": 1,
+          "ndcg_at_10": 1
+        },
+        "sql": {
+          "cases": 4,
+          "recall_at_10": 0.75,
+          "mrr": 0.525,
+          "ndcg_at_10": 0.5722662065794719
+        }
+      },
+      "results": [
+        {
+          "id": "semantic-code-001",
+          "category": "code",
+          "recall_at_10": 1,
+          "reciprocal_rank": 1,
+          "ndcg_at_10": 1,
+          "latency_ms": 0.08634477853775024,
+          "returned_paths": [
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/build_two_shot_three_models_anchor_qwen_20260917.py",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/merlin_deploy/two_shot_qwen35_selected_videos_vllm/scm_version_1.0.0.2.json",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/merlin_deploy/two_shot_qwen35_selected_videos_vllm/scm_version_1.0.0.1.json",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/merlin_deploy/two_shot_qwen35_selected_videos_vllm/two_shot_qwen35_direct_vllm_fix_summary_20260903.json",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/build_raw_all_novel_video_manifest.py",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/merlin_deploy/two_shot_qwen35_selected_videos_vllm/two_shot_scm_1.0.0.4_build.json",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/eval_two_shot_v48bench_three_models_anchor_qwen_ziti_20260918.py",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/eval_two_shot_v48bench_three_models_latest_high_overall.py",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/tools/two_shot_frame_sampler_go/scripts/benchmark_video_ocr_v3_rpc_two_shot.py",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/merlin_deploy/two_shot_qwen35_selected_videos_vllm/icm_v45_dpo_service_image_1.0.0.1.json"
+          ]
+        },
+        {
+          "id": "semantic-code-002",
+          "category": "code",
+          "recall_at_10": 1,
+          "reciprocal_rank": 1,
+          "ndcg_at_10": 1,
+          "latency_ms": 0.0629425048828125,
+          "returned_paths": [
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/build_tongyong_v6_teacher_full.py",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/prompts/tongyong_v6_teacher_v1/manifest_tongyong_v6_teacher_v1.json",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/watch_tongyong_v32bench.py",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/logs/v5_temporal_postprocess.json",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/snapshot_tongyong_v33bench_teacher_status.py",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/scripts/sample_trace_ppl_20260829.py",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/build_two_shot_omni_v12_train_student_no_posterior_dataset.py",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/prompts/two_shot_v6_glm53_twostage_cot_v1/manifest_two_shot_v6_glm53_twostage_cot_v1.json",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/bench_tongyong_v6_teacher_throughput.py",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/logs/v47_multi_pipeline_20260802.json"
+          ]
+        },
+        {
+          "id": "semantic-code-003",
+          "category": "code",
+          "recall_at_10": 1,
+          "reciprocal_rank": 0.5,
+          "ndcg_at_10": 0.6309297535714575,
+          "latency_ms": 0.06364285945892334,
+          "returned_paths": [
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/analyze_tongyong_v3bench_dual_role_delivery_posterior_material_pool_v2.py",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/analyze_tongyong_v3bench_delivered_pair_posterior_pool_v1.py",
+            "/mnt/bn/baiweikang/qianchuan_distill/workspace_assets/evaluation/tongyong_v3bench_delivered_pair_posterior_pool_v1_20260817/koujing34_strict_positive/manifest.json",
+            "/mnt/bn/baiweikang/qianchuan_distill/workspace_assets/evaluation/tongyong_v3bench_delivered_pair_posterior_pool_v1_20260817/manifest.json",
+            "/mnt/bn/baiweikang/qianchuan_distill/workspace_assets/evaluation/tongyong_v3bench_delivered_pair_posterior_pool_v1_20260817/koujing34_strict_positive/run_stdout.json",
+            "/mnt/bn/baiweikang/qianchuan_distill/workspace_assets/evaluation/tongyong_v3bench_delivered_pair_posterior_pool_v1_20260817/tongyong_v3bench_delivered_pair_posterior_pool_v1_summary.json",
+            "/mnt/bn/baiweikang/qianchuan_distill/workspace_assets/evaluation/tongyong_v3bench_delivered_pair_posterior_pool_v1_20260817/run_stdout.json",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/tools/two_shot_low_standard/report_local_windows_two_shot.py",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/tools/two_shot_low_standard/test_evaluate_fornax_gemini38_annotation_two_shot.py",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/tools/two_shot_low_standard/build_qc102_external_two_shot.py"
+          ]
+        },
+        {
+          "id": "semantic-code-004",
+          "category": "code",
+          "recall_at_10": 1,
+          "reciprocal_rank": 1,
+          "ndcg_at_10": 1,
+          "latency_ms": 0.05761533975601196,
+          "returned_paths": [
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/eval_two_shot_v48bench_three_models_anchor_qwen_ziti_20260918.py",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/eval_two_shot_v48bench_eight_models_latest_high_overall.py",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/eval_two_shot_v48bench_four_models_latest_high_overall.py",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/eval_two_shot_v48bench_three_models_latest_high_overall.py",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/eval_two_shot_v48bench_five_models_latest_high_overall.py",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/eval_two_shot_v48bench_six_industry_qwen_arena.py",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/eval_low_standard_qianchuan_two_shot_three_models_raw_all_vs_cost_top.py",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/eval_pairwise_toufang_model_prediction.py",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/eval_high_standard_v45_raw_all_vs_cost_top.py",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/eval_two_shot_v48_history_reward.py"
+          ]
+        },
+        {
+          "id": "semantic-sql-001",
+          "category": "sql",
+          "recall_at_10": 1,
+          "reciprocal_rank": 0.1,
+          "ndcg_at_10": 0.2890648263178879,
+          "latency_ms": 0.06030872464179993,
+          "returned_paths": [
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/sql/tongyong/tongyong_v3bench_candidate_inventory.sql",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/sql/tongyong/tongyong_v32bench_cost_ranked_candidate_inventory.sql",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/sql/tongyong/tongyong_v3bench_show_inventory.sql",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/sql/tongyong/tongyong_v31bench_midshow_candidate_inventory.sql",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/sql/tongyong/tongyong_v3bench_dual_role_delivery_posterior_material_pool_v2.sql",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/sql/qianchuan_sql_koujing4/qc102_aigc.sql",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/sql/tongyong/tongyong_v3bench_dual_role_midshow_material_pool_v1.sql",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/sql/tongyong/tongyong_v3bench_delivered_pair_posterior_pool_v1.sql",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/sql/qianchuan_sql_koujing4/qc303_aigc.sql",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/sql/qianchuan_sql_koujing4/two_shot_v48_posterior_refresh_20260917/qc102_aigc.sql"
+          ]
+        },
+        {
+          "id": "semantic-sql-002",
+          "category": "sql",
+          "recall_at_10": 0,
+          "reciprocal_rank": 0,
+          "ndcg_at_10": 0,
+          "latency_ms": 0.05488097667694092,
+          "returned_paths": [
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/sql/tongyong/tongyong_v3bench_candidate_inventory.sql",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/sql/tongyong/tongyong_v32bench_cost_ranked_candidate_inventory.sql",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/sql/tongyong/tongyong_v3bench_show_inventory.sql",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/sql/qianchuan_sql_koujing4/v47_multi_stage1_additional_sources.sql",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/sql/tongyong/tongyong_v3bench_all_combinations.sql",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/sql/tongyong/tongyong_v31bench_midshow_candidate_inventory.sql",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/sql/tongyong/tongyong_v3bench_dual_role_midshow_material_pool_v1.sql",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/sql/qianchuan_sql_koujing4/qc102_aigc_v47_stage1_pair_daily.sql",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/test_build_tongyong_v32bench_candidates.py",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/scripts/run_two_shot_v48_posterior_refresh.py"
+          ]
+        },
+        {
+          "id": "semantic-sql-003",
+          "category": "sql",
+          "recall_at_10": 1,
+          "reciprocal_rank": 1,
+          "ndcg_at_10": 1,
+          "latency_ms": 0.06580725312232971,
+          "returned_paths": [
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/sql/tongyong/tongyong_v3bench_delivered_pair_posterior_pool_v1.sql",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/sql/tongyong/tongyong_train_v2_show500_play500_28d.sql",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/sql/tongyong/tongyong_train_v2_show500_play500_28d_optimized.sql",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/sql/tongyong/tongyong_v33_bench_stratified_all_observed_pairs.sql",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/build_two_shot_omni_v12_gemini37_sft.py",
+            "/mnt/bn/baiweikang/qianchuan_distill/workspace_assets/evaluation/tongyong_v3bench_delivered_pair_posterior_pool_v1_20260817/tongyong_v3bench_delivered_pair_posterior_pool_v1_by_spu.tsv",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/build_two_shot_consistency_pair_datasets.py",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/scripts/build_two_shot_v48_posterior_refresh_sidecar.py",
+            "/mnt/bn/baiweikang/qianchuan_distill/workspace_assets/evaluation/tongyong_v3bench_delivered_pair_posterior_pool_v1_20260817/tongyong_v3bench_delivered_pair_posterior_pool_v1_summary.json",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/sql/qianchuan_sql_koujing4/qc102_aigc_v47_temporal_replay.sql"
+          ]
+        },
+        {
+          "id": "semantic-sql-004",
+          "category": "sql",
+          "recall_at_10": 1,
+          "reciprocal_rank": 1,
+          "ndcg_at_10": 1,
+          "latency_ms": 0.05741417407989502,
+          "returned_paths": [
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/sql/tongyong/tongyong_train_v2_show500_play500_28d_optimized.sql",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/sql/tongyong/tongyong_train_v2_show500_play500_28d.sql",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/tools/two_shot_omni_v13_sampler/selector_runtime.py",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/tools/two_shot_omni_v13_sampler/build_omni_v13_selector_trainset_two_shot.py",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/build_two_shot_omni_v12_train_student_no_posterior_dataset.py",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/scripts/build_two_shot_v48_posterior_legacy_index.py",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/build_two_shot_v6_label_judge_input.py",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/tools/two_shot_low_standard/train_acoustic_sft_two_shot.py",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/analyze_student_posterior.py",
+            "/mnt/bn/baiweikang/qianchuan_distill/workspace_assets/evaluation/tongyong_v3bench_delivered_pair_posterior_pool_v1_20260817/koujing34_strict_positive/tongyong_v3bench_strict_positive_koujing4_pair_ge5_60d_spus.tsv"
+          ]
+        },
+        {
+          "id": "semantic-result-001",
+          "category": "experiment_result",
+          "recall_at_10": 1,
+          "reciprocal_rank": 1,
+          "ndcg_at_10": 1,
+          "latency_ms": 0.055283308029174805,
+          "returned_paths": [
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/logs/v47_multi_output_audit_current.json",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/logs/v47_multi_output_audit.json",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/audit_two_shot_omni_v12_no_posterior_version.py",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/tools/two_shot_low_standard/report_sft_acoustic_two_shot.py",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/audit_omni_v1_1_benchmark.py",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/logs/v5_temporal_postprocess.json",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/sql/tongyong/tongyong_v3bench_diversity_audit.sql",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/logs/history_downloads_complete.summary.json",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/tools/two_shot_low_standard/report_local_windows_two_shot.py",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/tools/two_shot_low_standard/audit_pilot_evidence_two_shot.py"
+          ]
+        },
+        {
+          "id": "semantic-result-002",
+          "category": "experiment_result",
+          "recall_at_10": 1,
+          "reciprocal_rank": 1,
+          "ndcg_at_10": 1,
+          "latency_ms": 0.05671381950378418,
+          "returned_paths": [
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/merlin_deploy/ezreal_smoke_5services_20260914/three_scene_summary.corrected.json",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/merlin_deploy/ezreal_smoke_5services_20260914/history3_three_scene_postprocessed.json",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/merlin_deploy/ezreal_smoke_5services_20260914/three_scene_summary.json",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/merlin_deploy/ezreal_smoke_5services_20260914/two_shot_v6_ranked_ezreal_psm_smoke3_v6contract_20260915/raw_results_two_shot.jsonl",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/merlin_deploy/ezreal_smoke_5services_20260914/two_shot_v6_ranked_ezreal_psm_smoke3_defaultsnapshot_20260915/raw_results_two_shot.jsonl",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/merlin_deploy/ezreal_smoke_5services_20260914/history3_parity_smoke_postprocessed.json",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/merlin_deploy/ezreal_smoke_5services_20260914/two_shot_v6_ranked_ezreal_psm_c256_serial_full2983_20260915/raw_results_two_shot.jsonl",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/merlin_deploy/ezreal_smoke_5services_20260914/two_shot_v48bench_ezreal_psm_smoke3_20260915/raw_results_two_shot.jsonl",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/merlin_deploy/ezreal_smoke_5services_20260914/xllm_variants_and_v48_control.json",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/merlin_deploy/ezreal_smoke_5services_20260914/two_shot_v6_ranked_ezreal_psm_c128_serial_full2983_20260915/raw_results_two_shot.jsonl"
+          ]
+        },
+        {
+          "id": "semantic-result-003",
+          "category": "experiment_result",
+          "recall_at_10": 1,
+          "reciprocal_rank": 1,
+          "ndcg_at_10": 1,
+          "latency_ms": 0.05709752440452576,
+          "returned_paths": [
+            "/mnt/bn/baiweikang/qianchuan_distill/workspace_assets/evaluation/tongyong_v3bench_delivered_pair_posterior_pool_v1_20260817/tongyong_v3bench_delivered_pair_posterior_pool_v1_summary.json",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/sql/tongyong/tongyong_v3bench_delivered_pair_posterior_pool_v1.sql",
+            "/mnt/bn/baiweikang/qianchuan_distill/workspace_assets/evaluation/tongyong_v3bench_delivered_pair_posterior_pool_v1_20260817/REPORT_tongyong_v3bench_delivered_pair_posterior_pool_v1.md",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/analyze_tongyong_v3bench_delivered_pair_posterior_pool_v1.py",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/sql/tongyong/tongyong_v33_bench_stratified_all_observed_pairs.sql",
+            "/mnt/bn/baiweikang/qianchuan_distill/workspace_assets/evaluation/tongyong_v3bench_delivered_pair_posterior_pool_v1_20260817/tongyong_v3bench_delivered_pair_posterior_pool_v1_by_spu.tsv",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/scripts/join_two_shot_v48_posterior_refresh.py",
+            "/mnt/bn/baiweikang/qianchuan_distill/workspace_assets/evaluation/tongyong_v3bench_delivered_pair_posterior_pool_v1_20260817/koujing34_strict_positive/tongyong_v3bench_strict_positive_koujing4_pair_ge5_14d_spus.tsv",
+            "/mnt/bn/baiweikang/qianchuan_distill/workspace_assets/evaluation/tongyong_v3bench_delivered_pair_posterior_pool_v1_20260817/koujing34_strict_positive/tongyong_v3bench_strict_positive_koujing4_pair_ge5_60d_spus.tsv",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/merlin_deploy/ezreal_smoke_5services_20260914/history3_three_scene_postprocessed.json"
+          ]
+        },
+        {
+          "id": "semantic-result-004",
+          "category": "experiment_result",
+          "recall_at_10": 1,
+          "reciprocal_rank": 1,
+          "ndcg_at_10": 1,
+          "latency_ms": 0.054001808166503906,
+          "returned_paths": [
+            "/mnt/bn/baiweikang/qianchuan_distill/workspace_assets/evaluation/tongyong_v3bench_delivered_pair_posterior_pool_v1_20260817/koujing34_strict_positive/tongyong_v3bench_strict_positive_koujing34_sparse_graph_scene_summary.tsv",
+            "/mnt/bn/baiweikang/qianchuan_distill/workspace_assets/evaluation/tongyong_v3bench_delivered_pair_posterior_pool_v1_20260817/koujing34_strict_positive/tongyong_v3bench_strict_positive_koujing34_sparse_graph_summary.json",
+            "/mnt/bn/baiweikang/qianchuan_distill/workspace_assets/evaluation/tongyong_v3bench_delivered_pair_posterior_pool_v1_20260817/koujing34_strict_positive/tongyong_v3bench_strict_positive_koujing34_sparse_graph_60d_by_spu.tsv",
+            "/mnt/bn/baiweikang/qianchuan_distill/workspace_assets/evaluation/tongyong_v3bench_delivered_pair_posterior_pool_v1_20260817/koujing34_strict_positive/tongyong_v3bench_strict_positive_koujing34_sparse_graph_14d_by_spu.tsv",
+            "/mnt/bn/baiweikang/qianchuan_distill/workspace_assets/evaluation/tongyong_v3bench_delivered_pair_posterior_pool_v1_20260817/koujing34_strict_positive/tongyong_v3bench_strict_positive_koujing34_sparse_graph_distribution.tsv",
+            "/mnt/bn/baiweikang/qianchuan_distill/workspace_assets/evaluation/tongyong_v3bench_delivered_pair_posterior_pool_v1_20260817/koujing34_strict_positive/tongyong_v3bench_strict_positive_koujing4_pair_ge5_summary.json",
+            "/mnt/bn/baiweikang/qianchuan_distill/workspace_assets/evaluation/tongyong_v3bench_delivered_pair_posterior_pool_v1_20260817/koujing34_strict_positive/tongyong_v3bench_strict_positive_koujing4_pair_ge5_60d_spus.tsv",
+            "/mnt/bn/baiweikang/qianchuan_distill/workspace_assets/evaluation/tongyong_v3bench_delivered_pair_posterior_pool_v1_20260817/koujing34_strict_positive/tongyong_v3bench_strict_positive_koujing4_pair_ge5_14d_spus.tsv",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/analyze_tongyong_v3bench_koujing34_sparse_graph.py",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/sql/tongyong/tongyong_v33_bench_stratified_all_observed_pairs.sql"
+          ]
+        },
+        {
+          "id": "semantic-dataset-001",
+          "category": "dataset_query",
+          "recall_at_10": 1,
+          "reciprocal_rank": 0.3333333333333333,
+          "ndcg_at_10": 0.5,
+          "latency_ms": 0.057056546211242676,
+          "returned_paths": [
+            "/home/tiger/Projects/Bona/qianchuan_distill/human_annotation_sample_v1/sample_benchmark.py",
+            "/home/tiger/Projects/Bona/qianchuan_distill/human_annotation_sample_v1/enrich_sample.py",
+            "/home/tiger/Projects/Bona/qianchuan_distill/human_annotation_sample_v2/human_annotation_sample_250_enriched_flat.jsonl",
+            "/home/tiger/Projects/Bona/qianchuan_distill/human_annotation_sample_v2/human_annotation_sample_250_enriched.jsonl",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/scripts/patches/patch_v9_runner.py",
+            "/home/tiger/Projects/Bona/qianchuan_distill/human_annotation_sample_v2/scripts/build_xlsx_for_review.py",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/eval_two_shot_v48bench_five_models_latest_high_overall.py",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/eval_two_shot_v48bench_four_models_latest_high_overall.py",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/export_low_standard_disagreement_case_table.py",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/scripts/patches/patch_runner_v8.py"
+          ]
+        },
+        {
+          "id": "semantic-dataset-002",
+          "category": "dataset_query",
+          "recall_at_10": 1,
+          "reciprocal_rank": 1,
+          "ndcg_at_10": 1,
+          "latency_ms": 0.060461461544036865,
+          "returned_paths": [
+            "/home/tiger/Projects/Bona/qianchuan_distill/scripts/4model_inference_inputs/judge300_qc102.jsonl",
+            "/home/tiger/Projects/Bona/qianchuan_distill/scripts/sample_for_judge.py",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/scripts/patches/patch_judge_v7_b.py",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/scripts/judge_dataset/sample_for_judge.py",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/scripts/visualization/build_v4_html.py",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/scripts/patches/patch_v9_runner.py",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/scripts/batch_build/build_consensus_benchmark.py",
+            "/mnt/bn/baiweikang/qianchuan_distill/workspace_assets/evaluation/tongyong_v3bench_delivered_pair_posterior_pool_v1_20260817/koujing34_strict_positive/tongyong_v3bench_strict_positive_koujing4_pair_ge5_60d_spus.tsv",
+            "/home/tiger/Projects/Bona/qianchuan_distill/scripts/rerun_doubao_v4_length_243/manifest.json",
+            "/mnt/bn/baiweikang/qianchuan_distill/workspace_assets/evaluation/tongyong_v3bench_delivered_pair_posterior_pool_v1_20260817/koujing34_strict_positive/tongyong_v3bench_strict_positive_koujing4_pair_ge5_14d_spus.tsv"
+          ]
+        },
+        {
+          "id": "semantic-dataset-003",
+          "category": "dataset_query",
+          "recall_at_10": 0,
+          "reciprocal_rank": 0,
+          "ndcg_at_10": 0,
+          "latency_ms": 0.054702162742614746,
+          "returned_paths": [
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/scripts/patches/patch_judge_v7_b.py",
+            "/home/tiger/Projects/Bona/qianchuan_distill/scripts/build_judge_dataset_v4model.py",
+            "/home/tiger/Projects/Bona/qianchuan_distill/scripts/4model_inference_inputs/judge300_qc102.jsonl",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/scripts/build_two_shot_v48_posterior_legacy_index.py",
+            "/home/tiger/Projects/Bona/qianchuan_distill/scripts/4model_inference_inputs/sid_ctx_v4m.jsonl",
+            "/home/tiger/Projects/Bona/qianchuan_distill/scripts/judge_sample_v1.stats.json",
+            "/home/tiger/Projects/Bona/qianchuan_distill/scripts/sample_for_judge.py",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/eval_two_shot_v48bench_ziti_5models_asr_consistency4b.py",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/select_v3_judge_samples.py",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/sql/tongyong/tongyong_v3bench_delivered_pair_posterior_pool_v1.sql"
+          ]
+        },
+        {
+          "id": "semantic-dataset-004",
+          "category": "dataset_query",
+          "recall_at_10": 1,
+          "reciprocal_rank": 0.2,
+          "ndcg_at_10": 0.38685280723454163,
+          "latency_ms": 0.05388632416725159,
+          "returned_paths": [
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/merlin_deploy/ezreal_smoke_5services_20260914/two_shot_v6_ranked_ezreal_psm_c256_serial_full2983_20260915/raw_results_two_shot.jsonl",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/merlin_deploy/ezreal_smoke_5services_20260914/two_shot_v6_ranked_ezreal_psm_smoke3_v6contract_20260915/raw_results_two_shot.jsonl",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/merlin_deploy/ezreal_smoke_5services_20260914/two_shot_v6_ranked_ezreal_psm_c128_serial_full2983_20260915/raw_results_two_shot.jsonl",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/merlin_deploy/ezreal_smoke_5services_20260914/two_shot_v6_ranked_ezreal_psm_smoke3_defaultsnapshot_20260915/raw_results_two_shot.jsonl",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/merlin_deploy/ezreal_smoke_5services_20260914/two_shot_v48bench_ezreal_psm_smoke3_20260915/raw_results_two_shot.jsonl",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/merlin_deploy/ezreal_smoke_5services_20260914/two_shot_v48bench_ezreal_psm_c128_20260915/raw_results_two_shot.jsonl",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/merlin_deploy/ezreal_smoke_5services_20260914/two_shot_v48bench_ezreal_psm_c64_full2983_20260915/raw_results_two_shot.jsonl",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/merlin_deploy/ezreal_smoke_5services_20260914/two_shot_v48bench_ezreal_psm_c64_parity_20260915/raw_results_two_shot.jsonl",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/merlin_deploy/ezreal_smoke_5services_20260914/service_search_two_shots_v4_8_xllm.json",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/merlin_deploy/ezreal_smoke_5services_20260914/service_search_two_shots_v4_8_dapo.json"
+          ]
+        }
+      ],
+      "runtime": {
+        "backend": "official_fp32",
+        "model_path": "/mnt/bn/baiweikang/Models/harrier-oss-v1-270m",
+        "threads": 16,
+        "batch_size": 16,
+        "query_instruction": true,
+        "documents": 1123,
+        "documents_encoded": 1123,
+        "document_embeddings_reused_from": null,
+        "queries": 16,
+        "embedding_dimension": 640,
+        "tokens": 523773,
+        "load_seconds": 1.031880233436823,
+        "encode_seconds": 206.753702044487,
+        "texts_per_second": 5.508970280759096,
+        "tokens_per_second": 2533.3186047972204,
+        "peak_rss_mib": 3191.4453125,
+        "output_bytes": 4068358
+      },
+      "document_cosine_vs_reference": {
+        "min": 0.9999998807907104,
+        "p50": 1,
+        "mean": 1,
+        "p95": 1.0000001192092896
+      },
+      "query_cosine_vs_reference": {
+        "min": 0.9999998807907104,
+        "p50": 1,
+        "mean": 1,
+        "p95": 1.0000001192092896
+      },
+      "top10_overlap_vs_reference": 1
+    },
+    "onnx_270m_ffn_skip": {
+      "cases": 16,
+      "recall_at_10": 0.875,
+      "mrr": 0.6652777777777777,
+      "ndcg_at_10": 0.7156088943775899,
+      "p50_query_ms": 0.05683675408363342,
+      "p95_query_ms": 0.09512156248092651,
+      "categories": {
+        "code": {
+          "cases": 4,
+          "recall_at_10": 1,
+          "mrr": 0.875,
+          "ndcg_at_10": 0.9077324383928644
+        },
+        "dataset_query": {
+          "cases": 4,
+          "recall_at_10": 0.75,
+          "mrr": 0.3833333333333333,
+          "ndcg_at_10": 0.4717132018086354
+        },
+        "experiment_result": {
+          "cases": 4,
+          "recall_at_10": 1,
+          "mrr": 0.875,
+          "ndcg_at_10": 0.9077324383928644
+        },
+        "sql": {
+          "cases": 4,
+          "recall_at_10": 0.75,
+          "mrr": 0.5277777777777778,
+          "ndcg_at_10": 0.5752574989159953
+        }
+      },
+      "results": [
+        {
+          "id": "semantic-code-001",
+          "category": "code",
+          "recall_at_10": 1,
+          "reciprocal_rank": 1,
+          "ndcg_at_10": 1,
+          "latency_ms": 0.09512156248092651,
+          "returned_paths": [
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/build_two_shot_three_models_anchor_qwen_20260917.py",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/merlin_deploy/two_shot_qwen35_selected_videos_vllm/two_shot_qwen35_direct_vllm_fix_summary_20260903.json",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/build_raw_all_novel_video_manifest.py",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/eval_two_shot_v48bench_three_models_latest_high_overall.py",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/merlin_deploy/two_shot_qwen35_selected_videos_vllm/scm_version_1.0.0.2.json",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/merlin_deploy/two_shot_qwen35_selected_videos_vllm/scm_version_1.0.0.1.json",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/eval_two_shot_v48bench_three_models_anchor_qwen_ziti_20260918.py",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/eval_two_shot_v48_history_reward.py",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/tools/two_shot_frame_sampler_go/scripts/benchmark_video_ocr_v3_rpc_two_shot.py",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/merlin_deploy/ezreal_smoke_5services_20260914/production_ads_creative_two_shots_v4_8_xllm.parity.json"
+          ]
+        },
+        {
+          "id": "semantic-code-002",
+          "category": "code",
+          "recall_at_10": 1,
+          "reciprocal_rank": 1,
+          "ndcg_at_10": 1,
+          "latency_ms": 0.06779283285140991,
+          "returned_paths": [
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/build_tongyong_v6_teacher_full.py",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/prompts/tongyong_v6_teacher_v1/manifest_tongyong_v6_teacher_v1.json",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/logs/v5_temporal_postprocess.json",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/scripts/sample_trace_ppl_20260829.py",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/snapshot_tongyong_v33bench_teacher_status.py",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/build_two_shot_omni_v12_train_student_no_posterior_dataset.py",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/watch_tongyong_v32bench.py",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/prompts/two_shot_v6_glm53_twostage_cot_v1/manifest_two_shot_v6_glm53_twostage_cot_v1.json",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/bench_tongyong_v6_teacher_throughput.py",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/logs/v47_multi_pipeline_20260802.json"
+          ]
+        },
+        {
+          "id": "semantic-code-003",
+          "category": "code",
+          "recall_at_10": 1,
+          "reciprocal_rank": 0.5,
+          "ndcg_at_10": 0.6309297535714575,
+          "latency_ms": 0.06267428398132324,
+          "returned_paths": [
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/analyze_tongyong_v3bench_dual_role_delivery_posterior_material_pool_v2.py",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/analyze_tongyong_v3bench_delivered_pair_posterior_pool_v1.py",
+            "/mnt/bn/baiweikang/qianchuan_distill/workspace_assets/evaluation/tongyong_v3bench_delivered_pair_posterior_pool_v1_20260817/koujing34_strict_positive/manifest.json",
+            "/mnt/bn/baiweikang/qianchuan_distill/workspace_assets/evaluation/tongyong_v3bench_delivered_pair_posterior_pool_v1_20260817/manifest.json",
+            "/mnt/bn/baiweikang/qianchuan_distill/workspace_assets/evaluation/tongyong_v3bench_delivered_pair_posterior_pool_v1_20260817/koujing34_strict_positive/run_stdout.json",
+            "/mnt/bn/baiweikang/qianchuan_distill/workspace_assets/evaluation/tongyong_v3bench_delivered_pair_posterior_pool_v1_20260817/tongyong_v3bench_delivered_pair_posterior_pool_v1_summary.json",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/tools/two_shot_low_standard/report_local_windows_two_shot.py",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/analyze_tongyong_v3bench_dual_role_midshow_material_pool_v1.py",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/tools/two_shot_low_standard/build_qc102_external_two_shot.py",
+            "/mnt/bn/baiweikang/qianchuan_distill/workspace_assets/evaluation/tongyong_v3bench_delivered_pair_posterior_pool_v1_20260817/run_stdout.json"
+          ]
+        },
+        {
+          "id": "semantic-code-004",
+          "category": "code",
+          "recall_at_10": 1,
+          "reciprocal_rank": 1,
+          "ndcg_at_10": 1,
+          "latency_ms": 0.05527585744857788,
+          "returned_paths": [
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/eval_two_shot_v48bench_three_models_anchor_qwen_ziti_20260918.py",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/eval_two_shot_v48bench_eight_models_latest_high_overall.py",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/eval_two_shot_v48bench_six_industry_qwen_arena.py",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/eval_two_shot_v48bench_five_models_latest_high_overall.py",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/eval_two_shot_v48bench_three_models_latest_high_overall.py",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/eval_two_shot_v48bench_four_models_latest_high_overall.py",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/eval_low_standard_qianchuan_two_shot_three_models_raw_all_vs_cost_top.py",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/eval_high_standard_v45_raw_all_vs_cost_top.py",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/eval_pairwise_toufang_model_prediction.py",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/eval_two_shot_v48_history_reward.py"
+          ]
+        },
+        {
+          "id": "semantic-sql-001",
+          "category": "sql",
+          "recall_at_10": 1,
+          "reciprocal_rank": 0.1111111111111111,
+          "ndcg_at_10": 0.3010299956639812,
+          "latency_ms": 0.05564466118812561,
+          "returned_paths": [
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/sql/tongyong/tongyong_v3bench_candidate_inventory.sql",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/sql/tongyong/tongyong_v32bench_cost_ranked_candidate_inventory.sql",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/sql/tongyong/tongyong_v3bench_show_inventory.sql",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/sql/tongyong/tongyong_v31bench_midshow_candidate_inventory.sql",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/sql/tongyong/tongyong_v3bench_dual_role_delivery_posterior_material_pool_v2.sql",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/sql/tongyong/tongyong_v3bench_dual_role_midshow_material_pool_v1.sql",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/sql/qianchuan_sql_koujing4/qc102_aigc.sql",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/sql/tongyong/tongyong_v3bench_delivered_pair_posterior_pool_v1.sql",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/sql/qianchuan_sql_koujing4/two_shot_v48_posterior_refresh_20260917/qc102_aigc.sql",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/sql/qianchuan_sql_koujing4/qc303_aigc.sql"
+          ]
+        },
+        {
+          "id": "semantic-sql-002",
+          "category": "sql",
+          "recall_at_10": 0,
+          "reciprocal_rank": 0,
+          "ndcg_at_10": 0,
+          "latency_ms": 0.05713850259780884,
+          "returned_paths": [
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/sql/tongyong/tongyong_v3bench_candidate_inventory.sql",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/sql/tongyong/tongyong_v32bench_cost_ranked_candidate_inventory.sql",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/sql/qianchuan_sql_koujing4/v47_multi_stage1_additional_sources.sql",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/sql/tongyong/tongyong_v3bench_show_inventory.sql",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/sql/tongyong/tongyong_v31bench_midshow_candidate_inventory.sql",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/sql/tongyong/tongyong_v3bench_dual_role_midshow_material_pool_v1.sql",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/sql/tongyong/tongyong_v3bench_all_combinations.sql",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/sql/qianchuan_sql_koujing4/qc102_aigc_v47_stage1_pair_daily.sql",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/test_build_tongyong_v32bench_candidates.py",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/scripts/run_two_shot_v48_posterior_refresh.py"
+          ]
+        },
+        {
+          "id": "semantic-sql-003",
+          "category": "sql",
+          "recall_at_10": 1,
+          "reciprocal_rank": 1,
+          "ndcg_at_10": 1,
+          "latency_ms": 0.05899742245674133,
+          "returned_paths": [
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/sql/tongyong/tongyong_v3bench_delivered_pair_posterior_pool_v1.sql",
+            "/mnt/bn/baiweikang/qianchuan_distill/workspace_assets/evaluation/tongyong_v3bench_delivered_pair_posterior_pool_v1_20260817/tongyong_v3bench_delivered_pair_posterior_pool_v1_by_spu.tsv",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/sql/tongyong/tongyong_train_v2_show500_play500_28d.sql",
+            "/mnt/bn/baiweikang/qianchuan_distill/workspace_assets/evaluation/tongyong_v3bench_delivered_pair_posterior_pool_v1_20260817/tongyong_v3bench_delivered_pair_posterior_pool_v1_summary.json",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/sql/tongyong/tongyong_train_v2_show500_play500_28d_optimized.sql",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/sql/tongyong/tongyong_v33_bench_stratified_all_observed_pairs.sql",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/build_two_shot_consistency_pair_datasets.py",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/scripts/build_two_shot_v48_posterior_refresh_sidecar.py",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/build_two_shot_omni_v12_gemini37_sft.py",
+            "/mnt/bn/baiweikang/qianchuan_distill/workspace_assets/evaluation/tongyong_v3bench_delivered_pair_posterior_pool_v1_20260817/koujing34_strict_positive/tongyong_v3bench_strict_positive_koujing4_pair_ge5_60d_spus.tsv"
+          ]
+        },
+        {
+          "id": "semantic-sql-004",
+          "category": "sql",
+          "recall_at_10": 1,
+          "reciprocal_rank": 1,
+          "ndcg_at_10": 1,
+          "latency_ms": 0.05683675408363342,
+          "returned_paths": [
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/sql/tongyong/tongyong_train_v2_show500_play500_28d_optimized.sql",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/sql/tongyong/tongyong_train_v2_show500_play500_28d.sql",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/tools/two_shot_omni_v13_sampler/selector_runtime.py",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/tools/two_shot_omni_v13_sampler/build_omni_v13_selector_trainset_two_shot.py",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/scripts/build_two_shot_v48_posterior_legacy_index.py",
+            "/mnt/bn/baiweikang/qianchuan_distill/workspace_assets/evaluation/tongyong_v3bench_delivered_pair_posterior_pool_v1_20260817/koujing34_strict_positive/tongyong_v3bench_strict_positive_koujing4_pair_ge5_60d_spus.tsv",
+            "/mnt/bn/baiweikang/qianchuan_distill/workspace_assets/evaluation/tongyong_v3bench_delivered_pair_posterior_pool_v1_20260817/koujing34_strict_positive/tongyong_v3bench_strict_positive_koujing4_pair_ge5_14d_spus.tsv",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/tools/two_shot_low_standard/train_acoustic_sft_two_shot.py",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/build_two_shot_omni_v12_train_student_no_posterior_dataset.py",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/analyze_student_posterior.py"
+          ]
+        },
+        {
+          "id": "semantic-result-001",
+          "category": "experiment_result",
+          "recall_at_10": 1,
+          "reciprocal_rank": 1,
+          "ndcg_at_10": 1,
+          "latency_ms": 0.05817785859107971,
+          "returned_paths": [
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/logs/v47_multi_output_audit_current.json",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/logs/v47_multi_output_audit.json",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/audit_two_shot_omni_v12_no_posterior_version.py",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/logs/v5_temporal_postprocess.json",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/tools/two_shot_low_standard/report_sft_acoustic_two_shot.py",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/sql/tongyong/tongyong_v3bench_diversity_audit.sql",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/audit_omni_v1_1_benchmark.py",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/audit_v47_multi_outputs.py",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/tools/two_shot_low_standard/report_local_windows_two_shot.py",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/audit_two_shot_v48bench_chengpian_gaobiao_cache.py"
+          ]
+        },
+        {
+          "id": "semantic-result-002",
+          "category": "experiment_result",
+          "recall_at_10": 1,
+          "reciprocal_rank": 0.5,
+          "ndcg_at_10": 0.6309297535714575,
+          "latency_ms": 0.05622953176498413,
+          "returned_paths": [
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/merlin_deploy/ezreal_smoke_5services_20260914/history3_three_scene_postprocessed.json",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/merlin_deploy/ezreal_smoke_5services_20260914/three_scene_summary.corrected.json",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/merlin_deploy/ezreal_smoke_5services_20260914/three_scene_summary.json",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/merlin_deploy/ezreal_smoke_5services_20260914/two_shot_v6_ranked_ezreal_psm_smoke3_v6contract_20260915/raw_results_two_shot.jsonl",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/merlin_deploy/ezreal_smoke_5services_20260914/two_shot_v6_ranked_ezreal_psm_smoke3_defaultsnapshot_20260915/raw_results_two_shot.jsonl",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/merlin_deploy/ezreal_smoke_5services_20260914/two_shot_v6_ranked_ezreal_psm_c256_serial_full2983_20260915/raw_results_two_shot.jsonl",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/merlin_deploy/ezreal_smoke_5services_20260914/history3_parity_smoke_postprocessed.json",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/merlin_deploy/ezreal_smoke_5services_20260914/two_shot_v6_ranked_ezreal_psm_c128_serial_full2983_20260915/raw_results_two_shot.jsonl",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/merlin_deploy/ezreal_smoke_5services_20260914/two_shot_v48bench_ezreal_psm_smoke3_20260915/raw_results_two_shot.jsonl",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/merlin_deploy/ezreal_smoke_5services_20260914/two_shot_v48bench_ezreal_psm_c64_parity_20260915/raw_results_two_shot.jsonl"
+          ]
+        },
+        {
+          "id": "semantic-result-003",
+          "category": "experiment_result",
+          "recall_at_10": 1,
+          "reciprocal_rank": 1,
+          "ndcg_at_10": 1,
+          "latency_ms": 0.05369260907173157,
+          "returned_paths": [
+            "/mnt/bn/baiweikang/qianchuan_distill/workspace_assets/evaluation/tongyong_v3bench_delivered_pair_posterior_pool_v1_20260817/tongyong_v3bench_delivered_pair_posterior_pool_v1_summary.json",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/sql/tongyong/tongyong_v3bench_delivered_pair_posterior_pool_v1.sql",
+            "/mnt/bn/baiweikang/qianchuan_distill/workspace_assets/evaluation/tongyong_v3bench_delivered_pair_posterior_pool_v1_20260817/REPORT_tongyong_v3bench_delivered_pair_posterior_pool_v1.md",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/sql/tongyong/tongyong_v33_bench_stratified_all_observed_pairs.sql",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/analyze_tongyong_v3bench_delivered_pair_posterior_pool_v1.py",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/scripts/join_two_shot_v48_posterior_refresh.py",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/audit_two_shot_v48bench_chengpian_gaobiao_cache.py",
+            "/mnt/bn/baiweikang/qianchuan_distill/workspace_assets/evaluation/tongyong_v3bench_delivered_pair_posterior_pool_v1_20260817/tongyong_v3bench_delivered_pair_posterior_pool_v1_by_spu.tsv",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/audit_v5_v3bench_semantic_overlap.py",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/tools/two_shot_low_standard/report_local_windows_two_shot.py"
+          ]
+        },
+        {
+          "id": "semantic-result-004",
+          "category": "experiment_result",
+          "recall_at_10": 1,
+          "reciprocal_rank": 1,
+          "ndcg_at_10": 1,
+          "latency_ms": 0.05349889397621155,
+          "returned_paths": [
+            "/mnt/bn/baiweikang/qianchuan_distill/workspace_assets/evaluation/tongyong_v3bench_delivered_pair_posterior_pool_v1_20260817/koujing34_strict_positive/tongyong_v3bench_strict_positive_koujing34_sparse_graph_scene_summary.tsv",
+            "/mnt/bn/baiweikang/qianchuan_distill/workspace_assets/evaluation/tongyong_v3bench_delivered_pair_posterior_pool_v1_20260817/koujing34_strict_positive/tongyong_v3bench_strict_positive_koujing34_sparse_graph_summary.json",
+            "/mnt/bn/baiweikang/qianchuan_distill/workspace_assets/evaluation/tongyong_v3bench_delivered_pair_posterior_pool_v1_20260817/koujing34_strict_positive/tongyong_v3bench_strict_positive_koujing34_sparse_graph_60d_by_spu.tsv",
+            "/mnt/bn/baiweikang/qianchuan_distill/workspace_assets/evaluation/tongyong_v3bench_delivered_pair_posterior_pool_v1_20260817/koujing34_strict_positive/tongyong_v3bench_strict_positive_koujing34_sparse_graph_14d_by_spu.tsv",
+            "/mnt/bn/baiweikang/qianchuan_distill/workspace_assets/evaluation/tongyong_v3bench_delivered_pair_posterior_pool_v1_20260817/koujing34_strict_positive/tongyong_v3bench_strict_positive_koujing34_sparse_graph_distribution.tsv",
+            "/mnt/bn/baiweikang/qianchuan_distill/workspace_assets/evaluation/tongyong_v3bench_delivered_pair_posterior_pool_v1_20260817/koujing34_strict_positive/tongyong_v3bench_strict_positive_koujing4_pair_ge5_14d_spus.tsv",
+            "/mnt/bn/baiweikang/qianchuan_distill/workspace_assets/evaluation/tongyong_v3bench_delivered_pair_posterior_pool_v1_20260817/koujing34_strict_positive/tongyong_v3bench_strict_positive_koujing4_pair_ge5_60d_spus.tsv",
+            "/mnt/bn/baiweikang/qianchuan_distill/workspace_assets/evaluation/tongyong_v3bench_delivered_pair_posterior_pool_v1_20260817/koujing34_strict_positive/tongyong_v3bench_strict_positive_koujing4_pair_ge5_summary.json",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/analyze_tongyong_v3bench_koujing34_sparse_graph.py",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/sql/tongyong/tongyong_v33_bench_stratified_all_observed_pairs.sql"
+          ]
+        },
+        {
+          "id": "semantic-dataset-001",
+          "category": "dataset_query",
+          "recall_at_10": 1,
+          "reciprocal_rank": 0.3333333333333333,
+          "ndcg_at_10": 0.5,
+          "latency_ms": 0.053610652685165405,
+          "returned_paths": [
+            "/home/tiger/Projects/Bona/qianchuan_distill/human_annotation_sample_v1/sample_benchmark.py",
+            "/home/tiger/Projects/Bona/qianchuan_distill/human_annotation_sample_v1/enrich_sample.py",
+            "/home/tiger/Projects/Bona/qianchuan_distill/human_annotation_sample_v2/human_annotation_sample_250_enriched_flat.jsonl",
+            "/home/tiger/Projects/Bona/qianchuan_distill/human_annotation_sample_v2/human_annotation_sample_250_enriched.jsonl",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/scripts/patches/patch_v9_runner.py",
+            "/home/tiger/Projects/Bona/qianchuan_distill/human_annotation_sample_v2/scripts/build_xlsx_for_review.py",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/eval_two_shot_v48bench_five_models_latest_high_overall.py",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/eval_two_shot_v48bench_four_models_latest_high_overall.py",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/export_low_standard_disagreement_case_table.py",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/scripts/patches/patch_runner_v8.py"
+          ]
+        },
+        {
+          "id": "semantic-dataset-002",
+          "category": "dataset_query",
+          "recall_at_10": 1,
+          "reciprocal_rank": 1,
+          "ndcg_at_10": 1,
+          "latency_ms": 0.05694478750228882,
+          "returned_paths": [
+            "/home/tiger/Projects/Bona/qianchuan_distill/scripts/4model_inference_inputs/judge300_qc102.jsonl",
+            "/home/tiger/Projects/Bona/qianchuan_distill/scripts/sample_for_judge.py",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/scripts/judge_dataset/sample_for_judge.py",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/scripts/patches/patch_v9_runner.py",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/analyze_student_posterior.py",
+            "/home/tiger/Projects/Bona/qianchuan_distill/scripts/judge_sample_v1.with_ctx.jsonl",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/scripts/patches/patch_judge_v7_b.py",
+            "/mnt/bn/baiweikang/qianchuan_distill/workspace_assets/evaluation/tongyong_v3bench_delivered_pair_posterior_pool_v1_20260817/koujing34_strict_positive/tongyong_v3bench_strict_positive_koujing4_pair_ge5_60d_spus.tsv",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/build_two_shot_consistency_step_review_deepseek.py",
+            "/mnt/bn/baiweikang/qianchuan_distill/workspace_assets/evaluation/tongyong_v3bench_delivered_pair_posterior_pool_v1_20260817/koujing34_strict_positive/tongyong_v3bench_strict_positive_koujing4_pair_ge5_14d_spus.tsv"
+          ]
+        },
+        {
+          "id": "semantic-dataset-003",
+          "category": "dataset_query",
+          "recall_at_10": 0,
+          "reciprocal_rank": 0,
+          "ndcg_at_10": 0,
+          "latency_ms": 0.06795302033424377,
+          "returned_paths": [
+            "/home/tiger/Projects/Bona/qianchuan_distill/scripts/build_judge_dataset_v4model.py",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/scripts/build_two_shot_v48_posterior_legacy_index.py",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/scripts/patches/patch_judge_v7_b.py",
+            "/home/tiger/Projects/Bona/qianchuan_distill/scripts/4model_inference_inputs/judge300_qc102.jsonl",
+            "/home/tiger/Projects/Bona/qianchuan_distill/scripts/judge_sample_v1.stats.json",
+            "/home/tiger/Projects/Bona/qianchuan_distill/scripts/4model_inference_inputs/sid_ctx_v4m.jsonl",
+            "/mnt/bn/baiweikang/qianchuan_distill/workspace_assets/evaluation/tongyong_v3bench_delivered_pair_posterior_pool_v1_20260817/tongyong_v3bench_delivered_pair_posterior_pool_v1_summary.json",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/scripts/judge_dataset/sample_for_judge.py",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/select_v3_judge_samples.py",
+            "/home/tiger/Projects/Bona/qianchuan_distill/scripts/sample_for_judge.py"
+          ]
+        },
+        {
+          "id": "semantic-dataset-004",
+          "category": "dataset_query",
+          "recall_at_10": 1,
+          "reciprocal_rank": 0.2,
+          "ndcg_at_10": 0.38685280723454163,
+          "latency_ms": 0.052869319915771484,
+          "returned_paths": [
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/merlin_deploy/ezreal_smoke_5services_20260914/two_shot_v6_ranked_ezreal_psm_c256_serial_full2983_20260915/raw_results_two_shot.jsonl",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/merlin_deploy/ezreal_smoke_5services_20260914/two_shot_v6_ranked_ezreal_psm_smoke3_v6contract_20260915/raw_results_two_shot.jsonl",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/merlin_deploy/ezreal_smoke_5services_20260914/two_shot_v6_ranked_ezreal_psm_c128_serial_full2983_20260915/raw_results_two_shot.jsonl",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/merlin_deploy/ezreal_smoke_5services_20260914/two_shot_v6_ranked_ezreal_psm_smoke3_defaultsnapshot_20260915/raw_results_two_shot.jsonl",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/merlin_deploy/ezreal_smoke_5services_20260914/two_shot_v48bench_ezreal_psm_smoke3_20260915/raw_results_two_shot.jsonl",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/merlin_deploy/ezreal_smoke_5services_20260914/two_shot_v48bench_ezreal_psm_c128_20260915/raw_results_two_shot.jsonl",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/merlin_deploy/ezreal_smoke_5services_20260914/two_shot_v48bench_ezreal_psm_c64_full2983_20260915/raw_results_two_shot.jsonl",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/merlin_deploy/ezreal_smoke_5services_20260914/two_shot_v48bench_ezreal_psm_c64_parity_20260915/raw_results_two_shot.jsonl",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/merlin_deploy/ezreal_smoke_5services_20260914/service_search_two_shots_v4_8_xllm.json",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/merlin_deploy/ezreal_smoke_5services_20260914/service_search_two_shots_v4_8_dapo.final.json"
+          ]
+        }
+      ],
+      "runtime": {
+        "backend": "onnx_270m_ffn_skip",
+        "model_path": "/mnt/bn/baiweikang/Models/harrier-oss-v1-270m-ONNX/onnx/model-ffn_skip.onnx",
+        "threads": 16,
+        "batch_size": 16,
+        "query_instruction": true,
+        "documents": 1123,
+        "documents_encoded": 1123,
+        "document_embeddings_reused_from": null,
+        "queries": 16,
+        "embedding_dimension": 640,
+        "tokens": 523773,
+        "load_seconds": 0.8942196108400822,
+        "encode_seconds": 198.31763380765915,
+        "texts_per_second": 5.7433117677506855,
+        "tokens_per_second": 2641.0813297015625,
+        "peak_rss_mib": 2150.25,
+        "output_bytes": 4068358
+      },
+      "document_cosine_vs_reference": {
+        "min": 0.9795287847518921,
+        "p50": 0.9915143251419067,
+        "mean": 0.9910829067230225,
+        "p95": 0.9935296773910522
+      },
+      "query_cosine_vs_reference": {
+        "min": 0.9920680522918701,
+        "p50": 0.9942209720611572,
+        "mean": 0.9940664768218994,
+        "p95": 0.995151162147522
+      },
+      "top10_overlap_vs_reference": 0.89375
+    },
+    "onnx_270m_per_channel": {
+      "cases": 16,
+      "recall_at_10": 0.8125,
+      "mrr": 0.5590277777777778,
+      "ndcg_at_10": 0.6199435431196824,
+      "p50_query_ms": 0.06206333637237549,
+      "p95_query_ms": 0.09661540389060974,
+      "categories": {
+        "code": {
+          "cases": 4,
+          "recall_at_10": 0.75,
+          "mrr": 0.5,
+          "ndcg_at_10": 0.5654648767857288
+        },
+        "dataset_query": {
+          "cases": 4,
+          "recall_at_10": 0.75,
+          "mrr": 0.375,
+          "ndcg_at_10": 0.46405179677700553
+        },
+        "experiment_result": {
+          "cases": 4,
+          "recall_at_10": 1,
+          "mrr": 1,
+          "ndcg_at_10": 1
+        },
+        "sql": {
+          "cases": 4,
+          "recall_at_10": 0.75,
+          "mrr": 0.3611111111111111,
+          "ndcg_at_10": 0.4502574989159953
+        }
+      },
+      "results": [
+        {
+          "id": "semantic-code-001",
+          "category": "code",
+          "recall_at_10": 1,
+          "reciprocal_rank": 0.5,
+          "ndcg_at_10": 0.6309297535714575,
+          "latency_ms": 0.09661540389060974,
+          "returned_paths": [
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/eval_two_shot_v48bench_four_models_latest_high_overall.py",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/build_two_shot_three_models_anchor_qwen_20260917.py",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/eval_two_shot_v48bench_three_models_anchor_qwen_ziti_20260918.py",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/tools/two_shot_frame_sampler_go/scripts/benchmark_video_ocr_v3_rpc_two_shot.py",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/build_raw_all_novel_video_manifest.py",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/eval_two_shot_v48bench_six_industry_qwen_arena.py",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/eval_two_shot_v48bench_three_models_latest_high_overall.py",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/merlin_deploy/two_shot_qwen35_selected_videos_vllm/two_shot_qwen35_direct_vllm_fix_summary_20260903.json",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/merlin_deploy/ezreal_smoke_5services_20260914/production_ads_creative_two_shots_v4_8_xllm.parity.json",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/eval_two_shot_v48bench_five_models_latest_high_overall.py"
+          ]
+        },
+        {
+          "id": "semantic-code-002",
+          "category": "code",
+          "recall_at_10": 0,
+          "reciprocal_rank": 0,
+          "ndcg_at_10": 0,
+          "latency_ms": 0.062193721532821655,
+          "returned_paths": [
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/watch_tongyong_v32bench.py",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/logs/v5_temporal_postprocess.json",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/build_artifact_readmes.py",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/prompts/tongyong_v6_teacher_v1/manifest_tongyong_v6_teacher_v1.json",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/scripts/benchmark_retry/rerun_doubao_v4_length_243/manifest.json",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/build_two_shot_omni_v12_train_student_no_posterior_dataset.py",
+            "/home/tiger/Projects/Bona/qianchuan_distill/scripts/rerun_doubao_v4_length_243/manifest.json",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/scripts/sample_trace_ppl_20260829.py",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/snapshot_tongyong_v33bench_teacher_status.py",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/scripts/benchmark_retry/rerun_9_parse_errors/rerun_qc102_deepseek.jsonl"
+          ]
+        },
+        {
+          "id": "semantic-code-003",
+          "category": "code",
+          "recall_at_10": 1,
+          "reciprocal_rank": 0.5,
+          "ndcg_at_10": 0.6309297535714575,
+          "latency_ms": 0.06385520100593567,
+          "returned_paths": [
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/analyze_tongyong_v3bench_dual_role_delivery_posterior_material_pool_v2.py",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/analyze_tongyong_v3bench_delivered_pair_posterior_pool_v1.py",
+            "/mnt/bn/baiweikang/qianchuan_distill/workspace_assets/evaluation/tongyong_v3bench_delivered_pair_posterior_pool_v1_20260817/koujing34_strict_positive/manifest.json",
+            "/mnt/bn/baiweikang/qianchuan_distill/workspace_assets/evaluation/tongyong_v3bench_delivered_pair_posterior_pool_v1_20260817/manifest.json",
+            "/mnt/bn/baiweikang/qianchuan_distill/workspace_assets/evaluation/tongyong_v3bench_delivered_pair_posterior_pool_v1_20260817/run_stdout.json",
+            "/mnt/bn/baiweikang/qianchuan_distill/workspace_assets/evaluation/tongyong_v3bench_delivered_pair_posterior_pool_v1_20260817/tongyong_v3bench_delivered_pair_posterior_pool_v1_summary.json",
+            "/mnt/bn/baiweikang/qianchuan_distill/workspace_assets/evaluation/tongyong_v3bench_delivered_pair_posterior_pool_v1_20260817/koujing34_strict_positive/run_stdout.json",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/tools/two_shot_low_standard/report_local_windows_two_shot.py",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/prompts/two_shot_v6_visible_structured_rationale_v2/examples/example_teacher_rationale_packet_2k.json",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/tools/two_shot_low_standard/build_qc102_external_two_shot.py"
+          ]
+        },
+        {
+          "id": "semantic-code-004",
+          "category": "code",
+          "recall_at_10": 1,
+          "reciprocal_rank": 1,
+          "ndcg_at_10": 1,
+          "latency_ms": 0.056724995374679565,
+          "returned_paths": [
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/eval_two_shot_v48bench_three_models_anchor_qwen_ziti_20260918.py",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/eval_two_shot_v48bench_eight_models_latest_high_overall.py",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/eval_two_shot_v48bench_four_models_latest_high_overall.py",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/eval_two_shot_v48bench_three_models_latest_high_overall.py",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/eval_two_shot_v48bench_five_models_latest_high_overall.py",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/eval_two_shot_v48bench_six_industry_qwen_arena.py",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/eval_pairwise_toufang_model_prediction.py",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/analyze_two_shot_raw_all_human305_pvr_cost_ranks.py",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/eval_low_standard_qianchuan_two_shot_three_models_raw_all_vs_cost_top.py",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/eval_high_standard_v45_raw_all_vs_cost_top.py"
+          ]
+        },
+        {
+          "id": "semantic-sql-001",
+          "category": "sql",
+          "recall_at_10": 1,
+          "reciprocal_rank": 0.1111111111111111,
+          "ndcg_at_10": 0.3010299956639812,
+          "latency_ms": 0.0651143491268158,
+          "returned_paths": [
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/sql/tongyong/tongyong_v3bench_candidate_inventory.sql",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/sql/tongyong/tongyong_v32bench_cost_ranked_candidate_inventory.sql",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/sql/tongyong/tongyong_v31bench_midshow_candidate_inventory.sql",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/sql/tongyong/tongyong_v3bench_show_inventory.sql",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/sql/tongyong/tongyong_v3bench_dual_role_midshow_material_pool_v1.sql",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/sql/tongyong/tongyong_v3bench_dual_role_delivery_posterior_material_pool_v2.sql",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/sql/qianchuan_sql_koujing4/qc102_aigc.sql",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/sql/qianchuan_sql_koujing4/qc102_aigc_v47_stage1_pair_daily.sql",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/sql/qianchuan_sql_koujing4/two_shot_v48_posterior_refresh_20260917/qc102_aigc.sql",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/sql/tongyong/tongyong_v3bench_delivered_pair_posterior_pool_v1.sql"
+          ]
+        },
+        {
+          "id": "semantic-sql-002",
+          "category": "sql",
+          "recall_at_10": 0,
+          "reciprocal_rank": 0,
+          "ndcg_at_10": 0,
+          "latency_ms": 0.05782395601272583,
+          "returned_paths": [
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/sql/tongyong/tongyong_v32bench_cost_ranked_candidate_inventory.sql",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/sql/tongyong/tongyong_v3bench_candidate_inventory.sql",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/sql/qianchuan_sql_koujing4/v47_multi_stage1_additional_sources.sql",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/sql/qianchuan_sql_koujing4/qc102_aigc_v47_stage1_pair_daily.sql",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/sql/tongyong/tongyong_v3bench_show_inventory.sql",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/sql/tongyong/tongyong_v3bench_dual_role_midshow_material_pool_v1.sql",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/sql/tongyong/tongyong_v31bench_midshow_candidate_inventory.sql",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/sql/tongyong/tongyong_v3bench_all_combinations.sql",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/sql/tongyong/tongyong_train_v2_show500_play500_28d_optimized.sql",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/scripts/run_tongyong_v3bench_combinations_tqs.py"
+          ]
+        },
+        {
+          "id": "semantic-sql-003",
+          "category": "sql",
+          "recall_at_10": 1,
+          "reciprocal_rank": 0.3333333333333333,
+          "ndcg_at_10": 0.5,
+          "latency_ms": 0.05959346890449524,
+          "returned_paths": [
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/sql/tongyong/tongyong_train_v2_show500_play500_28d.sql",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/build_two_shot_consistency_pair_datasets.py",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/sql/tongyong/tongyong_v3bench_delivered_pair_posterior_pool_v1.sql",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/scripts/build_two_shot_v48_posterior_refresh_sidecar.py",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/sql/tongyong/tongyong_train_v2_show500_play500_28d_optimized.sql",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/build_two_shot_omni_v12_gemini37_sft.py",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/build_model_prediction_reward_plan.py",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/sql/tongyong/tongyong_v3bench_dual_role_delivery_posterior_material_pool_v2.sql",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/build_two_shot_omni_v12_annotation_bundle2_dataset.py",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/scripts/build_two_shot_v48_posterior_legacy_index.py"
+          ]
+        },
+        {
+          "id": "semantic-sql-004",
+          "category": "sql",
+          "recall_at_10": 1,
+          "reciprocal_rank": 1,
+          "ndcg_at_10": 1,
+          "latency_ms": 0.061806291341781616,
+          "returned_paths": [
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/sql/tongyong/tongyong_train_v2_show500_play500_28d_optimized.sql",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/sql/tongyong/tongyong_train_v2_show500_play500_28d.sql",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/tools/two_shot_omni_v13_sampler/selector_runtime.py",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/tools/two_shot_omni_v13_sampler/build_omni_v13_selector_trainset_two_shot.py",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/scripts/compute_two_shot_v6_teacher_topk_posterior_rank.py",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/scripts/build_two_shot_v48_posterior_legacy_index.py",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/build_two_shot_consistency_pair_datasets.py",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/analyze_student_posterior.py",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/tools/two_shot_low_standard/train_acoustic_sft_two_shot.py",
+            "/mnt/bn/baiweikang/qianchuan_distill/workspace_assets/evaluation/tongyong_v3bench_delivered_pair_posterior_pool_v1_20260817/koujing34_strict_positive/tongyong_v3bench_strict_positive_koujing34_sparse_graph_scene_summary.tsv"
+          ]
+        },
+        {
+          "id": "semantic-result-001",
+          "category": "experiment_result",
+          "recall_at_10": 1,
+          "reciprocal_rank": 1,
+          "ndcg_at_10": 1,
+          "latency_ms": 0.05992129445075989,
+          "returned_paths": [
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/logs/v47_multi_output_audit_current.json",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/logs/v47_multi_output_audit.json",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/audit_two_shot_omni_v12_no_posterior_version.py",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/logs/v5_temporal_postprocess.json",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/tools/two_shot_low_standard/report_sft_acoustic_two_shot.py",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/audit_omni_v1_1_benchmark.py",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/tools/two_shot_low_standard/audit_pilot_evidence_two_shot.py",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/audit_two_shot_v48bench_chengpian_gaobiao_cache.py",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/logs/history_downloads_complete.summary.json",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/watch_finalize_v3bench_front_fornax_dataset_union.py"
+          ]
+        },
+        {
+          "id": "semantic-result-002",
+          "category": "experiment_result",
+          "recall_at_10": 1,
+          "reciprocal_rank": 1,
+          "ndcg_at_10": 1,
+          "latency_ms": 0.06721168756484985,
+          "returned_paths": [
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/merlin_deploy/ezreal_smoke_5services_20260914/three_scene_summary.corrected.json",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/merlin_deploy/ezreal_smoke_5services_20260914/three_scene_summary.json",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/merlin_deploy/ezreal_smoke_5services_20260914/two_shot_v6_ranked_ezreal_psm_smoke3_v6contract_20260915/raw_results_two_shot.jsonl",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/merlin_deploy/ezreal_smoke_5services_20260914/two_shot_v6_ranked_ezreal_psm_smoke3_defaultsnapshot_20260915/raw_results_two_shot.jsonl",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/merlin_deploy/ezreal_smoke_5services_20260914/two_shot_v6_ranked_ezreal_psm_c256_serial_full2983_20260915/raw_results_two_shot.jsonl",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/merlin_deploy/ezreal_smoke_5services_20260914/history3_three_scene_postprocessed.json",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/merlin_deploy/ezreal_smoke_5services_20260914/two_shot_v6_ranked_ezreal_psm_c128_serial_full2983_20260915/raw_results_two_shot.jsonl",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/merlin_deploy/ezreal_smoke_5services_20260914/targeted_retries.json",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/merlin_deploy/ezreal_smoke_5services_20260914/two_shot_v48bench_ezreal_psm_smoke3_20260915/manifest.json",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/merlin_deploy/ezreal_smoke_5services_20260914/xllm_variants_and_v48_control.json"
+          ]
+        },
+        {
+          "id": "semantic-result-003",
+          "category": "experiment_result",
+          "recall_at_10": 1,
+          "reciprocal_rank": 1,
+          "ndcg_at_10": 1,
+          "latency_ms": 0.06206333637237549,
+          "returned_paths": [
+            "/mnt/bn/baiweikang/qianchuan_distill/workspace_assets/evaluation/tongyong_v3bench_delivered_pair_posterior_pool_v1_20260817/tongyong_v3bench_delivered_pair_posterior_pool_v1_summary.json",
+            "/mnt/bn/baiweikang/qianchuan_distill/workspace_assets/evaluation/tongyong_v3bench_delivered_pair_posterior_pool_v1_20260817/REPORT_tongyong_v3bench_delivered_pair_posterior_pool_v1.md",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/sql/tongyong/tongyong_v3bench_delivered_pair_posterior_pool_v1.sql",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/scripts/join_two_shot_v48_posterior_refresh.py",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/sql/tongyong/tongyong_v33_bench_stratified_all_observed_pairs.sql",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/analyze_tongyong_v3bench_delivered_pair_posterior_pool_v1.py",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/audit_v5_v3bench_semantic_overlap.py",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/sql/tongyong/tongyong_v3bench_dual_role_midshow_material_pool_v1.sql",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/audit_two_shot_v48bench_chengpian_gaobiao_cache.py",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/scripts/build_two_shot_capacity_estimate_20260910.py"
+          ]
+        },
+        {
+          "id": "semantic-result-004",
+          "category": "experiment_result",
+          "recall_at_10": 1,
+          "reciprocal_rank": 1,
+          "ndcg_at_10": 1,
+          "latency_ms": 0.05883723497390747,
+          "returned_paths": [
+            "/mnt/bn/baiweikang/qianchuan_distill/workspace_assets/evaluation/tongyong_v3bench_delivered_pair_posterior_pool_v1_20260817/koujing34_strict_positive/tongyong_v3bench_strict_positive_koujing34_sparse_graph_scene_summary.tsv",
+            "/mnt/bn/baiweikang/qianchuan_distill/workspace_assets/evaluation/tongyong_v3bench_delivered_pair_posterior_pool_v1_20260817/koujing34_strict_positive/tongyong_v3bench_strict_positive_koujing4_pair_ge5_60d_spus.tsv",
+            "/mnt/bn/baiweikang/qianchuan_distill/workspace_assets/evaluation/tongyong_v3bench_delivered_pair_posterior_pool_v1_20260817/koujing34_strict_positive/tongyong_v3bench_strict_positive_koujing34_sparse_graph_summary.json",
+            "/mnt/bn/baiweikang/qianchuan_distill/workspace_assets/evaluation/tongyong_v3bench_delivered_pair_posterior_pool_v1_20260817/koujing34_strict_positive/tongyong_v3bench_strict_positive_koujing34_sparse_graph_60d_by_spu.tsv",
+            "/mnt/bn/baiweikang/qianchuan_distill/workspace_assets/evaluation/tongyong_v3bench_delivered_pair_posterior_pool_v1_20260817/koujing34_strict_positive/tongyong_v3bench_strict_positive_koujing34_sparse_graph_14d_by_spu.tsv",
+            "/mnt/bn/baiweikang/qianchuan_distill/workspace_assets/evaluation/tongyong_v3bench_delivered_pair_posterior_pool_v1_20260817/koujing34_strict_positive/tongyong_v3bench_strict_positive_koujing34_sparse_graph_distribution.tsv",
+            "/mnt/bn/baiweikang/qianchuan_distill/workspace_assets/evaluation/tongyong_v3bench_delivered_pair_posterior_pool_v1_20260817/koujing34_strict_positive/tongyong_v3bench_strict_positive_koujing4_pair_ge5_14d_spus.tsv",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/sql/tongyong/tongyong_v33_bench_stratified_all_observed_pairs.sql",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/analyze_tongyong_v3bench_koujing34_sparse_graph.py",
+            "/mnt/bn/baiweikang/qianchuan_distill/workspace_assets/evaluation/tongyong_v3bench_delivered_pair_posterior_pool_v1_20260817/koujing34_strict_positive/manifest.json"
+          ]
+        },
+        {
+          "id": "semantic-dataset-001",
+          "category": "dataset_query",
+          "recall_at_10": 1,
+          "reciprocal_rank": 0.3333333333333333,
+          "ndcg_at_10": 0.5,
+          "latency_ms": 0.06361305713653564,
+          "returned_paths": [
+            "/home/tiger/Projects/Bona/qianchuan_distill/human_annotation_sample_v1/sample_benchmark.py",
+            "/home/tiger/Projects/Bona/qianchuan_distill/human_annotation_sample_v1/enrich_sample.py",
+            "/home/tiger/Projects/Bona/qianchuan_distill/human_annotation_sample_v2/human_annotation_sample_250_enriched_flat.jsonl",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/scripts/patches/patch_v9_runner.py",
+            "/home/tiger/Projects/Bona/qianchuan_distill/human_annotation_sample_v2/human_annotation_sample_250_enriched.jsonl",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/eval_two_shot_v48bench_four_models_latest_high_overall.py",
+            "/home/tiger/Projects/Bona/qianchuan_distill/human_annotation_sample_v2/sample_benchmark_v2.py",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/analyze_two_shot_raw_all_human305_pvr_cost_ranks.py",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/scripts/patches/patch_runner_v8_b.py",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/scripts/patches/patch_runner_v8.py"
+          ]
+        },
+        {
+          "id": "semantic-dataset-002",
+          "category": "dataset_query",
+          "recall_at_10": 1,
+          "reciprocal_rank": 1,
+          "ndcg_at_10": 1,
+          "latency_ms": 0.08365511894226074,
+          "returned_paths": [
+            "/home/tiger/Projects/Bona/qianchuan_distill/scripts/4model_inference_inputs/judge300_qc102.jsonl",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/scripts/patches/patch_v9_runner.py",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/scripts/patches/patch_runner_v8_b.py",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/scripts/build_two_shot_v48_posterior_legacy_index.py",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/scripts/batch_build/build_consensus_benchmark.py",
+            "/home/tiger/Projects/Bona/qianchuan_distill/scripts/judge_sample_v1.with_ctx.jsonl",
+            "/home/tiger/Projects/Bona/qianchuan_distill/scripts/sample_for_judge.py",
+            "/home/tiger/Projects/Bona/qianchuan_distill/human_annotation_sample_v1/sample_benchmark.py",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/scripts/visualization/build_v4_html.py",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/build_model_prediction_reward_plan.py"
+          ]
+        },
+        {
+          "id": "semantic-dataset-003",
+          "category": "dataset_query",
+          "recall_at_10": 0,
+          "reciprocal_rank": 0,
+          "ndcg_at_10": 0,
+          "latency_ms": 0.06695836782455444,
+          "returned_paths": [
+            "/home/tiger/Projects/Bona/qianchuan_distill/scripts/build_judge_dataset_v4model.py",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/scripts/build_two_shot_v48_posterior_legacy_index.py",
+            "/home/tiger/Projects/Bona/qianchuan_distill/scripts/4model_inference_inputs/judge300_qc102.jsonl",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/select_v3_judge_samples.py",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/eval_two_shot_model_table_asr_consistency4b.py",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/run_v48bench_asr_consistency_18models.py",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/eval_two_shot_v48bench_asr_consistency4b.py",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/eval_two_shot_v48bench_eight_models_latest_high_overall.py",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/scripts/judge_dataset/build_judge_dataset_v3.py",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/eval_two_shot_v48bench_ziti_5models_asr_consistency4b.py"
+          ]
+        },
+        {
+          "id": "semantic-dataset-004",
+          "category": "dataset_query",
+          "recall_at_10": 1,
+          "reciprocal_rank": 0.16666666666666666,
+          "ndcg_at_10": 0.3562071871080222,
+          "latency_ms": 0.06026029586791992,
+          "returned_paths": [
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/merlin_deploy/ezreal_smoke_5services_20260914/two_shot_v6_ranked_ezreal_psm_c128_serial_full2983_20260915/raw_results_two_shot.jsonl",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/merlin_deploy/ezreal_smoke_5services_20260914/two_shot_v6_ranked_ezreal_psm_c256_serial_full2983_20260915/raw_results_two_shot.jsonl",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/merlin_deploy/ezreal_smoke_5services_20260914/two_shot_v6_ranked_ezreal_psm_smoke3_v6contract_20260915/raw_results_two_shot.jsonl",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/merlin_deploy/ezreal_smoke_5services_20260914/two_shot_v6_ranked_ezreal_psm_smoke3_defaultsnapshot_20260915/raw_results_two_shot.jsonl",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/merlin_deploy/ezreal_smoke_5services_20260914/two_shot_v48bench_ezreal_psm_c64_full2983_20260915/raw_results_two_shot.jsonl",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/merlin_deploy/ezreal_smoke_5services_20260914/two_shot_v48bench_ezreal_psm_smoke3_20260915/raw_results_two_shot.jsonl",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/merlin_deploy/ezreal_smoke_5services_20260914/two_shot_v48bench_ezreal_psm_c64_parity_20260915/raw_results_two_shot.jsonl",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/merlin_deploy/ezreal_smoke_5services_20260914/two_shot_v48bench_ezreal_psm_c128_20260915/raw_results_two_shot.jsonl",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/merlin_deploy/v6_s1_ling_tiny_json_only/scm/requests/no_thinking_json_schema.template.json",
+            "/home/tiger/Projects/Bona/Qianchuan102_data_process/merlin_deploy/ezreal_smoke_5services_20260914/service_search_two_shots_v4_8_dapo.json"
+          ]
+        }
+      ],
+      "runtime": {
+        "backend": "onnx_270m_per_channel",
+        "model_path": "/mnt/bn/baiweikang/Models/harrier-oss-v1-270m-ONNX/onnx/model-per_channel.onnx",
+        "threads": 16,
+        "batch_size": 16,
+        "query_instruction": true,
+        "documents": 1123,
+        "documents_encoded": 1123,
+        "document_embeddings_reused_from": null,
+        "queries": 16,
+        "embedding_dimension": 640,
+        "tokens": 523773,
+        "load_seconds": 0.7357351519167423,
+        "encode_seconds": 161.6846902370453,
+        "texts_per_second": 7.044575453186796,
+        "tokens_per_second": 3239.4718339262577,
+        "peak_rss_mib": 1947.22265625,
+        "output_bytes": 4068358
+      },
+      "document_cosine_vs_reference": {
+        "min": 0.936936616897583,
+        "p50": 0.965493381023407,
+        "mean": 0.9649094343185425,
+        "p95": 0.9731569886207581
+      },
+      "query_cosine_vs_reference": {
+        "min": 0.9610319137573242,
+        "p50": 0.9676141738891602,
+        "mean": 0.9694482684135437,
+        "p95": 0.9814385771751404
+      },
+      "top10_overlap_vs_reference": 0.73125
+    }
+  },
+  "excluded_fusion": {
+    "status": "invalid_evaluation_artifact_leakage",
+    "source": "lexical_top50.json",
+    "leaked_case": "semantic-dataset-001",
+    "leaked_path": "/home/tiger/Projects/Bona/awi/evaluation/harrier_lancedb_20260923/semantic.dev.json",
+    "lexical_rank": 49,
+    "entered_hybrid_top10": false,
+    "note": "Fusion metrics were removed; dense backend metrics remain valid."
+  }
+}

@@ -1,0 +1,44 @@
+{
+  "database": "/tmp/awi-harrier-final/lancedb",
+  "source_embeddings": "/tmp/awi-harrier-final/embeddings/gguf_270m_q8.npz",
+  "rows": 100000,
+  "dimension": 640,
+  "database_bytes": 269559246,
+  "bytes_per_row": 2695.59246,
+  "insert_seconds_excluding_first_batch": 0.38271114975214005,
+  "rows_per_second": 235164.30095723056,
+  "index": {
+    "type": "IVF_PQ",
+    "metric": "cosine",
+    "partitions": 97,
+    "sub_vectors": 80,
+    "build_seconds": 7.641693413257599,
+    "indices": [
+      "IndexConfig(name=\"vector_idx\", index_type=\"IvfPq\", columns=[\"vector\"], index_uuid=\"6842b388-ba3e-4d52-9d4d-9df282fc0025\", type_url=\"/lance.index.pb.VectorIndexDetails\", created_at=datetime.datetime(2026, 9, 23, 6, 54, 47, 951000, tzinfo=datetime.timezone.utc), num_indexed_rows=100_000, num_unindexed_rows=0, size_bytes=9_397_621, num_segments=1, index_version=1, index_details={'metric_type': 'COSINE', 'compression': {'type': 'pq', 'num_bits': 8, 'num_sub_vectors': 80}, 'runtime_hints': {'lance.skip_transpose': 'false', 'lance.ivf.shuffle_partition_concurrency': '2', 'lance.pq.kmeans_redos': '1', 'lance.ivf.sample_rate': '256', 'lance.pq.sample_rate': '256', 'lance.ivf.max_iters': '50', 'lance.ivf.shuffle_partition_batches': '10240', 'lance.pq.max_iters': '50'}})"
+    ]
+  },
+  "query_ms": {
+    "samples": 160,
+    "p50": 4.194527864456177,
+    "p95": 4.767276346683502
+  },
+  "filtered_query_ms": {
+    "filter": "kind = 'code'",
+    "samples": 160,
+    "p50": 9.617239236831665,
+    "p95": 10.511808097362518
+  },
+  "lifecycle": {
+    "pre_index_version": 10,
+    "before_mutation_version": 11,
+    "inserted_version": 12,
+    "latest_version": 14,
+    "inserted_count": 1,
+    "updated_count": 1,
+    "deleted_count": 0,
+    "latest_count": 100000,
+    "historical_count": 100000,
+    "time_travel_read_passed": true,
+    "insert_update_delete_passed": true
+  }
+}
