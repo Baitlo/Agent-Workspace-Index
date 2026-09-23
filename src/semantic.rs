@@ -107,9 +107,21 @@ impl SemanticIndex {
     }
 
     pub(crate) fn warm(&self) -> Result<()> {
-        if self.config.is_some() {
-            self.request(json!({"op": "ping"}))?;
+        if self.config.is_none() {
+            return Ok(());
         }
+        if !self.manifest().is_file() || !self.database().is_dir() {
+            self.request(json!({"op": "warm"}))?;
+            return Ok(());
+        }
+        let manifest: Value = serde_json::from_slice(
+            &fs::read(self.manifest()).context("read semantic manifest for warmup")?,
+        )
+        .context("decode semantic manifest for warmup")?;
+        let generation = manifest["generation"]
+            .as_i64()
+            .context("semantic manifest has no generation")?;
+        self.search("warm semantic retrieval", generation, &[], &[], &[])?;
         Ok(())
     }
 

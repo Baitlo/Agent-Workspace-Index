@@ -175,6 +175,11 @@ class Sidecar:
         operation = request.get("op")
         if operation == "ping":
             return {"ready": True}
+        if operation == "warm":
+            vector = self.model.embed(
+                [QUERY_INSTRUCTION + "warm semantic retrieval"], normalize=True
+            )[0]
+            return {"ready": True, "dimension": len(vector)}
         if operation == "reset":
             return self.reset(Path(request["database"]))
         if operation == "coverage":
@@ -481,7 +486,7 @@ class Sidecar:
         partitions = int(metadata.get("vector_index_partitions", 0))
         if partitions:
             search = search.nprobes(partitions)
-        rows = search.limit(max(limit * 8, limit)).to_list()
+        rows = search.limit(max(limit * self.max_chunks_per_file, limit)).to_list()
         candidates: list[dict[str, Any]] = []
         seen: set[int] = set()
         for row in rows:

@@ -57,7 +57,7 @@ pub fn serve_with_snapshots(
         .as_ref()
         .map_or_else(|| index_dir.to_owned(), |value| value.active_path.clone());
     let mut workspace = WorkspaceIndex::open(workspace_path)?;
-    if let Err(error) = workspace.warm_semantic() {
+    if let Err(error) = workspace.warm_retrieval() {
         eprintln!("AWI semantic sidecar unavailable; serving lexical search: {error:#}");
     }
 
@@ -274,7 +274,7 @@ impl SnapshotFollower {
             match receiver.try_recv() {
                 Ok(Ok(Some(activated))) => {
                     let replacement = WorkspaceIndex::open(&activated.path)?;
-                    if let Err(error) = replacement.warm_semantic() {
+                    if let Err(error) = replacement.warm_retrieval() {
                         eprintln!(
                             "AWI semantic sidecar unavailable for generation {}; \
                              serving lexical search: {error:#}",

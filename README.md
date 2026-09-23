@@ -171,6 +171,11 @@ snapshot as SQLite and Tantivy. Readers reject a mismatched generation and
 fall back to lexical search when the sidecar is unavailable. Unset
 `AWI_SEMANTIC_MODEL` to disable the semantic lane.
 
+Query-time semantic retrieval runs concurrently with the lexical lanes. Vector
+overfetch is bounded by the configured maximum chunks per file, preserving
+file-level Top-K coverage without returning redundant chunk candidates.
+Persistent readers run one full hybrid warmup before serving queries.
+
 Sealed generations use an IVF_FLAT index and probe every partition. This keeps
 the original normalized Q8 vectors and exact Top-K ordering while avoiding the
 recall loss of product quantization at AWI's current corpus size.

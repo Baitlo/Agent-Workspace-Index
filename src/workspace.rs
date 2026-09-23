@@ -2,6 +2,7 @@ use std::collections::{BTreeMap, HashSet};
 use std::ffi::OsStr;
 use std::fs::{self, File, OpenOptions};
 use std::path::{Path, PathBuf};
+use std::thread;
 
 use anyhow::{Context, Result};
 use fs4::fs_std::FileExt;
@@ -321,45 +322,68 @@ impl WorkspaceIndex {
                 .iter()
                 .any(|kind| matches!(kind, FileKind::AgentInstructions | FileKind::AgentSkill));
         let include_memory = kind_filter.contains(&FileKind::AgentMemory);
-        let mut candidates = self
-            .search
-            .search(query, overfetch, overfetch, include_agent_lane)?;
-        if include_memory {
-            candidates.extend(
-                self.memory_search
-                    .search(query, overfetch, overfetch, false)?,
-            );
-            candidates.sort_by(|left, right| {
-                right
-                    .score
-                    .total_cmp(&left.score)
-                    .then_with(|| left.path.cmp(&right.path))
-            });
-            let mut seen = HashSet::new();
-            candidates.retain(|candidate| seen.insert(candidate.file_id));
-            candidates.truncate(overfetch);
-        }
-        if let Some(generation) = self.catalog.latest_completed_generation()? {
-            let semantic_path_prefixes = match path_prefix {
-                Some(prefix) if Path::new(prefix).is_absolute() => vec![prefix.to_owned()],
-                Some(prefix) => registered_roots
-                    .iter()
-                    .filter_map(|(_, root)| {
-                        let root_text = root.to_string_lossy();
-                        (root.is_dir()
-                            && (root_filter.is_empty() || root_filter.contains(root_text.as_ref())))
-                        .then(|| root.join(prefix).to_string_lossy().into_owned())
+        let generation = self.catalog.latest_completed_generation()?;
+        let semantic_index = &self.semantic;
+        let semantic_path_prefixes = match path_prefix {
+            Some(prefix) if Path::new(prefix).is_absolute() => vec![prefix.to_owned()],
+            Some(prefix) => registered_roots
+                .iter()
+                .filter_map(|(_, root)| {
+                    let root_text = root.to_string_lossy();
+                    (root.is_dir()
+                        && (root_filter.is_empty() || root_filter.contains(root_text.as_ref())))
+                    .then(|| root.join(prefix).to_string_lossy().into_owned())
+                })
+                .collect(),
+            None => Vec::new(),
+        };
+        let (lexical, semantic) = thread::scope(|scope| {
+            let semantic_scopes = &search_scopes;
+            let semantic_prefixes = &semantic_path_prefixes;
+            let semantic = generation
+                .filter(|_| semantic_index.enabled())
+                .map(|generation| {
+                    scope.spawn(move || {
+                        semantic_index.search(
+                            query,
+                            generation,
+                            semantic_scopes,
+                            kinds,
+                            semantic_prefixes,
+                        )
                     })
-                    .collect(),
-                None => Vec::new(),
-            };
-            match self.semantic.search(
-                query,
-                generation,
-                &search_scopes,
-                kinds,
-                &semantic_path_prefixes,
-            ) {
+                });
+            let lexical = (|| {
+                let mut candidates =
+                    self.search
+                        .search(query, overfetch, overfetch, include_agent_lane)?;
+                if include_memory {
+                    candidates.extend(
+                        self.memory_search
+                            .search(query, overfetch, overfetch, false)?,
+                    );
+                    candidates.sort_by(|left, right| {
+                        right
+                            .score
+                            .total_cmp(&left.score)
+                            .then_with(|| left.path.cmp(&right.path))
+                    });
+                    let mut seen = HashSet::new();
+                    candidates.retain(|candidate| seen.insert(candidate.file_id));
+                    candidates.truncate(overfetch);
+                }
+                Ok::<_, anyhow::Error>(candidates)
+            })();
+            let semantic = semantic.map(|worker| {
+                worker
+                    .join()
+                    .unwrap_or_else(|_| Err(anyhow::anyhow!("semantic search worker panicked")))
+            });
+            (lexical, semantic)
+        });
+        let mut candidates = lexical?;
+        if let Some(semantic) = semantic {
+            match semantic {
                 Ok(semantic) => {
                     candidates = merge_semantic_candidates(
                         candidates,
@@ -567,8 +591,10 @@ impl WorkspaceIndex {
         Ok(status)
     }
 
-    pub fn warm_semantic(&self) -> Result<()> {
-        self.semantic.warm()
+    pub fn warm_retrieval(&self) -> Result<()> {
+        self.semantic.warm()?;
+        self.search("warm workspace retrieval", 1)?;
+        Ok(())
     }
 
     /// Canonical roots currently registered in the catalog, newest-nested

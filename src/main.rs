@@ -631,8 +631,8 @@ fn main() -> Result<()> {
             let workspace = WorkspaceIndex::open(&cli.index_dir)
                 .with_context(|| format!("open AWI index {}", cli.index_dir.display()))?;
             workspace
-                .warm_semantic()
-                .context("warm semantic retrieval before benchmark")?;
+                .warm_retrieval()
+                .context("warm retrieval before benchmark")?;
             let semantic = workspace.status()?.semantic;
             if semantic.enabled && !semantic.available {
                 anyhow::bail!(

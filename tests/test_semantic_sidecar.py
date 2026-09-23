@@ -74,6 +74,20 @@ class CoverageTest(unittest.TestCase):
 
 
 class DocumentChunksTest(unittest.TestCase):
+    def test_warm_runs_a_real_embedding_call(self) -> None:
+        class Model:
+            def embed(self, texts: list[str], *, normalize: bool) -> list[list[float]]:
+                self.texts = texts
+                self.normalize = normalize
+                return [[0.0] * 640]
+
+        sidecar = SIDECAR.Sidecar.__new__(SIDECAR.Sidecar)
+        sidecar.model = Model()
+        result = sidecar.handle({"op": "warm"})
+        self.assertEqual(result, {"ready": True, "dimension": 640})
+        self.assertTrue(sidecar.model.normalize)
+        self.assertTrue(sidecar.model.texts[0].startswith(SIDECAR.QUERY_INSTRUCTION))
+
     def test_empty_payload_still_embeds_the_path_header(self) -> None:
         class ByteTokenizer:
             def tokenize(
