@@ -456,6 +456,10 @@ pub struct IndexStatus {
     pub failures: u64,
     #[serde(default)]
     pub semantic: SemanticStatus,
+    #[serde(default)]
+    pub retrieval: RetrievalStatus,
+    #[serde(default)]
+    pub serving: ServingStatus,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -465,6 +469,61 @@ pub struct SemanticStatus {
     pub generation: Option<i64>,
     pub files: u64,
     pub chunks: u64,
+    #[serde(default)]
+    pub chunking_version: u64,
+    #[serde(default)]
+    pub generation_lag: u64,
+    #[serde(default)]
+    pub metrics: SemanticMetrics,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub error: Option<String>,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct LatencySummary {
+    pub samples: u64,
+    pub p50_ms: f64,
+    pub p95_ms: f64,
+    pub max_ms: f64,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct SemanticMetrics {
+    pub queries: u64,
+    pub result_cache_hits: u64,
+    pub embedding_cache_hits: u64,
+    pub coalesced_queries: u64,
+    pub failures: u64,
+    pub sidecar_starts: u64,
+    pub sidecar_restarts: u64,
+    pub queue_wait: LatencySummary,
+    pub embedding: LatencySummary,
+    pub vector_search: LatencySummary,
+    pub total: LatencySummary,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct RetrievalStatus {
+    pub searches: u64,
+    pub in_flight: u64,
+    pub cache_hits: u64,
+    pub semantic_fallbacks: u64,
+    pub total: LatencySummary,
+    pub lexical: LatencySummary,
+    pub semantic: LatencySummary,
+    pub fusion: LatencySummary,
+    pub catalog_filter: LatencySummary,
+    pub preview: LatencySummary,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct ServingStatus {
+    pub workers: u64,
+    pub queue_capacity: u64,
+    pub accepted: u64,
+    pub completed: u64,
+    pub rejected: u64,
+    pub active: u64,
+    pub queued: u64,
+    pub queue_wait: LatencySummary,
 }

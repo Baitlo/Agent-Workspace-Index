@@ -5,8 +5,8 @@ use std::io::{BufRead, BufReader, Write};
 use std::os::unix::net::UnixStream;
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
-use std::sync::Mutex;
 use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::{Duration, Instant};
 
@@ -14,7 +14,10 @@ use anyhow::{Context, Result};
 use serde::Deserialize;
 use serde_json::{Value, json};
 
-use crate::model::{SearchCandidate, SearchDocument, SemanticCandidate, SemanticStatus};
+use crate::metrics::LatencyWindow;
+use crate::model::{
+    SearchCandidate, SearchDocument, SemanticCandidate, SemanticMetrics, SemanticStatus,
+};
 
 const SIDECAR_SOURCE: &str = include_str!("../scripts/semantic_sidecar.py");
 const DEFAULT_THREADS: usize = 16;
@@ -23,7 +26,13 @@ const DEFAULT_EMBEDDING_WORKERS: usize = 1;
 const DEFAULT_VECTOR_LIMIT: usize = 50;
 const DEFAULT_VECTOR_WEIGHT: f32 = 1.0;
 const DEFAULT_MAX_CHUNKS_PER_FILE: usize = 4;
+const DEFAULT_MAX_SQL_CHUNKS_PER_FILE: usize = 8;
+const DEFAULT_QUERY_BATCH_SIZE: usize = 8;
+const DEFAULT_QUERY_BATCH_WAIT_MS: u64 = 2;
+const DEFAULT_QUERY_CACHE_SIZE: usize = 256;
+const DEFAULT_MAX_INFLIGHT: usize = 32;
 const DEFAULT_QUERY_TIMEOUT_MS: u64 = 2_000;
+const CHUNKING_VERSION: u64 = 2;
 const UPDATE_TIMEOUT: Duration = Duration::from_secs(600);
 const START_TIMEOUT: Duration = Duration::from_secs(60);
 const MAX_BATCH_DOCUMENTS: usize = 32;
@@ -41,6 +50,11 @@ pub struct SemanticConfig {
     pub batch_size: usize,
     pub embedding_workers: usize,
     pub max_chunks_per_file: usize,
+    pub max_sql_chunks_per_file: usize,
+    pub query_batch_size: usize,
+    pub query_batch_wait_ms: u64,
+    pub query_cache_size: usize,
+    pub max_inflight: usize,
     pub vector_limit: usize,
     pub vector_weight: f32,
     pub query_timeout: Duration,
@@ -68,6 +82,17 @@ impl SemanticConfig {
                 "AWI_SEMANTIC_MAX_CHUNKS_PER_FILE",
                 DEFAULT_MAX_CHUNKS_PER_FILE,
             )?,
+            max_sql_chunks_per_file: env_usize(
+                "AWI_SEMANTIC_MAX_SQL_CHUNKS_PER_FILE",
+                DEFAULT_MAX_SQL_CHUNKS_PER_FILE,
+            )?,
+            query_batch_size: env_usize("AWI_SEMANTIC_QUERY_BATCH_SIZE", DEFAULT_QUERY_BATCH_SIZE)?,
+            query_batch_wait_ms: env_u64(
+                "AWI_SEMANTIC_QUERY_BATCH_WAIT_MS",
+                DEFAULT_QUERY_BATCH_WAIT_MS,
+            )?,
+            query_cache_size: env_usize("AWI_SEMANTIC_QUERY_CACHE_SIZE", DEFAULT_QUERY_CACHE_SIZE)?,
+            max_inflight: env_usize("AWI_SEMANTIC_MAX_INFLIGHT", DEFAULT_MAX_INFLIGHT)?,
             vector_limit: env_usize("AWI_SEMANTIC_VECTOR_LIMIT", DEFAULT_VECTOR_LIMIT)?,
             vector_weight: env_f32("AWI_SEMANTIC_WEIGHT", DEFAULT_VECTOR_WEIGHT)?,
             query_timeout: Duration::from_millis(env_u64(
@@ -81,7 +106,8 @@ impl SemanticConfig {
 pub(crate) struct SemanticIndex {
     index_dir: PathBuf,
     config: Option<SemanticConfig>,
-    runtime: Mutex<Option<SemanticRuntime>>,
+    runtime: Arc<Mutex<Option<Arc<SemanticRuntime>>>>,
+    metrics: Arc<SemanticMetricsState>,
 }
 
 impl SemanticIndex {
@@ -89,7 +115,8 @@ impl SemanticIndex {
         Ok(Self {
             index_dir: index_dir.to_owned(),
             config: SemanticConfig::from_env()?,
-            runtime: Mutex::new(None),
+            runtime: Arc::new(Mutex::new(None)),
+            metrics: Arc::new(SemanticMetricsState::default()),
         })
     }
 
@@ -98,7 +125,17 @@ impl SemanticIndex {
         Self {
             index_dir: index_dir.to_owned(),
             config: None,
-            runtime: Mutex::new(None),
+            runtime: Arc::new(Mutex::new(None)),
+            metrics: Arc::new(SemanticMetricsState::default()),
+        }
+    }
+
+    pub(crate) fn retarget(&self, index_dir: &Path) -> Self {
+        Self {
+            index_dir: index_dir.to_owned(),
+            config: self.config.clone(),
+            runtime: Arc::clone(&self.runtime),
+            metrics: Arc::clone(&self.metrics),
         }
     }
 
@@ -155,6 +192,16 @@ impl SemanticIndex {
         let pairs: Vec<(i64, i64)> =
             serde_json::from_value(result["pairs"].clone()).context("decode semantic coverage")?;
         Ok(pairs.into_iter().collect())
+    }
+
+    pub(crate) fn sql_chunks_are_current(&self) -> Result<bool> {
+        if !self.manifest().is_file() {
+            return Ok(false);
+        }
+        let manifest: Value =
+            serde_json::from_slice(&fs::read(self.manifest()).context("read semantic manifest")?)
+                .context("decode semantic manifest")?;
+        Ok(manifest["chunking_version"].as_u64() == Some(CHUNKING_VERSION))
     }
 
     pub(crate) fn apply_changes(
@@ -238,6 +285,7 @@ impl SemanticIndex {
         if !self.manifest().is_file() || !self.database().is_dir() {
             return Ok(Vec::new());
         }
+        let started_at = Instant::now();
         let result = self.request(json!({
             "op": "query",
             "database": self.database(),
@@ -248,8 +296,19 @@ impl SemanticIndex {
             "roots": roots,
             "kinds": kinds,
             "path_prefixes": path_prefixes
-        }))?;
-        serde_json::from_value(result["candidates"].clone()).context("decode semantic candidates")
+        }));
+        match result {
+            Ok(result) => {
+                self.metrics
+                    .record(&result["diagnostics"], started_at.elapsed());
+                serde_json::from_value(result["candidates"].clone())
+                    .context("decode semantic candidates")
+            }
+            Err(error) => {
+                self.metrics.record_failure(started_at.elapsed());
+                Err(error)
+            }
+        }
     }
 
     pub(crate) fn vector_weight(&self) -> f32 {
@@ -277,7 +336,10 @@ impl SemanticIndex {
                 generation: manifest["generation"].as_i64(),
                 files: manifest["files"].as_u64().unwrap_or_default(),
                 chunks: manifest["rows"].as_u64().unwrap_or_default(),
+                chunking_version: manifest["chunking_version"].as_u64().unwrap_or_default(),
+                metrics: self.metrics.snapshot(),
                 error: None,
+                ..SemanticStatus::default()
             },
             Err(error) => SemanticStatus {
                 enabled,
@@ -297,17 +359,21 @@ impl SemanticIndex {
     }
 
     fn request(&self, request: Value) -> Result<Value> {
-        let mut guard = self
-            .runtime
-            .lock()
-            .expect("semantic runtime mutex poisoned");
-        if guard.is_none() {
-            *guard = Some(SemanticRuntime::start(
-                self.config
-                    .as_ref()
-                    .context("semantic runtime is not configured")?,
-            )?);
-        }
+        let runtime = {
+            let mut guard = self
+                .runtime
+                .lock()
+                .expect("semantic runtime mutex poisoned");
+            if guard.is_none() {
+                *guard = Some(Arc::new(SemanticRuntime::start(
+                    self.config
+                        .as_ref()
+                        .context("semantic runtime is not configured")?,
+                )?));
+                self.metrics.sidecar_starts.fetch_add(1, Ordering::Relaxed);
+            }
+            Arc::clone(guard.as_ref().expect("semantic runtime initialized"))
+        };
         let timeout = if matches!(
             request.get("op").and_then(Value::as_str),
             Some("query" | "ping")
@@ -319,19 +385,92 @@ impl SemanticIndex {
         } else {
             UPDATE_TIMEOUT
         };
-        let result = guard
-            .as_mut()
-            .expect("semantic runtime initialized")
-            .request(&request, timeout);
+        let result = runtime.request(&request, timeout);
         if result.is_err() {
-            guard.take();
+            let mut guard = self
+                .runtime
+                .lock()
+                .expect("semantic runtime mutex poisoned");
+            if guard
+                .as_ref()
+                .is_some_and(|current| Arc::ptr_eq(current, &runtime))
+            {
+                guard.take();
+                runtime.stop();
+            }
         }
         result
     }
 }
 
+#[derive(Default)]
+struct SemanticMetricsState {
+    queries: AtomicU64,
+    result_cache_hits: AtomicU64,
+    embedding_cache_hits: AtomicU64,
+    coalesced_queries: AtomicU64,
+    failures: AtomicU64,
+    sidecar_starts: AtomicU64,
+    queue_wait: LatencyWindow,
+    embedding: LatencyWindow,
+    vector_search: LatencyWindow,
+    total: LatencyWindow,
+}
+
+impl SemanticMetricsState {
+    fn record(&self, diagnostics: &Value, elapsed: Duration) {
+        self.queries.fetch_add(1, Ordering::Relaxed);
+        if diagnostics["result_cache_hit"].as_bool().unwrap_or(false) {
+            self.result_cache_hits.fetch_add(1, Ordering::Relaxed);
+        }
+        if diagnostics["embedding_cache_hit"]
+            .as_bool()
+            .unwrap_or(false)
+        {
+            self.embedding_cache_hits.fetch_add(1, Ordering::Relaxed);
+        }
+        if diagnostics["coalesced"].as_bool().unwrap_or(false) {
+            self.coalesced_queries.fetch_add(1, Ordering::Relaxed);
+        }
+        self.queue_wait
+            .record_ms(diagnostics["queue_wait_ms"].as_f64().unwrap_or_default());
+        self.embedding
+            .record_ms(diagnostics["embedding_ms"].as_f64().unwrap_or_default());
+        self.vector_search
+            .record_ms(diagnostics["vector_ms"].as_f64().unwrap_or_default());
+        self.total.record_ms(
+            diagnostics["total_ms"]
+                .as_f64()
+                .unwrap_or(elapsed.as_secs_f64() * 1_000.0),
+        );
+    }
+
+    fn record_failure(&self, elapsed: Duration) {
+        self.queries.fetch_add(1, Ordering::Relaxed);
+        self.failures.fetch_add(1, Ordering::Relaxed);
+        self.total.record(elapsed);
+    }
+
+    fn snapshot(&self) -> SemanticMetrics {
+        let starts = self.sidecar_starts.load(Ordering::Relaxed);
+        SemanticMetrics {
+            queries: self.queries.load(Ordering::Relaxed),
+            result_cache_hits: self.result_cache_hits.load(Ordering::Relaxed),
+            embedding_cache_hits: self.embedding_cache_hits.load(Ordering::Relaxed),
+            coalesced_queries: self.coalesced_queries.load(Ordering::Relaxed),
+            failures: self.failures.load(Ordering::Relaxed),
+            sidecar_starts: starts,
+            sidecar_restarts: starts.saturating_sub(1),
+            queue_wait: self.queue_wait.snapshot(),
+            embedding: self.embedding.snapshot(),
+            vector_search: self.vector_search.snapshot(),
+            total: self.total.snapshot(),
+        }
+    }
+}
+
 struct SemanticRuntime {
-    child: Child,
+    child: Mutex<Child>,
     socket: PathBuf,
 }
 
@@ -361,6 +500,16 @@ impl SemanticRuntime {
             .arg(config.embedding_workers.to_string())
             .arg("--max-chunks-per-file")
             .arg(config.max_chunks_per_file.to_string())
+            .arg("--max-sql-chunks-per-file")
+            .arg(config.max_sql_chunks_per_file.to_string())
+            .arg("--query-batch-size")
+            .arg(config.query_batch_size.to_string())
+            .arg("--query-batch-wait-ms")
+            .arg(config.query_batch_wait_ms.to_string())
+            .arg("--query-cache-size")
+            .arg(config.query_cache_size.to_string())
+            .arg("--max-inflight")
+            .arg(config.max_inflight.to_string())
             .arg("--socket")
             .arg(&socket)
             .stdin(Stdio::null())
@@ -375,10 +524,18 @@ impl SemanticRuntime {
                 config.python.display()
             )
         })?;
-        let mut runtime = Self { child, socket };
+        let runtime = Self {
+            child: Mutex::new(child),
+            socket,
+        };
         let deadline = Instant::now() + START_TIMEOUT;
         loop {
-            if let Some(status) = runtime.child.try_wait()? {
+            if let Some(status) = runtime
+                .child
+                .lock()
+                .expect("semantic child mutex poisoned")
+                .try_wait()?
+            {
                 anyhow::bail!("semantic sidecar exited during startup: {status}");
             }
             if runtime.socket.exists() {
@@ -396,7 +553,7 @@ impl SemanticRuntime {
         }
     }
 
-    fn request(&mut self, request: &Value, timeout: Duration) -> Result<Value> {
+    fn request(&self, request: &Value, timeout: Duration) -> Result<Value> {
         let mut stream = UnixStream::connect(&self.socket)
             .with_context(|| format!("connect semantic sidecar {}", self.socket.display()))?;
         stream.set_read_timeout(Some(timeout))?;
@@ -407,9 +564,10 @@ impl SemanticRuntime {
         read_response(&mut BufReader::new(stream))
     }
 
-    fn stop(&mut self) {
-        let _ = self.child.kill();
-        let _ = self.child.wait();
+    fn stop(&self) {
+        let mut child = self.child.lock().expect("semantic child mutex poisoned");
+        let _ = child.kill();
+        let _ = child.wait();
         let _ = fs::remove_file(&self.socket);
     }
 }

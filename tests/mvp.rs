@@ -51,6 +51,13 @@ fn indexes_code_text_and_tabular_metadata_incrementally() {
 
     let text_hits = workspace.search("total_spend", 10).unwrap();
     assert!(text_hits.iter().any(|hit| hit.path.ends_with("report.sql")));
+    let cached_text_hits = workspace.search("total_spend", 10).unwrap();
+    assert_eq!(cached_text_hits[0].path, text_hits[0].path);
+    assert_eq!(workspace.status().unwrap().retrieval.cache_hits, 1);
+    let sql_hits = workspace.search("SQL total_spend", 10).unwrap();
+    assert!(sql_hits.iter().any(|hit| {
+        hit.path.ends_with("report.sql") && hit.matched_lanes.iter().any(|lane| lane == "sql")
+    }));
 
     let inspected = workspace.inspect(&source).unwrap();
     assert!(
@@ -688,6 +695,8 @@ fn daemon_serves_cli_requests_and_stops_cleanly() {
     let status = run_json(&index_dir, &socket, &["status", "--json"]);
     assert_eq!(status["active_files"], 1);
     assert_eq!(status["running_generations"], 0);
+    assert_eq!(status["serving"]["workers"], 1);
+    assert!(status["retrieval"]["searches"].as_u64().unwrap() >= 1);
 
     fs::write(
         root.join("service.rs"),
@@ -807,6 +816,72 @@ fn daemon_atomically_switches_published_snapshots() {
         &["search", "snapshot_version_one", "--json"],
     );
     assert!(stale.as_array().unwrap().is_empty());
+
+    run_json(&runtime_index, &socket, &["stop", "--json"]);
+    wait_until_stopped(&mut daemon);
+}
+
+#[test]
+fn snapshot_daemon_serves_around_a_stalled_connection() {
+    let fixture = tempdir().unwrap();
+    let root = fixture.path().join("workspace");
+    let writer_index = fixture.path().join("writer-index");
+    let publish_dir = fixture.path().join("published");
+    let runtime_index = fixture.path().join("runtime-index");
+    let socket = fixture.path().join("snapshot.sock");
+    fs::create_dir_all(&root).unwrap();
+    fs::write(
+        root.join("service.rs"),
+        "pub fn concurrent_snapshot_target() -> usize { 1 }\n",
+    )
+    .unwrap();
+    {
+        let mut workspace = WorkspaceIndex::open(&writer_index).unwrap();
+        workspace
+            .index_root(&root, &IndexOptions::default())
+            .unwrap();
+        workspace.publish_snapshot(&publish_dir).unwrap();
+    }
+
+    let child = Command::new(env!("CARGO_BIN_EXE_awi"))
+        .args([
+            "--index-dir",
+            path(&runtime_index),
+            "--socket",
+            path(&socket),
+        ])
+        .arg("serve")
+        .args([
+            "--snapshot-source",
+            path(&publish_dir),
+            "--snapshot-poll-ms",
+            "1000",
+        ])
+        .env("AWI_DAEMON_QUERY_WORKERS", "2")
+        .env("AWI_DAEMON_QUERY_QUEUE_CAPACITY", "2")
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn()
+        .unwrap();
+    let mut daemon = ChildGuard::new(child);
+    wait_until_ready(&mut daemon, &runtime_index, &socket);
+
+    let blocked = UnixStream::connect(&socket).unwrap();
+    thread::sleep(Duration::from_millis(50));
+    let request_index = runtime_index.clone();
+    let request_socket = socket.clone();
+    let (sender, receiver) = std::sync::mpsc::channel();
+    let request = thread::spawn(move || {
+        let value = run_json(&request_index, &request_socket, &["status", "--json"]);
+        sender.send(value).unwrap();
+    });
+    let status = receiver
+        .recv_timeout(Duration::from_secs(2))
+        .expect("second snapshot worker did not serve around a stalled connection");
+    assert_eq!(status["serving"]["workers"], 2);
+    assert!(status["serving"]["active"].as_u64().unwrap() >= 2);
+    drop(blocked);
+    request.join().unwrap();
 
     run_json(&runtime_index, &socket, &["stop", "--json"]);
     wait_until_stopped(&mut daemon);

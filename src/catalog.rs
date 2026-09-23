@@ -888,6 +888,8 @@ impl Catalog {
             },
             failures: self.count("index_failures", "1 = 1")?,
             semantic: Default::default(),
+            retrieval: Default::default(),
+            serving: Default::default(),
         })
     }
 

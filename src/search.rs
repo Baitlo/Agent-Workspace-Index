@@ -44,8 +44,10 @@ struct LaneSpec {
     name: &'static str,
     fields: Vec<Field>,
     weight: f32,
+    query: Option<String>,
     include_kinds: Option<&'static [&'static str]>,
     exclude_kinds: Option<&'static [&'static str]>,
+    path_suffix: Option<&'static str>,
 }
 
 #[derive(Clone)]
@@ -138,56 +140,85 @@ impl SearchIndex {
                 name: "path",
                 fields: vec![self.fields.path, self.fields.name, self.fields.experiment],
                 weight: 1.25,
+                query: None,
                 include_kinds: None,
                 exclude_kinds: base_exclusions,
+                path_suffix: None,
             },
             LaneSpec {
                 name: "content",
                 fields: vec![self.fields.content],
                 weight: 1.0,
+                query: None,
                 include_kinds: None,
                 exclude_kinds: base_exclusions,
+                path_suffix: None,
             },
             LaneSpec {
                 name: "symbol",
                 fields: vec![self.fields.symbols],
                 weight: 1.15,
+                query: None,
                 include_kinds: None,
                 exclude_kinds: base_exclusions,
+                path_suffix: None,
             },
             LaneSpec {
                 name: "schema",
                 fields: vec![self.fields.schema],
                 weight: 1.1,
+                query: None,
                 include_kinds: None,
                 exclude_kinds: base_exclusions,
+                path_suffix: None,
             },
         ];
+        if is_sql_query(query) {
+            lanes.push(LaneSpec {
+                name: "sql",
+                fields: vec![
+                    self.fields.path,
+                    self.fields.name,
+                    self.fields.content,
+                    self.fields.schema,
+                ],
+                weight: 1.35,
+                query: Some(expand_sql_query(query)),
+                include_kinds: Some(&["text"]),
+                exclude_kinds: None,
+                path_suffix: Some(".sql"),
+            });
+        }
         if include_agent_lane {
             lanes.push(LaneSpec {
                 name: "agent",
                 fields: vec![self.fields.name, self.fields.symbols, self.fields.content],
                 weight: 1.3,
+                query: None,
                 include_kinds: Some(AGENT_KINDS),
                 exclude_kinds: None,
+                path_suffix: None,
             });
         }
         lanes.push(LaneSpec {
             name: "memory",
             fields: vec![self.fields.name, self.fields.symbols, self.fields.content],
             weight: 1.15,
+            query: None,
             include_kinds: Some(MEMORY_KINDS),
             exclude_kinds: None,
+            path_suffix: None,
         });
 
         let lane_results = lanes
             .par_iter()
             .map(|lane| {
                 self.search_lane(
-                    query,
+                    lane.query.as_deref().unwrap_or(query),
                     &lane.fields,
                     lane.include_kinds,
                     lane.exclude_kinds,
+                    lane.path_suffix,
                     lane_limit,
                 )
                 .map(|hits| (lane.name, lane.weight, hits))
@@ -294,6 +325,7 @@ impl SearchIndex {
         fields: &[Field],
         include_kinds: Option<&[&str]>,
         exclude_kinds: Option<&[&str]>,
+        path_suffix: Option<&str>,
         limit: usize,
     ) -> Result<Vec<LaneHit>> {
         let reader = self.index.reader().context("open Tantivy reader")?;
@@ -328,9 +360,20 @@ impl SearchIndex {
             }));
         }
         let query = BooleanQuery::new(clauses);
-        let top_docs = searcher.search(&query, &TopDocs::with_limit(limit).order_by_score())?;
+        let lane_limit = if path_suffix.is_some() {
+            limit.max(100)
+        } else {
+            limit
+        };
+        let search_limit = if path_suffix.is_some() {
+            lane_limit.saturating_mul(4)
+        } else {
+            lane_limit
+        };
+        let top_docs =
+            searcher.search(&query, &TopDocs::with_limit(search_limit).order_by_score())?;
 
-        top_docs
+        let mut hits = top_docs
             .into_iter()
             .map(|(_score, address)| {
                 let document: TantivyDocument = searcher.doc(address)?;
@@ -353,7 +396,12 @@ impl SearchIndex {
                     generation: i64::try_from(generation).context("generation exceeds i64")?,
                 })
             })
-            .collect()
+            .collect::<Result<Vec<_>>>()?;
+        if let Some(suffix) = path_suffix {
+            hits.retain(|hit| hit.path.to_ascii_lowercase().ends_with(suffix));
+            hits.truncate(lane_limit);
+        }
+        Ok(hits)
     }
 }
 
@@ -411,6 +459,70 @@ fn lexical_tokens(value: &str) -> HashSet<String> {
     tokens
 }
 
+fn is_sql_query(query: &str) -> bool {
+    const SQL_SIGNALS: &[&str] = &[
+        "sql",
+        "cte",
+        "select",
+        "join",
+        "window",
+        "row",
+        "rank",
+        "ranking",
+        "aggregate",
+        "aggregating",
+        "group",
+        "partition",
+        "hive",
+        "spark",
+        "insert",
+    ];
+    let tokens = lexical_tokens(query);
+    SQL_SIGNALS.iter().any(|signal| tokens.contains(*signal))
+}
+
+fn expand_sql_query(query: &str) -> String {
+    let tokens = lexical_tokens(query);
+    let mut expansions = Vec::new();
+    if tokens.contains("spend") || tokens.contains("spending") {
+        expansions.push("cost spend");
+    }
+    if ["rank", "ranks", "ranking", "ranked"]
+        .iter()
+        .any(|term| tokens.contains(*term))
+    {
+        expansions.push("row_number order partition rank");
+    }
+    if ["filter", "filters", "filtered", "target"]
+        .iter()
+        .any(|term| tokens.contains(*term))
+    {
+        expansions.push("where semi join");
+    }
+    if ["aggregate", "aggregates", "aggregating", "aggregation"]
+        .iter()
+        .any(|term| tokens.contains(*term))
+    {
+        expansions.push("sum group by");
+    }
+    if tokens.contains("pair") || tokens.contains("pairs") {
+        expansions.push("pair generated front back");
+    }
+    if tokens.contains("short") && tokens.contains("long") {
+        expansions.push("14d 60d");
+    }
+    if tokens.contains("non") && tokens.contains("qianchuan") {
+        expansions.push("is_qianchuan_ad");
+    }
+    if tokens.contains("identifier") {
+        expansions.push("id key");
+    }
+    std::iter::once(query)
+        .chain(expansions)
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
 fn centered_exact_excerpt(source: &str, query: &str, max_chars: usize) -> Option<String> {
     let match_chars = query.chars().count();
     if match_chars == 0 || match_chars > max_chars {
@@ -459,5 +571,25 @@ mod tests {
         assert!(excerpt.contains("_patch_deepspeed_load_checkpoint"));
         assert!(!excerpt.starts_with("prefix"));
         assert!(excerpt.chars().count() <= 200);
+    }
+
+    #[test]
+    fn sql_query_classifier_handles_literal_and_intent_terms() {
+        assert!(is_sql_query("Find the SQL that joins the target list"));
+        assert!(is_sql_query(
+            "Build delivery labels by aggregating short and long windows"
+        ));
+        assert!(!is_sql_query("Find the Rust daemon connection handler"));
+    }
+
+    #[test]
+    fn sql_query_expansion_maps_intent_to_structural_terms() {
+        let expanded = expand_sql_query(
+            "Rank non-Qianchuan materials by spend and filter through a target list",
+        );
+        assert!(expanded.contains("cost spend"));
+        assert!(expanded.contains("row_number"));
+        assert!(expanded.contains("semi join"));
+        assert!(expanded.contains("is_qianchuan_ad"));
     }
 }

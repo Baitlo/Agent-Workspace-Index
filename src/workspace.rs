@@ -1,8 +1,11 @@
-use std::collections::{BTreeMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::ffi::OsStr;
 use std::fs::{self, File, OpenOptions};
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::{Arc, Mutex};
 use std::thread;
+use std::time::{Duration, Instant};
 
 use anyhow::{Context, Result};
 use fs4::fs_std::FileExt;
@@ -16,10 +19,12 @@ use crate::extract::{
     normalize_agent_memory_content, should_extract_text,
 };
 use crate::memory::{discover_agent_memory_sources, memory_metadata};
+use crate::metrics::LatencyWindow;
 use crate::model::{
     AgentDocumentRole, AgentMemoryIndexReport, AgentMemorySource, CatalogFileInput, ContentExcerpt,
     DatasetProfile, FileKind, IndexOptions, IndexReport, IndexStatus, InspectResult, NotifyReport,
-    QueryRequest, QueryResult, SearchDocument, SearchHit, SemanticBuildReport, SymbolRecord,
+    QueryRequest, QueryResult, RetrievalStatus, SearchDocument, SearchHit, SemanticBuildReport,
+    SymbolRecord,
 };
 use crate::search::SearchIndex;
 use crate::semantic::{SemanticIndex, merge_semantic_candidates};
@@ -35,6 +40,114 @@ const MEMORY_LAYER_BOOST: f32 = 0.004;
 const MAX_MEMORY_RECENCY_BOOST: f32 = 0.005;
 const SAME_DIRECTORY_MMR_PENALTY: f32 = 0.00125;
 const MATCH_PREVIEW_CHARS: usize = 1_000;
+const SEARCH_CACHE_CAPACITY: usize = 256;
+
+#[derive(Default)]
+struct RetrievalMetricsState {
+    searches: AtomicU64,
+    in_flight: AtomicU64,
+    cache_hits: AtomicU64,
+    semantic_fallbacks: AtomicU64,
+    total: LatencyWindow,
+    lexical: LatencyWindow,
+    semantic: LatencyWindow,
+    fusion: LatencyWindow,
+    catalog_filter: LatencyWindow,
+    preview: LatencyWindow,
+    cache: Mutex<SearchCache>,
+}
+
+#[derive(Default)]
+struct SearchCache {
+    sequence: u64,
+    entries: HashMap<String, (u64, Vec<SearchHit>)>,
+}
+
+struct SearchInFlight<'a> {
+    counter: &'a AtomicU64,
+}
+
+impl Drop for SearchInFlight<'_> {
+    fn drop(&mut self) {
+        self.counter.fetch_sub(1, Ordering::Relaxed);
+    }
+}
+
+struct RetrievalDurations {
+    total: Duration,
+    lexical: Duration,
+    semantic: Option<Duration>,
+    fusion: Duration,
+    catalog_filter: Duration,
+    preview: Duration,
+    semantic_fallback: bool,
+}
+
+impl RetrievalMetricsState {
+    fn begin(&self) -> SearchInFlight<'_> {
+        self.in_flight.fetch_add(1, Ordering::Relaxed);
+        SearchInFlight {
+            counter: &self.in_flight,
+        }
+    }
+
+    fn record(&self, durations: RetrievalDurations) {
+        self.searches.fetch_add(1, Ordering::Relaxed);
+        if durations.semantic_fallback {
+            self.semantic_fallbacks.fetch_add(1, Ordering::Relaxed);
+        }
+        self.total.record(durations.total);
+        self.lexical.record(durations.lexical);
+        if let Some(semantic) = durations.semantic {
+            self.semantic.record(semantic);
+        }
+        self.fusion.record(durations.fusion);
+        self.catalog_filter.record(durations.catalog_filter);
+        self.preview.record(durations.preview);
+    }
+
+    fn get_cached(&self, key: &str) -> Option<Vec<SearchHit>> {
+        let mut cache = self.cache.lock().expect("search cache mutex poisoned");
+        let next_sequence = cache.sequence.saturating_add(1);
+        let hits = cache.entries.get_mut(key)?;
+        hits.0 = next_sequence;
+        let output = hits.1.clone();
+        cache.sequence = next_sequence;
+        self.cache_hits.fetch_add(1, Ordering::Relaxed);
+        Some(output)
+    }
+
+    fn cache(&self, key: String, hits: Vec<SearchHit>) {
+        let mut cache = self.cache.lock().expect("search cache mutex poisoned");
+        cache.sequence = cache.sequence.saturating_add(1);
+        let sequence = cache.sequence;
+        cache.entries.insert(key, (sequence, hits));
+        if cache.entries.len() > SEARCH_CACHE_CAPACITY
+            && let Some(oldest) = cache
+                .entries
+                .iter()
+                .min_by_key(|(_, (sequence, _))| sequence)
+                .map(|(key, _)| key.clone())
+        {
+            cache.entries.remove(&oldest);
+        }
+    }
+
+    fn snapshot(&self) -> RetrievalStatus {
+        RetrievalStatus {
+            searches: self.searches.load(Ordering::Relaxed),
+            in_flight: self.in_flight.load(Ordering::Relaxed),
+            cache_hits: self.cache_hits.load(Ordering::Relaxed),
+            semantic_fallbacks: self.semantic_fallbacks.load(Ordering::Relaxed),
+            total: self.total.snapshot(),
+            lexical: self.lexical.snapshot(),
+            semantic: self.semantic.snapshot(),
+            fusion: self.fusion.snapshot(),
+            catalog_filter: self.catalog_filter.snapshot(),
+            preview: self.preview.snapshot(),
+        }
+    }
+}
 
 pub struct WorkspaceIndex {
     index_dir: PathBuf,
@@ -42,6 +155,7 @@ pub struct WorkspaceIndex {
     search: SearchIndex,
     memory_search: SearchIndex,
     semantic: SemanticIndex,
+    metrics: Arc<RetrievalMetricsState>,
 }
 
 impl WorkspaceIndex {
@@ -59,7 +173,26 @@ impl WorkspaceIndex {
             search,
             memory_search,
             semantic,
+            metrics: Arc::new(RetrievalMetricsState::default()),
         })
+    }
+
+    pub(crate) fn open_reader_at(&self, index_dir: &Path) -> Result<Self> {
+        let catalog = Catalog::open(&index_dir.join("catalog.sqlite3"))?;
+        let search = SearchIndex::open(&index_dir.join("tantivy"))?;
+        let memory_search = SearchIndex::open(&index_dir.join("memory-tantivy"))?;
+        Ok(Self {
+            index_dir: index_dir.to_owned(),
+            catalog,
+            search,
+            memory_search,
+            semantic: self.semantic.retarget(index_dir),
+            metrics: Arc::clone(&self.metrics),
+        })
+    }
+
+    pub(crate) fn index_dir(&self) -> &Path {
+        &self.index_dir
     }
 
     pub fn index_root(
@@ -272,6 +405,8 @@ impl WorkspaceIndex {
         if query.trim().is_empty() {
             anyhow::bail!("search query must not be empty");
         }
+        let total_started_at = Instant::now();
+        let _in_flight = self.metrics.begin();
         let registered_roots = self.catalog.roots()?;
         let mut root_filter = HashSet::new();
         let mut search_scopes = Vec::new();
@@ -323,6 +458,29 @@ impl WorkspaceIndex {
                 .any(|kind| matches!(kind, FileKind::AgentInstructions | FileKind::AgentSkill));
         let include_memory = kind_filter.contains(&FileKind::AgentMemory);
         let generation = self.catalog.latest_completed_generation()?;
+        let cache_key = serde_json::to_string(&(
+            &self.index_dir,
+            generation,
+            query,
+            limit,
+            &search_scopes,
+            kinds,
+            path_prefix,
+            &context_path,
+        ))
+        .context("encode search cache key")?;
+        if let Some(output) = self.metrics.get_cached(&cache_key) {
+            self.metrics.record(RetrievalDurations {
+                total: total_started_at.elapsed(),
+                lexical: Duration::ZERO,
+                semantic: None,
+                fusion: Duration::ZERO,
+                catalog_filter: Duration::ZERO,
+                preview: Duration::ZERO,
+                semantic_fallback: false,
+            });
+            return Ok(output);
+        }
         let semantic_index = &self.semantic;
         let semantic_path_prefixes = match path_prefix {
             Some(prefix) if Path::new(prefix).is_absolute() => vec![prefix.to_owned()],
@@ -344,15 +502,18 @@ impl WorkspaceIndex {
                 .filter(|_| semantic_index.enabled())
                 .map(|generation| {
                     scope.spawn(move || {
-                        semantic_index.search(
+                        let started_at = Instant::now();
+                        let result = semantic_index.search(
                             query,
                             generation,
                             semantic_scopes,
                             kinds,
                             semantic_prefixes,
-                        )
+                        );
+                        (result, started_at.elapsed())
                     })
                 });
+            let lexical_started_at = Instant::now();
             let lexical = (|| {
                 let mut candidates =
                     self.search
@@ -374,17 +535,26 @@ impl WorkspaceIndex {
                 }
                 Ok::<_, anyhow::Error>(candidates)
             })();
+            let lexical_duration = lexical_started_at.elapsed();
             let semantic = semantic.map(|worker| {
-                worker
-                    .join()
-                    .unwrap_or_else(|_| Err(anyhow::anyhow!("semantic search worker panicked")))
+                worker.join().unwrap_or_else(|_| {
+                    (
+                        Err(anyhow::anyhow!("semantic search worker panicked")),
+                        Duration::ZERO,
+                    )
+                })
             });
-            (lexical, semantic)
+            ((lexical, lexical_duration), semantic)
         });
+        let (lexical, lexical_duration) = lexical;
         let mut candidates = lexical?;
+        let fusion_started_at = Instant::now();
+        let mut semantic_duration = None;
+        let mut semantic_fallback = false;
         if let Some(semantic) = semantic {
+            semantic_duration = Some(semantic.1);
             match semantic {
-                Ok(semantic) => {
+                (Ok(semantic), _) => {
                     candidates = merge_semantic_candidates(
                         candidates,
                         semantic,
@@ -392,11 +562,14 @@ impl WorkspaceIndex {
                         self.semantic.vector_weight(),
                     );
                 }
-                Err(error) => {
+                (Err(error), _) => {
+                    semantic_fallback = true;
                     eprintln!("AWI semantic search unavailable; using lexical results: {error:#}");
                 }
             }
         }
+        let fusion_duration = fusion_started_at.elapsed();
+        let catalog_started_at = Instant::now();
         let candidate_ids = candidates
             .iter()
             .map(|candidate| candidate.file_id)
@@ -532,8 +705,25 @@ impl WorkspaceIndex {
             true
         });
         let mut ranked_hits = rerank_for_directory_diversity(ranked_hits, limit);
+        let catalog_filter_duration = catalog_started_at.elapsed();
+        let preview_started_at = Instant::now();
         self.focus_search_previews(query, &mut ranked_hits);
-        Ok(ranked_hits.into_iter().map(|(hit, _)| hit).collect())
+        let preview_duration = preview_started_at.elapsed();
+        let output = ranked_hits
+            .into_iter()
+            .map(|(hit, _)| hit)
+            .collect::<Vec<_>>();
+        self.metrics.cache(cache_key, output.clone());
+        self.metrics.record(RetrievalDurations {
+            total: total_started_at.elapsed(),
+            lexical: lexical_duration,
+            semantic: semantic_duration,
+            fusion: fusion_duration,
+            catalog_filter: catalog_filter_duration,
+            preview: preview_duration,
+            semantic_fallback,
+        });
+        Ok(output)
     }
 
     pub fn inspect(&self, path: impl AsRef<Path>) -> Result<InspectResult> {
@@ -581,6 +771,12 @@ impl WorkspaceIndex {
     pub fn status(&self) -> Result<IndexStatus> {
         let mut status = self.catalog.status()?;
         status.semantic = self.semantic.status();
+        status.retrieval = self.metrics.snapshot();
+        status.semantic.generation_lag =
+            match (status.completed_generation, status.semantic.generation) {
+                (Some(catalog), Some(semantic)) => catalog.saturating_sub(semantic) as u64,
+                _ => 0,
+            };
         if status.semantic.available && status.semantic.generation != status.completed_generation {
             status.semantic.available = false;
             status.semantic.error = Some(format!(
@@ -662,6 +858,7 @@ impl WorkspaceIndex {
                 self.semantic.reset()?;
                 HashSet::new()
             };
+            let rebuild_sql = resume && !self.semantic.sql_chunks_are_current()?;
             let mut report = SemanticBuildReport {
                 generation,
                 ..SemanticBuildReport::default()
@@ -680,7 +877,11 @@ impl WorkspaceIndex {
                         path.display()
                     );
                 }
-                if existing.contains(&(file.id, file.generation)) {
+                let is_sql = path
+                    .extension()
+                    .and_then(OsStr::to_str)
+                    .is_some_and(|extension| extension.eq_ignore_ascii_case("sql"));
+                if existing.contains(&(file.id, file.generation)) && !(rebuild_sql && is_sql) {
                     expected.push((file.id, file.generation));
                     report.files += 1;
                     report.reused_files += 1;
