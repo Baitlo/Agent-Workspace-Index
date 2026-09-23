@@ -393,16 +393,18 @@ class Sidecar:
         existing = None
         if manifest.is_file():
             existing = json.loads(manifest.read_text(encoding="utf-8"))
-        already_sealed = (
+        index_is_current = (
             existing is not None
-            and int(existing.get("generation", -1)) == generation
             and int(existing.get("files", -1)) == len(expected_pairs)
             and int(existing.get("rows", -1)) == row_count
             and existing.get("model_sha256") == self.model_sha256
             and existing.get("vector_index_type") == index_type
             and int(existing.get("vector_index_partitions", -1)) == partitions
         )
-        if row_count >= 256 and not already_sealed:
+        already_sealed = (
+            index_is_current and int(existing.get("generation", -1)) == generation
+        )
+        if row_count >= 256 and not index_is_current:
             table.create_index(
                 metric="cosine",
                 vector_column_name="vector",

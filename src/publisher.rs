@@ -125,6 +125,8 @@ pub fn publish_once(
         cycle.published = true;
         cycle.generation = Some(manifest.generation);
         cycle.pruned = prune_generations(&config.publish_dir, config.retain)?;
+    } else {
+        workspace.seal_semantic_generation()?;
     }
     // Reconciling every cycle appends generation rows even when nothing
     // changed; trim the bookkeeping so background filesystem noise cannot grow

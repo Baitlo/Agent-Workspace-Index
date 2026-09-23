@@ -164,8 +164,10 @@ instances are loaded lazily for document embedding only; query serving keeps a
 single model. AWI divides `AWI_SEMANTIC_THREADS` across those workers, so set it
 to the total CPU quota available to the sidecar.
 
-Subsequent producer cycles update only changed files. Before publication, AWI
-requires LanceDB coverage for every current eligible `(file_id, generation)`.
+Subsequent producer cycles update only changed files. A no-change cycle validates
+coverage and advances only the local semantic manifest; it does not publish a
+redundant NFS snapshot. Before publication, AWI requires LanceDB coverage for
+every current eligible `(file_id, generation)`.
 The semantic database and its manifest are copied into the same immutable
 snapshot as SQLite and Tantivy. Readers reject a mismatched generation and
 fall back to lexical search when the sidecar is unavailable. Unset

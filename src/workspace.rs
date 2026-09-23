@@ -750,6 +750,21 @@ impl WorkspaceIndex {
         }
     }
 
+    pub fn seal_semantic_generation(&self) -> Result<()> {
+        let _writer_lock = acquire_writer_lock(&self.index_dir)?;
+        let generation = self
+            .catalog
+            .latest_completed_generation()?
+            .context("cannot seal semantics without a completed generation")?;
+        let expected = self
+            .catalog
+            .current_semantic_files()?
+            .into_iter()
+            .map(|file| (file.id, file.generation))
+            .collect::<Vec<_>>();
+        self.semantic.seal(generation, &expected)
+    }
+
     pub fn publish_snapshot(&mut self, publish_dir: impl AsRef<Path>) -> Result<SnapshotManifest> {
         let _writer_lock = acquire_writer_lock(&self.index_dir)?;
         let generation = self
