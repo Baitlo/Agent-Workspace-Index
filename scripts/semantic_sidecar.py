@@ -513,7 +513,22 @@ def response_bytes(value: dict[str, Any]) -> bytes:
     ).encode()
 
 
+def terminate_with_parent() -> None:
+    """Ask Linux to terminate the sidecar when its Rust parent exits."""
+    import ctypes
+    import signal
+
+    libc = ctypes.CDLL(None, use_errno=True)
+    pr_set_pdeathsig = 1
+    if libc.prctl(pr_set_pdeathsig, signal.SIGTERM, 0, 0, 0) != 0:
+        error = ctypes.get_errno()
+        raise OSError(error, "prctl(PR_SET_PDEATHSIG) failed")
+    if os.getppid() == 1:
+        os.kill(os.getpid(), signal.SIGTERM)
+
+
 def main() -> int:
+    terminate_with_parent()
     args = parse_args()
     sidecar = Sidecar(args)
     args.socket.parent.mkdir(parents=True, exist_ok=True)

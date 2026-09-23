@@ -174,7 +174,8 @@ fall back to lexical search when the sidecar is unavailable. Unset
 Query-time semantic retrieval runs concurrently with the lexical lanes. Vector
 overfetch is bounded by the configured maximum chunks per file, preserving
 file-level Top-K coverage without returning redundant chunk candidates.
-Persistent readers run one full hybrid warmup before serving queries.
+Persistent readers run one full hybrid warmup before serving queries. The sidecar
+uses a Linux parent-death signal so stopping the reader also releases the model.
 
 Sealed generations use an IVF_FLAT index and probe every partition. This keeps
 the original normalized Q8 vectors and exact Top-K ordering while avoiding the
