@@ -11,6 +11,7 @@ mod model;
 pub mod protocol;
 pub mod publisher;
 mod search;
+mod semantic;
 pub mod snapshot;
 mod workspace;
 
@@ -23,7 +24,8 @@ pub use model::{
     AgentDocumentMetadata, AgentDocumentRole, AgentMemoryIndexReport, AgentMemoryLayer,
     AgentMemoryMetadata, AgentMemorySource, ContentExcerpt, DatasetColumn, DatasetProfile,
     FileKind, FileRecord, IndexOptions, IndexReport, IndexStatus, InspectResult, NotifyReport,
-    QueryColumn, QueryInput, QueryRequest, QueryResult, QuerySource, SearchHit, SymbolRecord,
+    QueryColumn, QueryInput, QueryRequest, QueryResult, QuerySource, SearchHit,
+    SemanticBuildReport, SemanticCandidate, SemanticStatus, SymbolRecord,
 };
 pub use publisher::{
     PublishCycle, PublisherConfig, partition_roots, publish_once, resolve_roots, watch,

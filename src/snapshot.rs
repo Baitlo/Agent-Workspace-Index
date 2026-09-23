@@ -42,6 +42,7 @@ pub(crate) fn publish(
     index_dir: &Path,
     publish_dir: &Path,
     generation: i64,
+    include_semantic: bool,
 ) -> Result<SnapshotManifest> {
     let generations_dir = publish_dir.join("generations");
     fs::create_dir_all(&generations_dir).with_context(|| {
@@ -79,6 +80,34 @@ pub(crate) fn publish(
             &index_dir.join("memory-tantivy"),
             &staging.join("memory-tantivy"),
         )?;
+        if include_semantic {
+            let semantic_database = index_dir.join("semantic.lance");
+            let semantic_manifest = index_dir.join("semantic-manifest.json");
+            match (semantic_database.exists(), semantic_manifest.exists()) {
+                (true, true) => {
+                    let metadata: serde_json::Value =
+                        serde_json::from_slice(&fs::read(&semantic_manifest).with_context(
+                            || format!("read semantic manifest {}", semantic_manifest.display()),
+                        )?)
+                        .context("decode semantic manifest")?;
+                    if metadata["generation"].as_i64() != Some(generation) {
+                        anyhow::bail!(
+                            "semantic generation {:?} does not match snapshot generation \
+                             {generation}",
+                            metadata["generation"].as_i64()
+                        );
+                    }
+                    copy_tree(&semantic_database, &staging.join("semantic.lance"))?;
+                    copy_tree(&semantic_manifest, &staging.join("semantic-manifest.json"))?;
+                }
+                (false, false) => {}
+                _ => anyhow::bail!(
+                    "semantic snapshot is incomplete: database={} manifest={}",
+                    semantic_database.exists(),
+                    semantic_manifest.exists()
+                ),
+            }
+        }
         let files = snapshot_files(&staging)?;
         let manifest = SnapshotManifest {
             format_version: SNAPSHOT_FORMAT_VERSION,
@@ -447,10 +476,21 @@ mod tests {
         fs::write(index.join("catalog.sqlite3"), b"catalog").unwrap();
         fs::write(index.join("tantivy/meta.json"), b"index").unwrap();
         fs::write(index.join("memory-tantivy/meta.json"), b"memory").unwrap();
+        fs::create_dir_all(index.join("semantic.lance/chunks.lance")).unwrap();
+        fs::write(
+            index.join("semantic.lance/chunks.lance/data.lance"),
+            b"vectors",
+        )
+        .unwrap();
+        fs::write(
+            index.join("semantic-manifest.json"),
+            b"{\"generation\":7}\n",
+        )
+        .unwrap();
 
-        let manifest = publish(&index, &publish_dir, 7).unwrap();
+        let manifest = publish(&index, &publish_dir, 7, true).unwrap();
         assert_eq!(manifest.generation, 7);
-        assert_eq!(manifest.files.len(), 3);
+        assert_eq!(manifest.files.len(), 5);
         let activated = materialize_latest(&publish_dir, &cache).unwrap();
         assert_eq!(activated.generation, 7);
         assert_eq!(
@@ -460,6 +500,15 @@ mod tests {
         assert_eq!(
             fs::read(activated.path.join("memory-tantivy/meta.json")).unwrap(),
             b"memory"
+        );
+        assert_eq!(
+            fs::read(
+                activated
+                    .path
+                    .join("semantic.lance/chunks.lance/data.lance")
+            )
+            .unwrap(),
+            b"vectors"
         );
     }
 
@@ -475,7 +524,7 @@ mod tests {
         fs::write(index.join("memory-tantivy/meta.json"), b"memory").unwrap();
 
         for generation in 1..=4 {
-            publish(&index, &publish_dir, generation).unwrap();
+            publish(&index, &publish_dir, generation, false).unwrap();
         }
         // Pointer currently references generation 4 (the latest publish).
         let removed = prune_generations(&publish_dir, 2).unwrap();
@@ -505,5 +554,38 @@ mod tests {
 
         // Pruning is idempotent once the retention target is met.
         assert!(prune_generations(&publish_dir, 2).unwrap().is_empty());
+    }
+
+    #[test]
+    fn refuses_incomplete_or_stale_semantic_snapshots() {
+        let fixture = tempdir().unwrap();
+        let index = fixture.path().join("index");
+        let publish_dir = fixture.path().join("publish");
+        fs::create_dir_all(index.join("tantivy")).unwrap();
+        fs::create_dir_all(index.join("memory-tantivy")).unwrap();
+        fs::create_dir_all(index.join("semantic.lance")).unwrap();
+        fs::write(index.join("catalog.sqlite3"), b"catalog").unwrap();
+        fs::write(index.join("tantivy/meta.json"), b"index").unwrap();
+        fs::write(index.join("memory-tantivy/meta.json"), b"memory").unwrap();
+        fs::write(index.join("semantic.lance/data.lance"), b"vectors").unwrap();
+
+        let error = publish(&index, &publish_dir, 7, true).unwrap_err();
+        assert!(format!("{error:#}").contains("semantic snapshot is incomplete"));
+
+        fs::write(
+            index.join("semantic-manifest.json"),
+            b"{\"generation\":6}\n",
+        )
+        .unwrap();
+        let error = publish(&index, &publish_dir, 7, true).unwrap_err();
+        assert!(format!("{error:#}").contains("does not match snapshot generation 7"));
+
+        let manifest = publish(&index, &publish_dir, 7, false).unwrap();
+        assert!(
+            manifest
+                .files
+                .iter()
+                .all(|file| !file.path.starts_with("semantic"))
+        );
     }
 }

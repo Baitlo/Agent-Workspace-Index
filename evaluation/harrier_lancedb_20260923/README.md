@@ -6,8 +6,10 @@ Status: exploration complete; production integration not enabled.
 
 ## Decision
 
-Use **Harrier OSS v1 270M ONNX `ffn_skip`** for the first AWI Python sidecar
-prototype and **LanceDB** as the vector store.
+The production choice is **Harrier OSS v1 270M GGUF Q8** with **LanceDB**.
+Although ONNX `ffn_skip` had better throughput in this experiment, GGUF Q8 was
+selected for its substantially higher embedding fidelity and simpler
+single-artifact runtime.
 
 - `ffn_skip` preserved Recall@10 at 0.875, reached 2,641 tokens/s, and used
   2,150 MiB peak RSS on the test worker.

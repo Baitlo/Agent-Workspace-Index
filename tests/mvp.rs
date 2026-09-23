@@ -133,6 +133,67 @@ fn indexes_code_text_and_tabular_metadata_incrementally() {
 }
 
 #[test]
+fn retries_files_written_by_a_failed_derived_index_generation() {
+    let fixture = tempdir().unwrap();
+    let root = fixture.path().join("workspace");
+    let index_dir = fixture.path().join("index");
+    let model = fixture.path().join("model.gguf");
+    fs::create_dir_all(&root).unwrap();
+    fs::write(root.join("lib.rs"), "pub fn version_one() {}\n").unwrap();
+    fs::write(&model, b"not-a-real-model").unwrap();
+
+    let first = Command::new(env!("CARGO_BIN_EXE_awi"))
+        .args([
+            "--index-dir",
+            path(&index_dir),
+            "index",
+            path(&root),
+            "--json",
+        ])
+        .output()
+        .unwrap();
+    assert_success(&first);
+
+    fs::write(root.join("lib.rs"), "pub fn version_two() {}\n").unwrap();
+    let failed = Command::new(env!("CARGO_BIN_EXE_awi"))
+        .env("AWI_SEMANTIC_MODEL", &model)
+        .env("AWI_SEMANTIC_PYTHON", "/bin/false")
+        .args([
+            "--index-dir",
+            path(&index_dir),
+            "index",
+            path(&root),
+            "--json",
+        ])
+        .output()
+        .unwrap();
+    assert!(!failed.status.success());
+
+    let retry = Command::new(env!("CARGO_BIN_EXE_awi"))
+        .args([
+            "--index-dir",
+            path(&index_dir),
+            "index",
+            path(&root),
+            "--json",
+        ])
+        .output()
+        .unwrap();
+    assert_success(&retry);
+    let report: Value = serde_json::from_slice(&retry.stdout).unwrap();
+    assert_eq!(report["indexed"], 1);
+    assert_eq!(report["unchanged"], 0);
+    assert!(
+        WorkspaceIndex::open(&index_dir)
+            .unwrap()
+            .search("version_two", 5)
+            .unwrap()
+            .iter()
+            .any(|hit| hit.path.ends_with("lib.rs"))
+    );
+}
+
+#[test]
 fn search_preview_is_centered_on_a_late_content_match() {
     let fixture = tempdir().unwrap();
     let root = fixture.path().join("workspace");

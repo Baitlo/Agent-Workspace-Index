@@ -76,6 +76,7 @@ pub(crate) struct ExistingFile {
     pub mtime_ns: i64,
     pub content_hash: Option<String>,
     pub kind: FileKind,
+    pub generation_completed: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -285,7 +286,7 @@ pub(crate) struct CatalogFileInput {
     pub extraction_status: String,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize)]
 pub(crate) struct SearchDocument {
     pub file_id: i64,
     pub path: String,
@@ -297,6 +298,22 @@ pub(crate) struct SearchDocument {
     pub schema: String,
     pub preview: String,
     pub generation: i64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SemanticCandidate {
+    pub file_id: i64,
+    pub path: String,
+    pub generation: i64,
+    pub score: f32,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct SemanticBuildReport {
+    pub generation: i64,
+    pub files: u64,
+    pub chunks: u64,
+    pub skipped: u64,
 }
 
 #[derive(Debug, Clone)]
@@ -436,4 +453,17 @@ pub struct IndexStatus {
     #[serde(default)]
     pub agent_memories: u64,
     pub failures: u64,
+    #[serde(default)]
+    pub semantic: SemanticStatus,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct SemanticStatus {
+    pub enabled: bool,
+    pub available: bool,
+    pub generation: Option<i64>,
+    pub files: u64,
+    pub chunks: u64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub error: Option<String>,
 }

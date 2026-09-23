@@ -18,9 +18,10 @@ use crate::memory::{discover_agent_memory_sources, memory_metadata};
 use crate::model::{
     AgentDocumentRole, AgentMemoryIndexReport, AgentMemorySource, CatalogFileInput, ContentExcerpt,
     DatasetProfile, FileKind, IndexOptions, IndexReport, IndexStatus, InspectResult, NotifyReport,
-    QueryRequest, QueryResult, SearchDocument, SearchHit, SymbolRecord,
+    QueryRequest, QueryResult, SearchDocument, SearchHit, SemanticBuildReport, SymbolRecord,
 };
 use crate::search::SearchIndex;
+use crate::semantic::{SemanticIndex, merge_semantic_candidates};
 use crate::snapshot::{SnapshotManifest, publish};
 
 const DEFAULT_INSPECT_LINES: usize = 120;
@@ -39,6 +40,7 @@ pub struct WorkspaceIndex {
     catalog: Catalog,
     search: SearchIndex,
     memory_search: SearchIndex,
+    semantic: SemanticIndex,
 }
 
 impl WorkspaceIndex {
@@ -49,11 +51,13 @@ impl WorkspaceIndex {
         let catalog = Catalog::open(&index_dir.join("catalog.sqlite3"))?;
         let search = SearchIndex::open(&index_dir.join("tantivy"))?;
         let memory_search = SearchIndex::open(&index_dir.join("memory-tantivy"))?;
+        let semantic = SemanticIndex::open(index_dir)?;
         Ok(Self {
             index_dir: index_dir.to_owned(),
             catalog,
             search,
             memory_search,
+            semantic,
         })
     }
 
@@ -335,6 +339,40 @@ impl WorkspaceIndex {
             candidates.retain(|candidate| seen.insert(candidate.file_id));
             candidates.truncate(overfetch);
         }
+        if let Some(generation) = self.catalog.latest_completed_generation()? {
+            let semantic_path_prefixes = match path_prefix {
+                Some(prefix) if Path::new(prefix).is_absolute() => vec![prefix.to_owned()],
+                Some(prefix) => registered_roots
+                    .iter()
+                    .filter_map(|(_, root)| {
+                        let root_text = root.to_string_lossy();
+                        (root.is_dir()
+                            && (root_filter.is_empty() || root_filter.contains(root_text.as_ref())))
+                        .then(|| root.join(prefix).to_string_lossy().into_owned())
+                    })
+                    .collect(),
+                None => Vec::new(),
+            };
+            match self.semantic.search(
+                query,
+                generation,
+                &search_scopes,
+                kinds,
+                &semantic_path_prefixes,
+            ) {
+                Ok(semantic) => {
+                    candidates = merge_semantic_candidates(
+                        candidates,
+                        semantic,
+                        overfetch,
+                        self.semantic.vector_weight(),
+                    );
+                }
+                Err(error) => {
+                    eprintln!("AWI semantic search unavailable; using lexical results: {error:#}");
+                }
+            }
+        }
         let candidate_ids = candidates
             .iter()
             .map(|candidate| candidate.file_id)
@@ -517,7 +555,20 @@ impl WorkspaceIndex {
     }
 
     pub fn status(&self) -> Result<IndexStatus> {
-        self.catalog.status()
+        let mut status = self.catalog.status()?;
+        status.semantic = self.semantic.status();
+        if status.semantic.available && status.semantic.generation != status.completed_generation {
+            status.semantic.available = false;
+            status.semantic.error = Some(format!(
+                "semantic generation {:?} does not match catalog generation {:?}",
+                status.semantic.generation, status.completed_generation
+            ));
+        }
+        Ok(status)
+    }
+
+    pub fn warm_semantic(&self) -> Result<()> {
+        self.semantic.warm()
     }
 
     /// Canonical roots currently registered in the catalog, newest-nested
@@ -560,14 +611,135 @@ impl WorkspaceIndex {
         execute_query(request)
     }
 
-    pub fn publish_snapshot(&self, publish_dir: impl AsRef<Path>) -> Result<SnapshotManifest> {
+    pub fn rebuild_semantic(&mut self, options: &IndexOptions) -> Result<SemanticBuildReport> {
+        if !self.semantic.enabled() {
+            anyhow::bail!("semantic indexing requires AWI_SEMANTIC_MODEL");
+        }
         let _writer_lock = acquire_writer_lock(&self.index_dir)?;
-        self.catalog.checkpoint()?;
+        let files = self.catalog.current_semantic_files()?;
+        let root = self
+            .catalog
+            .roots()?
+            .into_iter()
+            .next()
+            .map(|(_, root)| root)
+            .context("cannot build semantics without an indexed root")?;
+        let (root_id, generation) = self.catalog.start_generation(&root)?;
+        let result = (|| {
+            self.semantic.reset()?;
+            let mut report = SemanticBuildReport {
+                generation,
+                ..SemanticBuildReport::default()
+            };
+            let mut batch = Vec::new();
+            let mut expected = Vec::with_capacity(files.len());
+            for file in &files {
+                let path = Path::new(&file.absolute_path);
+                let text = extract_text(path, options.max_content_bytes)
+                    .with_context(|| format!("extract semantic source {}", path.display()))?;
+                if text.content_hash != file.content_hash {
+                    anyhow::bail!(
+                        "semantic source changed since catalog generation {}: {}; \
+                         run reconcile first",
+                        file.generation,
+                        path.display()
+                    );
+                }
+                let symbols = self
+                    .catalog
+                    .symbols_for(file.id)?
+                    .into_iter()
+                    .flat_map(|symbol| [symbol.name, symbol.signature.unwrap_or_default()])
+                    .collect::<Vec<_>>()
+                    .join(" ");
+                let schema = self
+                    .catalog
+                    .dataset_profile_for(file.id)?
+                    .map(|profile| profile.schema_text())
+                    .unwrap_or_default();
+                if text
+                    .content
+                    .as_deref()
+                    .is_none_or(|content| content.is_empty())
+                    && schema.is_empty()
+                    && symbols.is_empty()
+                {
+                    report.skipped += 1;
+                    continue;
+                }
+                expected.push((file.id, file.generation));
+                batch.push(SearchDocument {
+                    file_id: file.id,
+                    path: file.absolute_path.clone(),
+                    name: file.name.clone(),
+                    experiment: file.experiment.clone().unwrap_or_default(),
+                    kind: file.kind.as_str().to_owned(),
+                    content: text.content.unwrap_or_default(),
+                    symbols,
+                    schema,
+                    preview: String::new(),
+                    generation: file.generation,
+                });
+                if batch.len() >= 128 {
+                    let (indexed, chunks) = self.semantic.apply_changes(&batch, &[])?;
+                    report.files += indexed;
+                    report.chunks += chunks;
+                    eprintln!(
+                        "AWI semantic build progress: files={} chunks={}",
+                        report.files, report.chunks
+                    );
+                    batch.clear();
+                }
+            }
+            if !batch.is_empty() {
+                let (indexed, chunks) = self.semantic.apply_changes(&batch, &[])?;
+                report.files += indexed;
+                report.chunks += chunks;
+            }
+            self.semantic.seal(generation, &expected)?;
+            Ok(report)
+        })();
+        match result {
+            Ok(report) => {
+                self.catalog.complete_generation(root_id, generation)?;
+                Ok(report)
+            }
+            Err(error) => {
+                let _ = self.catalog.record_failure(
+                    generation,
+                    "<semantic>",
+                    "semantic_rebuild",
+                    &format!("{error:#}"),
+                );
+                let _ = self
+                    .catalog
+                    .fail_generation(generation, &format!("{error:#}"));
+                Err(error)
+            }
+        }
+    }
+
+    pub fn publish_snapshot(&mut self, publish_dir: impl AsRef<Path>) -> Result<SnapshotManifest> {
+        let _writer_lock = acquire_writer_lock(&self.index_dir)?;
         let generation = self
             .catalog
             .latest_completed_generation()?
             .context("cannot publish an index without a completed generation")?;
-        publish(&self.index_dir, publish_dir.as_ref(), generation)
+        let expected = self
+            .catalog
+            .current_semantic_files()?
+            .into_iter()
+            .map(|file| (file.id, file.generation))
+            .collect::<Vec<_>>();
+        self.semantic.seal(generation, &expected)?;
+        self.catalog.prune_generation_rows(generation)?;
+        self.catalog.checkpoint()?;
+        publish(
+            &self.index_dir,
+            publish_dir.as_ref(),
+            generation,
+            self.semantic.enabled(),
+        )
     }
 
     fn apply_search_changes(
@@ -589,6 +761,26 @@ impl WorkspaceIndex {
         memory_deleted.dedup();
         self.search.apply_changes(&regular, &regular_deleted)?;
         self.memory_search.apply_changes(&memory, &memory_deleted)
+    }
+
+    fn apply_semantic_changes(
+        &self,
+        generation: i64,
+        documents: &[SearchDocument],
+        deleted_paths: &[String],
+    ) -> Result<(u64, u64)> {
+        match self.semantic.apply_changes(documents, deleted_paths) {
+            Ok(report) => Ok(report),
+            Err(error) => {
+                self.catalog.record_failure(
+                    generation,
+                    "<semantic>",
+                    "semantic_index",
+                    &format!("{error:#}"),
+                )?;
+                Err(error)
+            }
+        }
     }
 
     fn focus_search_previews(&self, query: &str, hits: &mut [(SearchHit, Option<String>)]) {
@@ -696,6 +888,7 @@ impl WorkspaceIndex {
 
         let deleted_paths = self.catalog.mark_missing_deleted(root_id, generation)?;
         report.deleted = deleted_paths.len() as u64;
+        self.apply_semantic_changes(generation, &documents, &deleted_paths)?;
         self.apply_search_changes(&documents, &deleted_paths)?;
         self.catalog.complete_generation(root_id, generation)?;
         Ok(report)
@@ -805,6 +998,7 @@ impl WorkspaceIndex {
             }
         }
 
+        self.apply_semantic_changes(generation, &documents, &deleted_paths)?;
         self.apply_search_changes(&documents, &deleted_paths)?;
         self.catalog.complete_generation(root_id, generation)?;
         Ok(report)
@@ -851,10 +1045,15 @@ impl WorkspaceIndex {
             .to_owned();
         let experiment = experiment_name(Path::new(&relative_path));
         let existing = self.catalog.existing_file(&absolute_path)?;
+        let existing_is_current = existing
+            .as_ref()
+            .is_some_and(|state| state.generation_completed);
 
-        if existing.as_ref().is_some_and(|state| {
-            state.size_bytes == size_bytes && state.mtime_ns == mtime_ns && state.kind == kind
-        }) {
+        if existing_is_current
+            && existing.as_ref().is_some_and(|state| {
+                state.size_bytes == size_bytes && state.mtime_ns == mtime_ns && state.kind == kind
+            })
+        {
             let file_id = existing.as_ref().expect("checked above").id;
             self.catalog
                 .mark_seen(file_id, generation, size_bytes, mtime_ns)?;
@@ -899,11 +1098,13 @@ impl WorkspaceIndex {
             text.content = Some(normalized);
         }
 
-        if existing.as_ref().is_some_and(|state| {
-            state.content_hash.is_some()
-                && state.content_hash == text.content_hash
-                && state.kind == kind
-        }) {
+        if existing_is_current
+            && existing.as_ref().is_some_and(|state| {
+                state.content_hash.is_some()
+                    && state.content_hash == text.content_hash
+                    && state.kind == kind
+            })
+        {
             let file_id = existing.as_ref().expect("checked above").id;
             self.catalog
                 .mark_seen(file_id, generation, size_bytes, mtime_ns)?;
@@ -1248,5 +1449,47 @@ mod tests {
         let selected = rerank_for_directory_diversity(candidates, 2);
         assert_eq!(selected[0].0.path, "/workspace/a/first.json");
         assert_eq!(selected[1].0.path, "/workspace/b/implementation.sql");
+    }
+
+    #[test]
+    fn semantic_coverage_excludes_empty_files() {
+        let fixture = tempfile::tempdir().unwrap();
+        let root = fixture.path().join("workspace");
+        fs::create_dir_all(&root).unwrap();
+        fs::write(root.join("empty.rs"), "").unwrap();
+        fs::write(root.join("present.rs"), "pub fn present() {}\n").unwrap();
+
+        let mut workspace = WorkspaceIndex::open(fixture.path().join("index")).unwrap();
+        workspace
+            .index_root(&root, &IndexOptions::default())
+            .unwrap();
+        let files = workspace.catalog.current_semantic_files().unwrap();
+        let names = files.into_iter().map(|file| file.name).collect::<Vec<_>>();
+        assert_eq!(names, vec!["present.rs"]);
+    }
+
+    #[test]
+    fn read_only_open_does_not_fail_an_active_generation() {
+        let fixture = tempfile::tempdir().unwrap();
+        let root = fixture.path().join("workspace");
+        fs::create_dir_all(&root).unwrap();
+        let index_dir = fixture.path().join("index");
+        let mut writer = WorkspaceIndex::open(&index_dir).unwrap();
+        let (_, generation) = writer.catalog.start_generation(&root).unwrap();
+
+        let observer = WorkspaceIndex::open(&index_dir).unwrap();
+        let status = observer.status().unwrap();
+        assert_eq!(status.running_generations, 1);
+        assert_eq!(status.failed_generations, 0);
+
+        let (_, replacement) = writer.catalog.start_generation(&root).unwrap();
+        let status = writer.status().unwrap();
+        assert_eq!(status.running_generations, 1);
+        assert_eq!(status.failed_generations, 1);
+        writer
+            .catalog
+            .fail_generation(replacement, "test cleanup")
+            .unwrap();
+        assert!(replacement > generation);
     }
 }

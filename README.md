@@ -108,6 +108,52 @@ already known, read it directly with the host's file tools. Search snippets are
 generated from bounded stored source windows, and light directory-diversity
 reranking prevents one artifact folder from filling the result set.
 
+### Semantic Retrieval
+
+AWI can add a Harrier GGUF Q8 semantic lane without changing the MCP tool
+surface. Document embeddings are computed during `reconcile`, `notify`, or an
+initial `semantic-build`; normal searches compute only the query embedding.
+SQLite remains authoritative, and semantic candidates whose file generation is
+not current are discarded.
+
+Create a dedicated Python environment and enable the sidecar:
+
+```bash
+python3 -m venv ~/.cache/awi/semantic-venv
+~/.cache/awi/semantic-venv/bin/pip install -r requirements-semantic.txt
+
+export AWI_SEMANTIC_MODEL=/path/to/harrier-oss-v1-270M-Q8_0.gguf
+export AWI_SEMANTIC_MODEL_SHA256=fe12f3583dbbb832def4cffeb46c0d0ab49a3288542d5cdbaeb1741315a01b87
+export AWI_SEMANTIC_PYTHON="$HOME/.cache/awi/semantic-venv/bin/python"
+export AWI_SEMANTIC_THREADS=16
+export AWI_SEMANTIC_EMBED_WORKERS=1
+```
+
+For an existing catalog, precompute every eligible file once:
+
+```bash
+awi --index-dir /tmp/awi-writer semantic-build \
+  --publish-dir /shared/awi-publication --json
+```
+
+The build uses tokenizer-aware, structure-sensitive chunks capped at 480 model
+tokens, keeps at most four chunks per file, applies the Harrier query
+instruction only to queries, and L2-normalizes embeddings. Source, text,
+semi-structured, and tabular content are eligible; sensitive or metadata-only
+files and Agent memory are excluded.
+
+Bulk builders can set `AWI_SEMANTIC_EMBED_WORKERS` above one. Extra GGUF model
+instances are loaded lazily for document embedding only; query serving keeps a
+single model. AWI divides `AWI_SEMANTIC_THREADS` across those workers, so set it
+to the total CPU quota available to the sidecar.
+
+Subsequent producer cycles update only changed files. Before publication, AWI
+requires LanceDB coverage for every current eligible `(file_id, generation)`.
+The semantic database and its manifest are copied into the same immutable
+snapshot as SQLite and Tantivy. Readers reject a mismatched generation and
+fall back to lexical search when the sidecar is unavailable. Unset
+`AWI_SEMANTIC_MODEL` to disable the semantic lane.
+
 For NFS-backed workspaces, build mutable indexes on local storage and publish
 immutable snapshots:
 

@@ -58,6 +58,7 @@ impl Catalog {
                 mtime_ns INTEGER NOT NULL,
                 content_hash TEXT,
                 index_generation INTEGER NOT NULL,
+                generation_completed INTEGER NOT NULL DEFAULT 1,
                 last_seen_generation INTEGER NOT NULL,
                 content_indexed INTEGER NOT NULL,
                 extraction_status TEXT NOT NULL,
@@ -148,19 +149,24 @@ impl Catalog {
             );
             ",
         )?;
-
-        connection.execute(
-            "UPDATE generations
-             SET status = 'failed', completed_at_ms = ?1,
-                 error = COALESCE(error, 'interrupted before completion')
-             WHERE status = 'running'",
-            params![now_ms()],
+        ensure_column(
+            &connection,
+            "files",
+            "generation_completed",
+            "INTEGER NOT NULL DEFAULT 1",
         )?;
 
         Ok(Self { connection })
     }
 
     pub(crate) fn start_generation(&mut self, root: &Path) -> Result<(i64, i64)> {
+        self.connection.execute(
+            "UPDATE generations
+             SET status = 'failed', completed_at_ms = ?1,
+                 error = COALESCE(error, 'interrupted before completion')
+             WHERE status = 'running'",
+            params![now_ms()],
+        )?;
         let root = root.to_string_lossy();
         self.connection.execute(
             "INSERT INTO roots(path) VALUES (?1)
@@ -267,6 +273,10 @@ impl Catalog {
             "UPDATE roots SET last_completed_generation = ?1 WHERE id = ?2",
             params![generation, root_id],
         )?;
+        transaction.execute(
+            "UPDATE files SET generation_completed = 1 WHERE index_generation = ?1",
+            params![generation],
+        )?;
         transaction.commit()?;
         Ok(())
     }
@@ -285,8 +295,9 @@ impl Catalog {
         let raw = self
             .connection
             .query_row(
-                "SELECT id, size_bytes, mtime_ns, content_hash, kind
-                 FROM files WHERE absolute_path = ?1 AND deleted = 0",
+                "SELECT f.id, f.size_bytes, f.mtime_ns, f.content_hash, f.kind,
+                        f.generation_completed
+                 FROM files f WHERE f.absolute_path = ?1 AND f.deleted = 0",
                 params![absolute_path],
                 |row| {
                     Ok((
@@ -295,20 +306,24 @@ impl Catalog {
                         row.get::<_, i64>(2)?,
                         row.get::<_, Option<String>>(3)?,
                         row.get::<_, String>(4)?,
+                        row.get::<_, bool>(5)?,
                     ))
                 },
             )
             .optional()?;
 
-        raw.map(|(id, size_bytes, mtime_ns, content_hash, kind)| {
-            Ok(ExistingFile {
-                id,
-                size_bytes: u64::try_from(size_bytes).context("negative catalog file size")?,
-                mtime_ns,
-                content_hash,
-                kind: FileKind::try_from(kind.as_str())?,
-            })
-        })
+        raw.map(
+            |(id, size_bytes, mtime_ns, content_hash, kind, generation_completed)| {
+                Ok(ExistingFile {
+                    id,
+                    size_bytes: u64::try_from(size_bytes).context("negative catalog file size")?,
+                    mtime_ns,
+                    content_hash,
+                    kind: FileKind::try_from(kind.as_str())?,
+                    generation_completed,
+                })
+            },
+        )
         .transpose()
     }
 
@@ -362,9 +377,9 @@ impl Catalog {
                 "INSERT INTO files(
                 root_id, absolute_path, relative_path, name, extension, kind, experiment,
                 size_bytes, mtime_ns, content_hash, index_generation, last_seen_generation,
-                content_indexed, extraction_status, deleted
+                content_indexed, extraction_status, deleted, generation_completed
              ) VALUES (
-                ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?11, ?12, ?13, 0
+                ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?11, ?12, ?13, 0, 0
              )
              ON CONFLICT(absolute_path) DO UPDATE SET
                 root_id = excluded.root_id,
@@ -380,7 +395,8 @@ impl Catalog {
                 last_seen_generation = excluded.last_seen_generation,
                 content_indexed = excluded.content_indexed,
                 extraction_status = excluded.extraction_status,
-                deleted = 0
+                deleted = 0,
+                generation_completed = 0
              RETURNING id",
                 params![
                     file.root_id,
@@ -631,7 +647,7 @@ impl Catalog {
                 f.index_generation, f.content_indexed, f.extraction_status
              FROM files f JOIN roots r ON r.id = f.root_id
              WHERE f.id IN ({placeholders}) AND f.deleted = 0
-               AND f.index_generation <= ?"
+               AND f.index_generation <= ? AND f.generation_completed = 1"
         );
         let mut parameters = file_ids.to_vec();
         parameters.push(generation);
@@ -645,12 +661,40 @@ impl Catalog {
         Ok(files)
     }
 
+    pub(crate) fn current_semantic_files(&self) -> Result<Vec<FileRecord>> {
+        let Some(generation) = self.latest_completed_generation()? else {
+            return Ok(Vec::new());
+        };
+        let mut statement = self.connection.prepare(
+            "SELECT
+                f.id, r.path, f.absolute_path, f.relative_path, f.name, f.extension,
+                f.kind, f.experiment, f.size_bytes, f.mtime_ns, f.content_hash,
+                f.index_generation, f.content_indexed, f.extraction_status
+             FROM files f JOIN roots r ON r.id = f.root_id
+             WHERE f.deleted = 0
+               AND f.index_generation <= ?1 AND f.generation_completed = 1
+               AND f.kind IN ('source', 'text', 'semi_structured', 'tabular')
+               AND f.size_bytes > 0
+               AND (
+                    f.content_indexed = 1 OR EXISTS(
+                        SELECT 1 FROM dataset_profiles d WHERE d.file_id = f.id
+                    )
+               )
+             ORDER BY f.id",
+        )?;
+        statement
+            .query_map(params![generation], raw_file_from_row)?
+            .map(|row| row?.try_into())
+            .collect()
+    }
+
     pub(crate) fn current_file_by_path(&self, absolute_path: &str) -> Result<Option<FileRecord>> {
         let Some(generation) = self.latest_completed_generation()? else {
             return Ok(None);
         };
         self.query_file(
-            "WHERE f.absolute_path = ?1 AND f.deleted = 0 AND f.index_generation <= ?2",
+            "WHERE f.absolute_path = ?1 AND f.deleted = 0
+               AND f.index_generation <= ?2 AND f.generation_completed = 1",
             params![absolute_path, generation],
         )
     }
@@ -818,7 +862,7 @@ impl Catalog {
             completed_generation: self.latest_completed_generation()?,
             running_generations: self.count("generations", "status = 'running'")?,
             failed_generations: self.count("generations", "status = 'failed'")?,
-            active_files: self.count("files", "deleted = 0")?,
+            active_files: self.count("files", "deleted = 0 AND generation_completed = 1")?,
             deleted_files: self.count("files", "deleted = 1")?,
             symbols: self.count("symbols", "1 = 1")?,
             datasets: self.count("dataset_profiles", "1 = 1")?,
@@ -826,7 +870,7 @@ impl Catalog {
                 let count: i64 = self.connection.query_row(
                     "SELECT COUNT(*)
                      FROM agent_documents a JOIN files f ON f.id = a.file_id
-                     WHERE f.deleted = 0",
+                     WHERE f.deleted = 0 AND f.generation_completed = 1",
                     [],
                     |row| row.get(0),
                 )?;
@@ -836,13 +880,14 @@ impl Catalog {
                 let count: i64 = self.connection.query_row(
                     "SELECT COUNT(*)
                      FROM agent_memories m JOIN files f ON f.id = m.file_id
-                     WHERE f.deleted = 0",
+                     WHERE f.deleted = 0 AND f.generation_completed = 1",
                     [],
                     |row| row.get(0),
                 )?;
                 u64::try_from(count).context("negative Agent memory count")?
             },
             failures: self.count("index_failures", "1 = 1")?,
+            semantic: Default::default(),
         })
     }
 
@@ -976,6 +1021,26 @@ impl TryFrom<RawFile> for FileRecord {
             extraction_status: raw.extraction_status,
         })
     }
+}
+
+fn ensure_column(
+    connection: &Connection,
+    table: &str,
+    column: &str,
+    declaration: &str,
+) -> Result<()> {
+    let mut statement = connection.prepare(&format!("PRAGMA table_info({table})"))?;
+    let exists = statement
+        .query_map([], |row| row.get::<_, String>(1))?
+        .collect::<rusqlite::Result<Vec<_>>>()?
+        .iter()
+        .any(|name| name == column);
+    if !exists {
+        connection.execute_batch(&format!(
+            "ALTER TABLE {table} ADD COLUMN {column} {declaration}"
+        ))?;
+    }
+    Ok(())
 }
 
 fn now_ms() -> i64 {

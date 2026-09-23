@@ -8,8 +8,8 @@ use awi::protocol::Request;
 use awi::{
     IndexOptions, IndexReport, IndexStatus, InspectResult, IntegrationClient, IntegrationOptions,
     NotifyReport, PublisherConfig, QueryInput, QueryRequest, QueryResult, SearchHit,
-    WorkspaceIndex, default_server_spec, integrate as integrate_clients, render_human,
-    watch as watch_publisher,
+    SemanticBuildReport, WorkspaceIndex, default_server_spec, integrate as integrate_clients,
+    render_human, watch as watch_publisher,
 };
 use clap::{Parser, Subcommand};
 use serde::Serialize;
@@ -211,6 +211,18 @@ enum Command {
 
         #[arg(long)]
         allow_draft: bool,
+    },
+
+    /// Rebuild the configured semantic index from the current catalog.
+    SemanticBuild {
+        #[arg(long)]
+        publish_dir: Option<PathBuf>,
+
+        #[arg(long, default_value_t = 4)]
+        max_content_mib: u64,
+
+        #[arg(long)]
+        json: bool,
     },
 
     /// Show catalog and generation health.
@@ -614,6 +626,18 @@ fn main() -> Result<()> {
             let gold = load_gold(&gold, allow_draft)?;
             let workspace = WorkspaceIndex::open(&cli.index_dir)
                 .with_context(|| format!("open AWI index {}", cli.index_dir.display()))?;
+            workspace
+                .warm_semantic()
+                .context("warm semantic retrieval before benchmark")?;
+            let semantic = workspace.status()?.semantic;
+            if semantic.enabled && !semantic.available {
+                anyhow::bail!(
+                    "semantic retrieval is configured but unavailable: {}",
+                    semantic
+                        .error
+                        .unwrap_or_else(|| "semantic snapshot is missing".to_owned())
+                );
+            }
             let report = evaluate_retrieval(&workspace, &gold)?;
             if let Some(output) = output {
                 if let Some(parent) = output.parent() {
@@ -624,6 +648,42 @@ fn main() -> Result<()> {
             }
             print_json(&report)?;
         }
+        Command::SemanticBuild {
+            publish_dir,
+            max_content_mib,
+            json,
+        } => {
+            let options = IndexOptions {
+                max_content_bytes: mib(max_content_mib),
+                ..IndexOptions::default()
+            };
+            let mut workspace = WorkspaceIndex::open(&cli.index_dir)
+                .with_context(|| format!("open AWI index {}", cli.index_dir.display()))?;
+            let report: SemanticBuildReport = workspace.rebuild_semantic(&options)?;
+            let snapshot = if let Some(publish_dir) = publish_dir {
+                Some(workspace.publish_snapshot(publish_dir)?)
+            } else {
+                None
+            };
+            if json {
+                print_json(&serde_json::json!({
+                    "report": report,
+                    "snapshot": snapshot
+                }))?;
+            } else {
+                println!(
+                    "generation={} files={} chunks={} skipped={}",
+                    report.generation, report.files, report.chunks, report.skipped
+                );
+                if let Some(snapshot) = snapshot {
+                    println!(
+                        "published_generation={} files={}",
+                        snapshot.generation,
+                        snapshot.files.len()
+                    );
+                }
+            }
+        }
         Command::Status { json } => {
             let status: IndexStatus =
                 execute(&cli.index_dir, &socket, &Request::Status, |workspace| {
@@ -633,7 +693,7 @@ fn main() -> Result<()> {
                 print_json(&status)?;
             } else {
                 println!(
-                    "completed_generation={:?} running={} failed={} active_files={} deleted_files={} symbols={} datasets={} agent_documents={} agent_memories={} failures={}",
+                    "completed_generation={:?} running={} failed={} active_files={} deleted_files={} symbols={} datasets={} agent_documents={} agent_memories={} failures={} semantic_enabled={} semantic_available={} semantic_generation={:?} semantic_files={} semantic_chunks={}",
                     status.completed_generation,
                     status.running_generations,
                     status.failed_generations,
@@ -643,7 +703,12 @@ fn main() -> Result<()> {
                     status.datasets,
                     status.agent_documents,
                     status.agent_memories,
-                    status.failures
+                    status.failures,
+                    status.semantic.enabled,
+                    status.semantic.available,
+                    status.semantic.generation,
+                    status.semantic.files,
+                    status.semantic.chunks
                 );
             }
         }

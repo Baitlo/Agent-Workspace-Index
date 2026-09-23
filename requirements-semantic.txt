@@ -1,0 +1,4 @@
+llama-cpp-python==0.3.35
+lancedb==0.39.0
+numpy==2.3.2
+pyarrow==25.0.1
