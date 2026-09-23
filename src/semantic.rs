@@ -1,4 +1,4 @@
-use std::collections::{BTreeSet, HashMap};
+use std::collections::{BTreeSet, HashMap, HashSet};
 use std::env;
 use std::fs;
 use std::io::{BufRead, BufReader, Write};
@@ -127,6 +127,22 @@ impl SemanticIndex {
                 .with_context(|| format!("remove semantic manifest {}", manifest.display()))?;
         }
         Ok(())
+    }
+
+    pub(crate) fn file_generations(&self) -> Result<HashSet<(i64, i64)>> {
+        if self.config.is_none() {
+            anyhow::bail!("semantic indexing requires AWI_SEMANTIC_MODEL");
+        }
+        if !self.database().is_dir() {
+            return Ok(HashSet::new());
+        }
+        let result = self.request(json!({
+            "op": "coverage",
+            "database": self.database()
+        }))?;
+        let pairs: Vec<(i64, i64)> =
+            serde_json::from_value(result["pairs"].clone()).context("decode semantic coverage")?;
+        Ok(pairs.into_iter().collect())
     }
 
     pub(crate) fn apply_changes(

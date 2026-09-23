@@ -177,6 +177,8 @@ class Sidecar:
             return {"ready": True}
         if operation == "reset":
             return self.reset(Path(request["database"]))
+        if operation == "coverage":
+            return self.coverage(Path(request["database"]))
         if operation == "update":
             return self.update(
                 Path(request["database"]),
@@ -316,6 +318,28 @@ class Sidecar:
                 raise RuntimeError(f"semantic table is missing under {database}")
             self.tables[key] = db.open_table("chunks")
         return self.tables[key]
+
+    def coverage(self, database: Path) -> dict[str, Any]:
+        if not database.is_dir():
+            return {"pairs": [], "rows": 0}
+        db = self.lancedb.connect(database)
+        if "chunks" not in db.list_tables().tables:
+            return {"pairs": [], "rows": 0}
+        table = self.open_table(database)
+        rows = table.search().select(["file_id", "generation"]).to_arrow()
+        pairs = sorted(
+            set(
+                zip(
+                    rows["file_id"].to_pylist(),
+                    rows["generation"].to_pylist(),
+                    strict=True,
+                )
+            )
+        )
+        return {
+            "pairs": [[file_id, generation] for file_id, generation in pairs],
+            "rows": table.count_rows(),
+        }
 
     def seal(
         self,

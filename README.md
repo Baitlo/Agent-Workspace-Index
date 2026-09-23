@@ -136,6 +136,21 @@ awi --index-dir /tmp/awi-writer semantic-build \
   --publish-dir /shared/awi-publication --json
 ```
 
+An interrupted bulk build can reuse complete file generations already committed
+to LanceDB. If workspace content changed during the failed attempt, reconcile
+the catalog without publishing first, then resume:
+
+```bash
+env -u AWI_SEMANTIC_MODEL \
+  awi --index-dir /tmp/awi-writer reconcile /path/to/workspace --json
+awi --index-dir /tmp/awi-writer semantic-build --resume \
+  --publish-dir /shared/awi-publication --json
+```
+
+Resume mode still re-hashes every source against SQLite and reuses only exact
+`(file_id, generation)` pairs. Seal performs the same full coverage check and
+prunes stale pairs before publication.
+
 The build uses tokenizer-aware, structure-sensitive chunks capped at 480 model
 tokens, keeps at most four chunks per file, applies the Harrier query
 instruction only to queries, and L2-normalizes embeddings. Source, text,

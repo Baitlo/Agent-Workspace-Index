@@ -218,6 +218,10 @@ enum Command {
         #[arg(long)]
         publish_dir: Option<PathBuf>,
 
+        /// Reuse current file generations already present in LanceDB.
+        #[arg(long)]
+        resume: bool,
+
         #[arg(long, default_value_t = 4)]
         max_content_mib: u64,
 
@@ -650,6 +654,7 @@ fn main() -> Result<()> {
         }
         Command::SemanticBuild {
             publish_dir,
+            resume,
             max_content_mib,
             json,
         } => {
@@ -659,7 +664,7 @@ fn main() -> Result<()> {
             };
             let mut workspace = WorkspaceIndex::open(&cli.index_dir)
                 .with_context(|| format!("open AWI index {}", cli.index_dir.display()))?;
-            let report: SemanticBuildReport = workspace.rebuild_semantic(&options)?;
+            let report: SemanticBuildReport = workspace.rebuild_semantic(&options, resume)?;
             let snapshot = if let Some(publish_dir) = publish_dir {
                 Some(workspace.publish_snapshot(publish_dir)?)
             } else {
@@ -672,8 +677,12 @@ fn main() -> Result<()> {
                 }))?;
             } else {
                 println!(
-                    "generation={} files={} chunks={} skipped={}",
-                    report.generation, report.files, report.chunks, report.skipped
+                    "generation={} files={} reused_files={} chunks={} skipped={}",
+                    report.generation,
+                    report.files,
+                    report.reused_files,
+                    report.chunks,
+                    report.skipped
                 );
                 if let Some(snapshot) = snapshot {
                     println!(

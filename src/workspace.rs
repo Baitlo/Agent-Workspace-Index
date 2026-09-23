@@ -611,7 +611,11 @@ impl WorkspaceIndex {
         execute_query(request)
     }
 
-    pub fn rebuild_semantic(&mut self, options: &IndexOptions) -> Result<SemanticBuildReport> {
+    pub fn rebuild_semantic(
+        &mut self,
+        options: &IndexOptions,
+        resume: bool,
+    ) -> Result<SemanticBuildReport> {
         if !self.semantic.enabled() {
             anyhow::bail!("semantic indexing requires AWI_SEMANTIC_MODEL");
         }
@@ -626,7 +630,12 @@ impl WorkspaceIndex {
             .context("cannot build semantics without an indexed root")?;
         let (root_id, generation) = self.catalog.start_generation(&root)?;
         let result = (|| {
-            self.semantic.reset()?;
+            let existing = if resume {
+                self.semantic.file_generations()?
+            } else {
+                self.semantic.reset()?;
+                HashSet::new()
+            };
             let mut report = SemanticBuildReport {
                 generation,
                 ..SemanticBuildReport::default()
@@ -644,6 +653,12 @@ impl WorkspaceIndex {
                         file.generation,
                         path.display()
                     );
+                }
+                if existing.contains(&(file.id, file.generation)) {
+                    expected.push((file.id, file.generation));
+                    report.files += 1;
+                    report.reused_files += 1;
+                    continue;
                 }
                 let symbols = self
                     .catalog
@@ -685,8 +700,8 @@ impl WorkspaceIndex {
                     report.files += indexed;
                     report.chunks += chunks;
                     eprintln!(
-                        "AWI semantic build progress: files={} chunks={}",
-                        report.files, report.chunks
+                        "AWI semantic build progress: files={} reused={} chunks={}",
+                        report.files, report.reused_files, report.chunks
                     );
                     batch.clear();
                 }

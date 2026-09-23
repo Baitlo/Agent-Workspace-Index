@@ -312,6 +312,7 @@ pub struct SemanticCandidate {
 pub struct SemanticBuildReport {
     pub generation: i64,
     pub files: u64,
+    pub reused_files: u64,
     pub chunks: u64,
     pub skipped: u64,
 }

@@ -351,6 +351,20 @@ mkdir -p "$prefix/node_modules/pi-mcp-adapter"
     );
 }
 
+#[test]
+fn semantic_build_exposes_resume_mode() {
+    let output = Command::new(env!("CARGO_BIN_EXE_awi"))
+        .args(["semantic-build", "--help"])
+        .output()
+        .unwrap();
+    assert!(output.status.success());
+    assert!(
+        String::from_utf8_lossy(&output.stdout).contains("--resume"),
+        "semantic-build help did not expose --resume: {}",
+        String::from_utf8_lossy(&output.stdout)
+    );
+}
+
 fn run_integrate(
     fixture: &Path,
     home: &Path,
