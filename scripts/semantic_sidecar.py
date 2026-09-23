@@ -357,6 +357,10 @@ class Sidecar:
             raise RuntimeError("semantic coverage does not match the catalog")
 
         row_count = table.count_rows()
+        index_type = "IVF_FLAT" if row_count >= 256 else "FLAT"
+        partitions = (
+            min(256, max(16, int(math.sqrt(row_count)))) if row_count >= 256 else 0
+        )
         existing = None
         if manifest.is_file():
             existing = json.loads(manifest.read_text(encoding="utf-8"))
@@ -366,15 +370,15 @@ class Sidecar:
             and int(existing.get("files", -1)) == len(expected_pairs)
             and int(existing.get("rows", -1)) == row_count
             and existing.get("model_sha256") == self.model_sha256
+            and existing.get("vector_index_type") == index_type
+            and int(existing.get("vector_index_partitions", -1)) == partitions
         )
         if row_count >= 256 and not already_sealed:
-            partitions = min(256, max(16, int(math.sqrt(row_count))))
             table.create_index(
                 metric="cosine",
                 vector_column_name="vector",
-                index_type="IVF_PQ",
+                index_type="IVF_FLAT",
                 num_partitions=partitions,
-                num_sub_vectors=80,
                 replace=True,
             )
         if already_sealed:
@@ -387,6 +391,8 @@ class Sidecar:
             "dimension": 640,
             "files": len(expected_pairs),
             "rows": row_count,
+            "vector_index_type": index_type,
+            "vector_index_partitions": partitions,
             "pruned_file_generations": len(unexpected),
             "created_at_ms": int(time.time() * 1000),
         }
@@ -442,15 +448,16 @@ class Sidecar:
                 for prefix in path_prefixes
             ]
             predicates.append("(" + " OR ".join(prefix_filters) + ")")
-        rows = (
+        search = (
             self.open_table(database)
             .search(vector, vector_column_name="vector")
             .metric("cosine")
             .where(" AND ".join(predicates), prefilter=True)
-            .nprobes(16)
-            .limit(max(limit * 8, limit))
-            .to_list()
         )
+        partitions = int(metadata.get("vector_index_partitions", 0))
+        if partitions:
+            search = search.nprobes(partitions)
+        rows = search.limit(max(limit * 8, limit)).to_list()
         candidates: list[dict[str, Any]] = []
         seen: set[int] = set()
         for row in rows:

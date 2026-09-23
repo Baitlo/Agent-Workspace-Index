@@ -154,6 +154,10 @@ snapshot as SQLite and Tantivy. Readers reject a mismatched generation and
 fall back to lexical search when the sidecar is unavailable. Unset
 `AWI_SEMANTIC_MODEL` to disable the semantic lane.
 
+Sealed generations use an IVF_FLAT index and probe every partition. This keeps
+the original normalized Q8 vectors and exact Top-K ordering while avoiding the
+recall loss of product quantization at AWI's current corpus size.
+
 For NFS-backed workspaces, build mutable indexes on local storage and publish
 immutable snapshots:
 
