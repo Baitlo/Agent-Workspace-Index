@@ -19,7 +19,8 @@ cleanup() {
   fi
   rm -f "$local_socket"
 }
-trap cleanup EXIT INT TERM
+trap cleanup EXIT
+trap 'exit 0' INT TERM
 
 while true; do
   rm -f "$local_socket"
