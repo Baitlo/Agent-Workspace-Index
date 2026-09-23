@@ -672,16 +672,6 @@ impl WorkspaceIndex {
                     .dataset_profile_for(file.id)?
                     .map(|profile| profile.schema_text())
                     .unwrap_or_default();
-                if text
-                    .content
-                    .as_deref()
-                    .is_none_or(|content| content.is_empty())
-                    && schema.is_empty()
-                    && symbols.is_empty()
-                {
-                    report.skipped += 1;
-                    continue;
-                }
                 expected.push((file.id, file.generation));
                 batch.push(SearchDocument {
                     file_id: file.id,
@@ -1467,7 +1457,7 @@ mod tests {
     }
 
     #[test]
-    fn semantic_coverage_excludes_empty_files() {
+    fn semantic_coverage_excludes_zero_byte_files() {
         let fixture = tempfile::tempdir().unwrap();
         let root = fixture.path().join("workspace");
         fs::create_dir_all(&root).unwrap();

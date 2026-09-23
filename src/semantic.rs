@@ -156,12 +156,7 @@ impl SemanticIndex {
         let replaced_paths = replacement_paths(documents, deleted_paths);
         let documents = documents
             .iter()
-            .filter(|document| {
-                semantic_kind(&document.kind)
-                    && (!document.content.is_empty()
-                        || !document.symbols.is_empty()
-                        || !document.schema.is_empty())
-            })
+            .filter(|document| semantic_kind(&document.kind))
             .collect::<Vec<_>>();
         let mut files = 0_u64;
         let mut chunks = 0_u64;

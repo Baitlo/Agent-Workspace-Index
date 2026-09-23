@@ -73,5 +73,35 @@ class CoverageTest(unittest.TestCase):
         self.assertEqual(result, {"pairs": [[2, 7], [9, 4]], "rows": 3})
 
 
+class DocumentChunksTest(unittest.TestCase):
+    def test_empty_payload_still_embeds_the_path_header(self) -> None:
+        class ByteTokenizer:
+            def tokenize(
+                self, value: bytes, *, add_bos: bool, special: bool
+            ) -> list[int]:
+                self.options = (add_bos, special)
+                return list(value)
+
+            def detokenize(self, tokens: list[int]) -> bytes:
+                return bytes(tokens)
+
+        sidecar = SIDECAR.Sidecar.__new__(SIDECAR.Sidecar)
+        sidecar.model = ByteTokenizer()
+        sidecar.max_tokens = 480
+        sidecar.max_chunks_per_file = 4
+        chunks = sidecar.document_chunks(
+            {
+                "file_id": 7,
+                "path": "/workspace/whitespace.txt",
+                "kind": "text",
+                "generation": 3,
+                "content": "",
+            }
+        )
+        self.assertEqual(len(chunks), 1)
+        self.assertEqual(chunks[0]["file_id"], 7)
+        self.assertIn("Path: /workspace/whitespace.txt", chunks[0]["text"])
+
+
 if __name__ == "__main__":
     unittest.main()

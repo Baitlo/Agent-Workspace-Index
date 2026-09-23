@@ -155,7 +155,9 @@ The build uses tokenizer-aware, structure-sensitive chunks capped at 480 model
 tokens, keeps at most four chunks per file, applies the Harrier query
 instruction only to queries, and L2-normalizes embeddings. Source, text,
 semi-structured, and tabular content are eligible; sensitive or metadata-only
-files and Agent memory are excluded.
+files and Agent memory are excluded. A nonzero eligible file whose extracted
+payload is empty receives a path-and-type header vector so build and publication
+coverage stay identical; zero-byte files remain excluded.
 
 Bulk builders can set `AWI_SEMANTIC_EMBED_WORKERS` above one. Extra GGUF model
 instances are loaded lazily for document embedding only; query serving keeps a
