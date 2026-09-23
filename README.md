@@ -194,6 +194,15 @@ awi --index-dir /tmp/awi-reader serve \
   --snapshot-source /shared/awi-publication
 ```
 
+When a client host lacks enough CPU quota for GGUF latency targets, run the
+snapshot reader on a CPU worker and preserve the local MCP socket with the
+reconnecting stream-local tunnel:
+
+```bash
+scripts/remote-reader-tunnel.sh \
+  /tmp/local-awi.sock /tmp/remote-awi.sock <worker-ip> <ssh-port>
+```
+
 ### Automatic Update Chain
 
 To keep the shared publication current without manual reconciles, run the
