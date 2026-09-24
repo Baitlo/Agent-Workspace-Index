@@ -1,0 +1,62 @@
+name: CI
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  linux:
+    name: Linux ${{ matrix.arch }}
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: x86_64
+            runner: ubuntu-22.04
+          - arch: aarch64
+            runner: ubuntu-22.04-arm
+
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v6
+
+      - name: Install native build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes build-essential cmake pkg-config
+
+      - name: Install Rust
+        run: |
+          rustup set auto-self-update disable
+          toolchain="$(sed -n 's/^channel = "\(.*\)"$/\1/p' rust-toolchain.toml)"
+          rustup toolchain install "$toolchain" --profile minimal --component clippy,rustfmt
+          rustup default "$toolchain"
+
+      - name: Verify native architecture
+        run: |
+          rustc -vV
+          uname -m
+          test "$(rustc -vV | sed -n 's/^host: //p')" = "${{ matrix.arch }}-unknown-linux-gnu"
+
+      - name: Check formatting
+        run: cargo fmt --check
+
+      - name: Lint
+        run: cargo clippy --locked --all-targets --all-features -- -D warnings
+
+      - name: Test Rust
+        run: cargo test --locked --all-features
+
+      - name: Test semantic sidecar helpers
+        run: python3 -m unittest tests/test_semantic_sidecar.py

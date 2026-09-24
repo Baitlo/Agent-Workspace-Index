@@ -26,6 +26,39 @@ ranking, deduplication, and safety semantics. See
 [Cross-Agent memory indexing](docs/agent-memory.md) for memory sources and the
 raw-history boundary.
 
+## Prebuilt Linux Binaries
+
+GitHub Releases provide native binaries for:
+
+- `x86_64-unknown-linux-gnu`
+- `aarch64-unknown-linux-gnu`
+
+Install the latest binary with the checksum-verifying installer:
+
+```bash
+curl -fsSLO \
+  https://raw.githubusercontent.com/Baitlo/Agent-Workspace-Index/main/scripts/install-release.sh
+bash install-release.sh
+```
+
+Pin a release with `--version v0.1.0`, or choose another destination with
+`--bin-dir`. The binaries are built natively on Ubuntu 22.04 GitHub-hosted
+runners and require a compatible glibc and `libstdc++`.
+
+The release archive also contains `install.sh`. To install the binary, build an
+initial index, and register detected Agent clients in one operation:
+
+```bash
+tar -xzf awi-x86_64-unknown-linux-gnu.tar.gz
+awi-x86_64-unknown-linux-gnu/install.sh \
+  --source-binary "$PWD/awi-x86_64-unknown-linux-gnu/awi" \
+  --workspace /absolute/path/to/your/repository
+```
+
+Semantic retrieval remains optional. It additionally requires Python,
+LanceDB, `llama-cpp-python`, and a compatible GGUF embedding model.
+Maintainers should follow the [release checklist](docs/releasing.md).
+
 ## Agent-assisted Install
 
 Give your coding agent the
@@ -43,7 +76,7 @@ workspace, detects installed Agent clients, and registers the AWI MCP server
 with each supported client. The operation is idempotent. Pass
 `--skip-agent-knowledge` or `--skip-agent-memory` to disable either source
 class. Raw chats remain excluded unless `--include-raw-memory` is supplied.
-Rust and Cargo are required when building from source.
+Rust and Cargo are required only when building from source.
 
 If Pi is detected, the installer also installs the pinned
 `pi-mcp-adapter@2.36.0`, because Pi intentionally has no built-in MCP client.
