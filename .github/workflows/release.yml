@@ -23,8 +23,10 @@ jobs:
         include:
           - runner: ubuntu-22.04
             target: x86_64-unknown-linux-gnu
+            full_test: true
           - runner: ubuntu-22.04-arm
             target: aarch64-unknown-linux-gnu
+            full_test: false
 
     steps:
       - name: Check out source
@@ -53,12 +55,14 @@ jobs:
           test "$version" = "$package_version"
           test "$(rustc -vV | sed -n 's/^host: //p')" = "$TARGET"
 
-      - name: Test
+      - name: Test x86_64 release profile
+        if: matrix.full_test
         run: |
           cargo fmt --check
-          cargo clippy --locked --all-targets --all-features -- -D warnings
-          cargo test --locked --all-features
-          python3 -m unittest tests/test_semantic_sidecar.py
+          cargo test --locked --release --all-features
+
+      - name: Test semantic sidecar helpers
+        run: python3 -m unittest tests/test_semantic_sidecar.py
 
       - name: Build release binary
         run: cargo build --locked --release

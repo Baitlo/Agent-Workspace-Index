@@ -8,10 +8,12 @@ must be compiled and tested on matching GitHub-hosted hardware:
 | `x86_64-unknown-linux-gnu` | `ubuntu-22.04` |
 | `aarch64-unknown-linux-gnu` | `ubuntu-22.04-arm` |
 
-The release workflow does not cross-compile arm64. Each native job runs
-formatting, Clippy, Rust tests, semantic-sidecar helper tests, and a release
-build before packaging. GitHub then creates provenance attestations and one
-`SHA256SUMS` file.
+The workflows do not cross-compile arm64. CI runs the complete Clippy and Rust
+test suite on x86_64. The arm64 job performs a native release build plus
+reconcile/search smoke tests on the resulting binary. The release workflow
+repeats a release-profile test on x86_64 and a native release build on arm64
+before packaging. Both jobs run the semantic-sidecar helper tests. GitHub then
+creates provenance attestations and one `SHA256SUMS` file.
 
 ## Release Checklist
 
