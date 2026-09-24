@@ -45,6 +45,8 @@ pub enum Request {
     },
     Inspect {
         path: PathBuf,
+        #[serde(default)]
+        symbol: Option<String>,
         start_line: usize,
         max_lines: usize,
         max_chars: usize,

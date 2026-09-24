@@ -226,6 +226,10 @@ pub struct AgentMemoryMetadata {
     pub agent: String,
     pub layer: AgentMemoryLayer,
     #[serde(skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub workspace_root: Option<PathBuf>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub project_key: Option<String>,
@@ -240,6 +244,8 @@ impl AgentMemoryMetadata {
         [
             Some(self.agent.as_str()),
             Some(self.layer.as_str()),
+            self.name.as_deref(),
+            self.description.as_deref(),
             self.workspace_root.as_ref().and_then(|path| path.to_str()),
             self.project_key.as_deref(),
             self.session_id.as_deref(),
@@ -257,6 +263,14 @@ pub struct AgentMemoryIndexReport {
     pub include_raw: bool,
     pub sources: Vec<AgentMemorySource>,
     pub reports: Vec<IndexReport>,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct AgentMemoryRefreshReport {
+    pub projects: u64,
+    pub sources: u64,
+    pub indexed: u64,
+    pub deleted: u64,
 }
 
 impl DatasetProfile {
@@ -340,6 +354,8 @@ pub struct SearchHit {
     pub matched_lanes: Vec<String>,
     pub preview: String,
     #[serde(skip_serializing_if = "Option::is_none")]
+    pub symbol: Option<SymbolRecord>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub agent: Option<AgentDocumentMetadata>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub memory: Option<AgentMemoryMetadata>,
@@ -367,6 +383,8 @@ pub struct FileRecord {
 pub struct InspectResult {
     pub file: FileRecord,
     pub symbols: Vec<SymbolRecord>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub focused_symbol: Option<SymbolRecord>,
     pub dataset: Option<DatasetProfile>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub agent: Option<AgentDocumentMetadata>,
@@ -453,6 +471,8 @@ pub struct IndexStatus {
     pub agent_documents: u64,
     #[serde(default)]
     pub agent_memories: u64,
+    #[serde(default)]
+    pub memory: MemoryStatus,
     pub failures: u64,
     #[serde(default)]
     pub semantic: SemanticStatus,
@@ -460,6 +480,19 @@ pub struct IndexStatus {
     pub retrieval: RetrievalStatus,
     #[serde(default)]
     pub serving: ServingStatus,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct MemoryStatus {
+    pub registered_projects: u64,
+    pub registered_sources: u64,
+    pub active_files: u64,
+    pub generation: Option<i64>,
+    pub generation_lag: u64,
+    pub stale_files: u64,
+    pub missing_files: u64,
+    pub max_source_lag_ms: u64,
+    pub oldest_source_age_ms: u64,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]

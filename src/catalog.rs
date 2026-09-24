@@ -8,7 +8,7 @@ use rusqlite::{Connection, OptionalExtension, Row, params, params_from_iter};
 use crate::model::{
     AgentDocumentMetadata, AgentDocumentRole, AgentMemoryLayer, AgentMemoryMetadata,
     AgentMemorySource, CatalogFileInput, DatasetProfile, ExistingFile, FileKind, FileRecord,
-    IndexStatus, SymbolRecord,
+    IndexStatus, MemoryStatus, SymbolRecord,
 };
 
 pub(crate) struct Catalog {
@@ -112,16 +112,24 @@ impl Catalog {
                 agent TEXT NOT NULL,
                 workspace_root TEXT,
                 project_key TEXT,
-                raw_history INTEGER NOT NULL
+                raw_history INTEGER NOT NULL,
+                active INTEGER NOT NULL DEFAULT 1
             );
 
             CREATE INDEX IF NOT EXISTS agent_memory_sources_workspace
                 ON agent_memory_sources(workspace_root);
 
+            CREATE TABLE IF NOT EXISTS agent_memory_projects (
+                workspace_root TEXT PRIMARY KEY,
+                include_raw INTEGER NOT NULL
+            );
+
             CREATE TABLE IF NOT EXISTS agent_memories (
                 file_id INTEGER PRIMARY KEY REFERENCES files(id) ON DELETE CASCADE,
                 agent TEXT NOT NULL,
                 layer TEXT NOT NULL,
+                name TEXT,
+                description TEXT,
                 workspace_root TEXT,
                 project_key TEXT,
                 session_id TEXT,
@@ -154,6 +162,22 @@ impl Catalog {
             "files",
             "generation_completed",
             "INTEGER NOT NULL DEFAULT 1",
+        )?;
+        ensure_column(&connection, "agent_memories", "name", "TEXT")?;
+        ensure_column(&connection, "agent_memories", "description", "TEXT")?;
+        ensure_column(
+            &connection,
+            "agent_memory_sources",
+            "active",
+            "INTEGER NOT NULL DEFAULT 1",
+        )?;
+        connection.execute(
+            "INSERT OR IGNORE INTO agent_memory_projects(workspace_root, include_raw)
+             SELECT workspace_root, MAX(raw_history)
+             FROM agent_memory_sources
+             WHERE workspace_root IS NOT NULL
+             GROUP BY workspace_root",
+            [],
         )?;
 
         Ok(Self { connection })
@@ -201,16 +225,64 @@ impl Catalog {
             .context("list indexed roots")
     }
 
+    pub(crate) fn publisher_roots(&self) -> Result<Vec<PathBuf>> {
+        let mut statement = self.connection.prepare(
+            "SELECT r.path
+             FROM roots r
+             WHERE NOT EXISTS (
+                SELECT 1 FROM agent_memory_sources s WHERE s.path = r.path
+             )
+             ORDER BY length(r.path) DESC, r.path",
+        )?;
+        statement
+            .query_map([], |row| Ok(PathBuf::from(row.get::<_, String>(0)?)))?
+            .collect::<rusqlite::Result<Vec<_>>>()
+            .context("list publisher roots")
+    }
+
+    pub(crate) fn register_agent_memory_project(
+        &self,
+        workspace_root: &Path,
+        include_raw: bool,
+    ) -> Result<()> {
+        self.connection.execute(
+            "INSERT INTO agent_memory_projects(workspace_root, include_raw)
+             VALUES (?1, ?2)
+             ON CONFLICT(workspace_root) DO UPDATE SET
+                include_raw = excluded.include_raw",
+            params![workspace_root.to_string_lossy().as_ref(), include_raw],
+        )?;
+        Ok(())
+    }
+
+    pub(crate) fn agent_memory_projects(&self) -> Result<Vec<(PathBuf, bool)>> {
+        let mut statement = self.connection.prepare(
+            "SELECT workspace_root, include_raw
+             FROM agent_memory_projects
+             ORDER BY workspace_root",
+        )?;
+        statement
+            .query_map([], |row| {
+                Ok((
+                    PathBuf::from(row.get::<_, String>(0)?),
+                    row.get::<_, bool>(1)?,
+                ))
+            })?
+            .collect::<rusqlite::Result<Vec<_>>>()
+            .context("list registered Agent memory projects")
+    }
+
     pub(crate) fn upsert_agent_memory_source(&self, source: &AgentMemorySource) -> Result<()> {
         self.connection.execute(
             "INSERT INTO agent_memory_sources(
-                path, agent, workspace_root, project_key, raw_history
-             ) VALUES (?1, ?2, ?3, ?4, ?5)
+                path, agent, workspace_root, project_key, raw_history, active
+             ) VALUES (?1, ?2, ?3, ?4, ?5, 1)
              ON CONFLICT(path) DO UPDATE SET
                 agent = excluded.agent,
                 workspace_root = excluded.workspace_root,
                 project_key = excluded.project_key,
-                raw_history = excluded.raw_history",
+                raw_history = excluded.raw_history,
+                active = 1",
             params![
                 source.path.to_string_lossy().as_ref(),
                 source.agent,
@@ -235,7 +307,8 @@ impl Catalog {
             .query_row(
                 "SELECT path, agent, workspace_root, project_key, raw_history
                  FROM agent_memory_sources
-                 WHERE ?1 = path OR substr(?1, 1, length(path) + 1) = path || '/'
+                 WHERE active = 1
+                   AND (?1 = path OR substr(?1, 1, length(path) + 1) = path || '/')
                  ORDER BY length(path) DESC
                  LIMIT 1",
                 params![path.as_ref()],
@@ -259,6 +332,35 @@ impl Catalog {
                 raw_history,
             },
         ))
+    }
+
+    pub(crate) fn agent_memory_sources(&self) -> Result<Vec<AgentMemorySource>> {
+        let mut statement = self.connection.prepare(
+            "SELECT path, agent, workspace_root, project_key, raw_history
+             FROM agent_memory_sources
+             WHERE active = 1
+             ORDER BY path",
+        )?;
+        statement
+            .query_map([], |row| {
+                Ok(AgentMemorySource {
+                    path: PathBuf::from(row.get::<_, String>(0)?),
+                    agent: row.get(1)?,
+                    workspace_root: row.get::<_, Option<String>>(2)?.map(PathBuf::from),
+                    project_key: row.get(3)?,
+                    raw_history: row.get(4)?,
+                })
+            })?
+            .collect::<rusqlite::Result<Vec<_>>>()
+            .context("list registered Agent memory sources")
+    }
+
+    pub(crate) fn deactivate_agent_memory_source(&self, path: &Path) -> Result<()> {
+        self.connection.execute(
+            "UPDATE agent_memory_sources SET active = 0 WHERE path = ?1",
+            params![path.to_string_lossy().as_ref()],
+        )?;
+        Ok(())
     }
 
     pub(crate) fn complete_generation(&mut self, root_id: i64, generation: i64) -> Result<()> {
@@ -526,12 +628,14 @@ impl Catalog {
         if let Some(metadata) = metadata {
             self.connection.execute(
                 "INSERT INTO agent_memories(
-                    file_id, agent, layer, workspace_root, project_key, session_id,
-                    observed_at_ms, raw_history
-                 ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)
+                    file_id, agent, layer, name, description, workspace_root,
+                    project_key, session_id, observed_at_ms, raw_history
+                 ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)
                  ON CONFLICT(file_id) DO UPDATE SET
                     agent = excluded.agent,
                     layer = excluded.layer,
+                    name = excluded.name,
+                    description = excluded.description,
                     workspace_root = excluded.workspace_root,
                     project_key = excluded.project_key,
                     session_id = excluded.session_id,
@@ -541,6 +645,8 @@ impl Catalog {
                     file_id,
                     metadata.agent,
                     metadata.layer.as_str(),
+                    metadata.name,
+                    metadata.description,
                     metadata
                         .workspace_root
                         .as_ref()
@@ -720,6 +826,47 @@ impl Catalog {
         Ok(symbols)
     }
 
+    pub(crate) fn exact_symbol_definitions(
+        &self,
+        names: &[String],
+    ) -> Result<Vec<(i64, String, i64, SymbolRecord)>> {
+        if names.is_empty() {
+            return Ok(Vec::new());
+        }
+        let predicates = std::iter::repeat_n("s.name = ? COLLATE NOCASE", names.len())
+            .collect::<Vec<_>>()
+            .join(" OR ");
+        let sql = format!(
+            "SELECT f.id, f.absolute_path, f.index_generation,
+                    s.name, s.kind, s.language, s.line_start, s.line_end, s.signature
+             FROM symbols s
+             JOIN files f ON f.id = s.file_id
+             WHERE f.deleted = 0 AND f.generation_completed = 1
+               AND s.kind NOT IN ('call', 'import')
+               AND ({predicates})
+             ORDER BY f.absolute_path, s.line_start, s.line_end"
+        );
+        let mut statement = self.connection.prepare(&sql)?;
+        statement
+            .query_map(params_from_iter(names.iter()), |row| {
+                Ok((
+                    row.get::<_, i64>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, i64>(2)?,
+                    SymbolRecord {
+                        name: row.get(3)?,
+                        kind: row.get(4)?,
+                        language: row.get(5)?,
+                        line_start: row.get::<_, i64>(6)? as usize,
+                        line_end: row.get::<_, i64>(7)? as usize,
+                        signature: row.get(8)?,
+                    },
+                ))
+            })?
+            .collect::<rusqlite::Result<Vec<_>>>()
+            .context("query exact symbol definitions")
+    }
+
     pub(crate) fn dataset_profile_for(&self, file_id: i64) -> Result<Option<DatasetProfile>> {
         let json = self
             .connection
@@ -799,8 +946,8 @@ impl Catalog {
         let raw = self
             .connection
             .query_row(
-                "SELECT agent, layer, workspace_root, project_key, session_id,
-                        observed_at_ms, raw_history
+                "SELECT agent, layer, name, description, workspace_root,
+                        project_key, session_id, observed_at_ms, raw_history
                  FROM agent_memories WHERE file_id = ?1",
                 params![file_id],
                 |row| {
@@ -810,8 +957,10 @@ impl Catalog {
                         row.get::<_, Option<String>>(2)?,
                         row.get::<_, Option<String>>(3)?,
                         row.get::<_, Option<String>>(4)?,
-                        row.get::<_, i64>(5)?,
-                        row.get::<_, bool>(6)?,
+                        row.get::<_, Option<String>>(5)?,
+                        row.get::<_, Option<String>>(6)?,
+                        row.get::<_, i64>(7)?,
+                        row.get::<_, bool>(8)?,
                     ))
                 },
             )
@@ -830,8 +979,8 @@ impl Catalog {
             .collect::<Vec<_>>()
             .join(",");
         let sql = format!(
-            "SELECT file_id, agent, layer, workspace_root, project_key, session_id,
-                    observed_at_ms, raw_history
+            "SELECT file_id, agent, layer, name, description, workspace_root,
+                    project_key, session_id, observed_at_ms, raw_history
              FROM agent_memories WHERE file_id IN ({placeholders})"
         );
         let mut statement = self.connection.prepare(&sql)?;
@@ -844,8 +993,10 @@ impl Catalog {
                     row.get::<_, Option<String>>(3)?,
                     row.get::<_, Option<String>>(4)?,
                     row.get::<_, Option<String>>(5)?,
-                    row.get::<_, i64>(6)?,
-                    row.get::<_, bool>(7)?,
+                    row.get::<_, Option<String>>(6)?,
+                    row.get::<_, Option<String>>(7)?,
+                    row.get::<_, i64>(8)?,
+                    row.get::<_, bool>(9)?,
                 ),
             ))
         })?;
@@ -857,7 +1008,43 @@ impl Catalog {
         Ok(memories)
     }
 
+    pub(crate) fn agent_memory_file_states(&self) -> Result<Vec<(PathBuf, i64)>> {
+        let mut statement = self.connection.prepare(
+            "SELECT f.absolute_path, f.mtime_ns
+             FROM agent_memories m
+             JOIN files f ON f.id = m.file_id
+             WHERE f.deleted = 0 AND f.generation_completed = 1
+             ORDER BY f.absolute_path",
+        )?;
+        statement
+            .query_map([], |row| {
+                Ok((
+                    PathBuf::from(row.get::<_, String>(0)?),
+                    row.get::<_, i64>(1)?,
+                ))
+            })?
+            .collect::<rusqlite::Result<Vec<_>>>()
+            .context("list Agent memory file states")
+    }
+
     pub(crate) fn status(&self) -> Result<IndexStatus> {
+        let active_memories = {
+            let count: i64 = self.connection.query_row(
+                "SELECT COUNT(*)
+                 FROM agent_memories m JOIN files f ON f.id = m.file_id
+                 WHERE f.deleted = 0 AND f.generation_completed = 1",
+                [],
+                |row| row.get(0),
+            )?;
+            u64::try_from(count).context("negative Agent memory count")?
+        };
+        let memory_generation = self.connection.query_row(
+            "SELECT MAX(f.index_generation)
+             FROM agent_memories m JOIN files f ON f.id = m.file_id
+             WHERE f.deleted = 0 AND f.generation_completed = 1",
+            [],
+            |row| row.get::<_, Option<i64>>(0),
+        )?;
         Ok(IndexStatus {
             completed_generation: self.latest_completed_generation()?,
             running_generations: self.count("generations", "status = 'running'")?,
@@ -876,15 +1063,13 @@ impl Catalog {
                 )?;
                 u64::try_from(count).context("negative Agent document count")?
             },
-            agent_memories: {
-                let count: i64 = self.connection.query_row(
-                    "SELECT COUNT(*)
-                     FROM agent_memories m JOIN files f ON f.id = m.file_id
-                     WHERE f.deleted = 0 AND f.generation_completed = 1",
-                    [],
-                    |row| row.get(0),
-                )?;
-                u64::try_from(count).context("negative Agent memory count")?
+            agent_memories: active_memories,
+            memory: MemoryStatus {
+                registered_projects: self.count("agent_memory_projects", "1 = 1")?,
+                registered_sources: self.count("agent_memory_sources", "active = 1")?,
+                active_files: active_memories,
+                generation: memory_generation,
+                ..Default::default()
             },
             failures: self.count("index_failures", "1 = 1")?,
             semantic: Default::default(),
@@ -951,6 +1136,8 @@ type RawAgentMemory = (
     Option<String>,
     Option<String>,
     Option<String>,
+    Option<String>,
+    Option<String>,
     i64,
     bool,
 );
@@ -971,10 +1158,22 @@ fn agent_document_from_raw(raw: RawAgentDocument) -> Result<AgentDocumentMetadat
 }
 
 fn agent_memory_from_raw(raw: RawAgentMemory) -> Result<AgentMemoryMetadata> {
-    let (agent, layer, workspace_root, project_key, session_id, observed_at_ms, raw_history) = raw;
+    let (
+        agent,
+        layer,
+        name,
+        description,
+        workspace_root,
+        project_key,
+        session_id,
+        observed_at_ms,
+        raw_history,
+    ) = raw;
     Ok(AgentMemoryMetadata {
         agent,
         layer: AgentMemoryLayer::try_from(layer.as_str())?,
+        name,
+        description,
         workspace_root: workspace_root.map(PathBuf::from),
         project_key,
         session_id,

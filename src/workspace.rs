@@ -5,7 +5,7 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::thread;
-use std::time::{Duration, Instant};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use anyhow::{Context, Result};
 use fs4::fs_std::FileExt;
@@ -21,10 +21,10 @@ use crate::extract::{
 use crate::memory::{discover_agent_memory_sources, memory_metadata};
 use crate::metrics::LatencyWindow;
 use crate::model::{
-    AgentDocumentRole, AgentMemoryIndexReport, AgentMemorySource, CatalogFileInput, ContentExcerpt,
-    DatasetProfile, FileKind, IndexOptions, IndexReport, IndexStatus, InspectResult, NotifyReport,
-    QueryRequest, QueryResult, RetrievalStatus, SearchDocument, SearchHit, SemanticBuildReport,
-    SymbolRecord,
+    AgentDocumentRole, AgentMemoryIndexReport, AgentMemoryRefreshReport, AgentMemorySource,
+    CatalogFileInput, ContentExcerpt, DatasetProfile, FileKind, IndexOptions, IndexReport,
+    IndexStatus, InspectResult, NotifyReport, QueryRequest, QueryResult, RetrievalStatus,
+    SearchDocument, SearchHit, SemanticBuildReport, SymbolRecord,
 };
 use crate::search::SearchIndex;
 use crate::semantic::{SemanticIndex, merge_semantic_candidates};
@@ -38,6 +38,11 @@ const EXACT_PROJECT_MEMORY_BOOST: f32 = 0.08;
 const GLOBAL_MEMORY_BOOST: f32 = 0.01;
 const MEMORY_LAYER_BOOST: f32 = 0.004;
 const MAX_MEMORY_RECENCY_BOOST: f32 = 0.005;
+const EXACT_MEMORY_FILENAME_BOOST: f32 = 0.25;
+const EXACT_MEMORY_NAME_BOOST: f32 = 0.22;
+const MEMORY_DESCRIPTION_BOOST: f32 = 0.04;
+const AGGREGATE_MEMORY_PENALTY: f32 = 0.08;
+const EXACT_SYMBOL_BOOST: f32 = 1.5;
 const SAME_DIRECTORY_MMR_PENALTY: f32 = 0.00125;
 const MATCH_PREVIEW_CHARS: usize = 1_000;
 const SEARCH_CACHE_CAPACITY: usize = 256;
@@ -300,6 +305,11 @@ impl WorkspaceIndex {
                 project_root.as_ref().display()
             )
         })?;
+        {
+            let _writer_lock = acquire_writer_lock(&self.index_dir)?;
+            self.catalog
+                .register_agent_memory_project(&project_root, include_raw)?;
+        }
         let sources = discover_agent_memory_sources(&project_root, include_raw)?;
         let mut reports = Vec::with_capacity(sources.len());
         for source in &sources {
@@ -311,6 +321,66 @@ impl WorkspaceIndex {
             sources,
             reports,
         })
+    }
+
+    pub fn refresh_agent_memories(
+        &mut self,
+        options: &IndexOptions,
+    ) -> Result<AgentMemoryRefreshReport> {
+        let projects = self.catalog.agent_memory_projects()?;
+        let managed_projects = projects
+            .iter()
+            .map(|(project_root, _)| project_root.clone())
+            .collect::<HashSet<_>>();
+        let mut refresh = AgentMemoryRefreshReport {
+            projects: projects.len() as u64,
+            ..Default::default()
+        };
+        let mut discovered_paths = HashSet::new();
+        for (project_root, include_raw) in projects {
+            let report = self.index_agent_memories(project_root, include_raw, options)?;
+            refresh.sources = refresh.sources.saturating_add(report.sources.len() as u64);
+            discovered_paths.extend(report.sources.iter().map(|source| source.path.clone()));
+            for source_report in report.reports {
+                refresh.indexed = refresh.indexed.saturating_add(source_report.indexed);
+                refresh.deleted = refresh.deleted.saturating_add(source_report.deleted);
+            }
+        }
+        for source in self.catalog.agent_memory_sources()? {
+            if discovered_paths.contains(&source.path) {
+                continue;
+            }
+            let managed = source
+                .workspace_root
+                .as_ref()
+                .map_or(!managed_projects.is_empty(), |workspace| {
+                    managed_projects.contains(workspace)
+                });
+            if managed {
+                refresh.deleted = refresh
+                    .deleted
+                    .saturating_add(self.retire_agent_memory_source(&source.path)?);
+            }
+        }
+        Ok(refresh)
+    }
+
+    fn retire_agent_memory_source(&mut self, path: &Path) -> Result<u64> {
+        let _writer_lock = acquire_writer_lock(&self.index_dir)?;
+        let (root_id, generation) = self.catalog.start_generation(path)?;
+        let result = (|| {
+            let deleted_paths = self.catalog.mark_missing_deleted(root_id, generation)?;
+            self.apply_search_changes(&[], &deleted_paths)?;
+            self.catalog.complete_generation(root_id, generation)?;
+            self.catalog.deactivate_agent_memory_source(path)?;
+            Ok(deleted_paths.len() as u64)
+        })();
+        if let Err(error) = &result {
+            let _ = self
+                .catalog
+                .fail_generation(generation, &format!("{error:#}"));
+        }
+        result
     }
 
     pub fn index_agent_memory_source(
@@ -568,6 +638,31 @@ impl WorkspaceIndex {
                 }
             }
         }
+        let exact_symbols = self
+            .catalog
+            .exact_symbol_definitions(&query_symbol_terms(query))?;
+        let mut exact_symbols_by_file = HashMap::new();
+        for (file_id, path, generation, symbol) in exact_symbols {
+            exact_symbols_by_file
+                .entry(file_id)
+                .or_insert_with(|| symbol.clone());
+            if let Some(candidate) = candidates
+                .iter_mut()
+                .find(|candidate| candidate.file_id == file_id)
+            {
+                if !candidate.lanes.iter().any(|lane| lane == "exact_symbol") {
+                    candidate.lanes.push("exact_symbol".to_owned());
+                }
+            } else {
+                candidates.push(crate::model::SearchCandidate {
+                    file_id,
+                    path,
+                    generation,
+                    score: 0.0,
+                    lanes: vec!["exact_symbol".to_owned()],
+                });
+            }
+        }
         let fusion_duration = fusion_started_at.elapsed();
         let catalog_started_at = Instant::now();
         let candidate_ids = candidates
@@ -662,6 +757,18 @@ impl WorkspaceIndex {
                 };
                 score += f32::from(metadata.layer.summary_priority()) * MEMORY_LAYER_BOOST;
                 score += memory_recency_boost(metadata.observed_at_ms);
+                let memory_match = memory_metadata_match(query, &file.name, metadata);
+                score += memory_match.boost;
+                if is_specific_query(query)
+                    && metadata.layer == crate::model::AgentMemoryLayer::ProjectSummary
+                    && !memory_match.exact_entity
+                {
+                    score -= AGGREGATE_MEMORY_PENALTY;
+                }
+            }
+            let symbol = exact_symbols_by_file.get(&file.id).cloned();
+            if symbol.is_some() {
+                score += EXACT_SYMBOL_BOOST;
             }
             let content_hash = file.content_hash.clone();
             ranked_hits.push((
@@ -677,6 +784,7 @@ impl WorkspaceIndex {
                     score,
                     matched_lanes: candidate.lanes,
                     preview: String::new(),
+                    symbol,
                     agent,
                     memory,
                 },
@@ -737,11 +845,35 @@ impl WorkspaceIndex {
         max_lines: usize,
         max_chars: usize,
     ) -> Result<InspectResult> {
+        self.inspect_excerpt_inner(path.as_ref(), start_line, max_lines, max_chars, None)
+    }
+
+    pub fn inspect_symbol(
+        &self,
+        path: impl AsRef<Path>,
+        symbol: &str,
+        max_lines: usize,
+        max_chars: usize,
+    ) -> Result<InspectResult> {
+        if symbol.trim().is_empty() {
+            anyhow::bail!("inspect symbol must not be empty");
+        }
+        self.inspect_excerpt_inner(path.as_ref(), 1, max_lines, max_chars, Some(symbol))
+    }
+
+    fn inspect_excerpt_inner(
+        &self,
+        path: &Path,
+        start_line: usize,
+        max_lines: usize,
+        max_chars: usize,
+        symbol: Option<&str>,
+    ) -> Result<InspectResult> {
         if start_line == 0 || max_lines == 0 || max_chars == 0 {
             anyhow::bail!("inspect excerpt limits must be positive");
         }
-        let path = fs::canonicalize(path.as_ref())
-            .with_context(|| format!("resolve path {}", path.as_ref().display()))?;
+        let path =
+            fs::canonicalize(path).with_context(|| format!("resolve path {}", path.display()))?;
         let absolute_path = path.to_string_lossy();
         let file = self
             .catalog
@@ -754,13 +886,34 @@ impl WorkspaceIndex {
                 )
             })?;
         let symbols = self.catalog.symbols_for(file.id)?;
+        let focused_symbol = symbol
+            .map(|requested| {
+                symbols
+                    .iter()
+                    .filter(|candidate| candidate.name.eq_ignore_ascii_case(requested))
+                    .min_by_key(|candidate| {
+                        (
+                            matches!(candidate.kind.as_str(), "call" | "import"),
+                            candidate.line_start,
+                        )
+                    })
+                    .cloned()
+                    .with_context(|| {
+                        format!("symbol {requested:?} is not indexed in {}", path.display())
+                    })
+            })
+            .transpose()?;
         let dataset = self.catalog.dataset_profile_for(file.id)?;
         let agent = self.catalog.agent_document_for(file.id)?;
         let memory = self.catalog.agent_memory_for(file.id)?;
+        let start_line = focused_symbol.as_ref().map_or(start_line, |symbol| {
+            symbol.line_start.saturating_sub(2).max(1)
+        });
         let content = content_excerpt(&path, &file, start_line, max_lines, max_chars)?;
         Ok(InspectResult {
             file,
             symbols,
+            focused_symbol,
             dataset,
             agent,
             memory,
@@ -784,6 +937,40 @@ impl WorkspaceIndex {
                 status.semantic.generation, status.completed_generation
             ));
         }
+        status.memory.generation_lag = match (status.completed_generation, status.memory.generation)
+        {
+            (Some(catalog), Some(memory)) => catalog.saturating_sub(memory) as u64,
+            _ => 0,
+        };
+        let now_ms = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_millis()
+            .try_into()
+            .unwrap_or(u64::MAX);
+        for (path, indexed_mtime_ns) in self.catalog.agent_memory_file_states()? {
+            let Ok(metadata) = fs::metadata(&path) else {
+                status.memory.missing_files = status.memory.missing_files.saturating_add(1);
+                continue;
+            };
+            let source_mtime_ns = mtime_ns(&metadata);
+            let source_mtime_ms =
+                u64::try_from(source_mtime_ns.saturating_div(1_000_000)).unwrap_or_default();
+            status.memory.oldest_source_age_ms = status
+                .memory
+                .oldest_source_age_ms
+                .max(now_ms.saturating_sub(source_mtime_ms));
+            if source_mtime_ns > indexed_mtime_ns {
+                status.memory.stale_files = status.memory.stale_files.saturating_add(1);
+                let lag_ms = u64::try_from(
+                    source_mtime_ns
+                        .saturating_sub(indexed_mtime_ns)
+                        .saturating_div(1_000_000),
+                )
+                .unwrap_or(u64::MAX);
+                status.memory.max_source_lag_ms = status.memory.max_source_lag_ms.max(lag_ms);
+            }
+        }
         Ok(status)
     }
 
@@ -793,15 +980,11 @@ impl WorkspaceIndex {
         Ok(())
     }
 
-    /// Canonical roots currently registered in the catalog, newest-nested
-    /// first. Used by the producer to reconcile everything already indexed.
+    /// Canonical non-memory roots currently registered in the catalog,
+    /// newest-nested first. The producer refreshes memory from its project
+    /// registry before reconciling these roots.
     pub fn indexed_roots(&self) -> Result<Vec<PathBuf>> {
-        Ok(self
-            .catalog
-            .roots()?
-            .into_iter()
-            .map(|(_, root)| root)
-            .collect())
+        self.catalog.publisher_roots()
     }
 
     /// Delete generation bookkeeping rows older than the latest completed
@@ -1050,6 +1233,13 @@ impl WorkspaceIndex {
             .previews(query, &memory_ids, MATCH_PREVIEW_CHARS)
             .unwrap_or_default();
         for (hit, _) in hits {
+            if let Some(symbol) = &hit.symbol
+                && let Some(preview) =
+                    symbol_definition_preview(Path::new(&hit.path), symbol, MATCH_PREVIEW_CHARS)
+            {
+                hit.preview = preview;
+                continue;
+            }
             let previews = if hit.kind == FileKind::AgentMemory {
                 &memory_previews
             } else {
@@ -1604,6 +1794,69 @@ fn combined_status(
     parts.join(",")
 }
 
+fn query_symbol_terms(query: &str) -> Vec<String> {
+    let raw = query
+        .split_whitespace()
+        .map(|term| {
+            term.trim_matches(|ch: char| !(ch.is_alphanumeric() || matches!(ch, '_' | ':' | '.')))
+                .trim_end_matches("()")
+        })
+        .filter(|term| !term.is_empty())
+        .collect::<Vec<_>>();
+    let single_term = raw.len() == 1;
+    let mut seen = HashSet::new();
+    raw.into_iter()
+        .filter(|term| {
+            term.len() >= 2
+                && (single_term
+                    || term.contains('_')
+                    || term.contains("::")
+                    || term.chars().skip(1).any(|ch| ch.is_ascii_uppercase())
+                    || term.chars().any(|ch| ch.is_ascii_digit()))
+        })
+        .map(str::to_owned)
+        .filter(|term| seen.insert(term.to_ascii_lowercase()))
+        .collect()
+}
+
+fn symbol_definition_preview(
+    path: &Path,
+    symbol: &SymbolRecord,
+    max_chars: usize,
+) -> Option<String> {
+    let source = fs::read_to_string(path).ok()?;
+    let start = symbol.line_start.saturating_sub(2).max(1);
+    let end = symbol.line_end.saturating_add(8);
+    let excerpt = source
+        .lines()
+        .enumerate()
+        .filter(|(index, _)| {
+            let line = index + 1;
+            line >= start && line <= end
+        })
+        .map(|(_, line)| line)
+        .collect::<Vec<_>>()
+        .join("\n");
+    let evidence = format!(
+        "{} {} at lines {}-{}{}",
+        symbol.kind,
+        symbol.name,
+        symbol.line_start,
+        symbol.line_end,
+        symbol
+            .signature
+            .as_deref()
+            .map(|signature| format!(": {signature}"))
+            .unwrap_or_default()
+    );
+    Some(
+        format!("{evidence}\n\n{excerpt}")
+            .chars()
+            .take(max_chars)
+            .collect(),
+    )
+}
+
 fn memory_recency_boost(observed_at_ms: i64) -> f32 {
     use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -1614,6 +1867,97 @@ fn memory_recency_boost(observed_at_ms: i64) -> f32 {
         .unwrap_or(observed_at_ms);
     let age_days = now_ms.saturating_sub(observed_at_ms).max(0) as f32 / 86_400_000.0;
     MAX_MEMORY_RECENCY_BOOST / (1.0 + age_days / 30.0)
+}
+
+#[derive(Debug, Clone, Copy, Default)]
+struct MemoryMetadataMatch {
+    boost: f32,
+    exact_entity: bool,
+}
+
+fn memory_metadata_match(
+    query: &str,
+    filename: &str,
+    metadata: &crate::model::AgentMemoryMetadata,
+) -> MemoryMetadataMatch {
+    let query = normalized_match_text(query);
+    let filename = Path::new(filename)
+        .file_stem()
+        .and_then(OsStr::to_str)
+        .unwrap_or(filename);
+    let filename = normalized_match_text(filename);
+    let name = metadata.name.as_deref().map(normalized_match_text);
+    let filename_match = filename.len() >= 4 && contains_entity(&query, &filename);
+    let name_match = name
+        .as_deref()
+        .is_some_and(|name| name.len() >= 4 && contains_entity(&query, name));
+    let mut boost = 0.0;
+    if filename_match {
+        boost += EXACT_MEMORY_FILENAME_BOOST;
+    }
+    if name_match {
+        boost += EXACT_MEMORY_NAME_BOOST;
+    }
+    if let Some(description) = metadata.description.as_deref() {
+        let description = normalized_match_text(description);
+        let query_terms = query.split_whitespace().collect::<HashSet<_>>();
+        let description_terms = description.split_whitespace().collect::<HashSet<_>>();
+        let matched = query_terms.intersection(&description_terms).count();
+        if matched >= 2 || matched == 1 && query_terms.len() == 1 {
+            let ratio = matched as f32 / query_terms.len().max(1) as f32;
+            boost += MEMORY_DESCRIPTION_BOOST * ratio;
+        }
+    }
+    MemoryMetadataMatch {
+        boost,
+        exact_entity: filename_match || name_match,
+    }
+}
+
+fn normalized_match_text(value: &str) -> String {
+    value
+        .chars()
+        .map(|ch| {
+            if ch.is_alphanumeric() {
+                ch.to_ascii_lowercase()
+            } else {
+                ' '
+            }
+        })
+        .collect::<String>()
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
+fn contains_entity(query: &str, entity: &str) -> bool {
+    query == entity
+        || query
+            .strip_prefix(entity)
+            .is_some_and(|suffix| suffix.starts_with(' '))
+        || query
+            .strip_suffix(entity)
+            .is_some_and(|prefix| prefix.ends_with(' '))
+        || query.contains(&format!(" {entity} "))
+}
+
+fn is_specific_query(query: &str) -> bool {
+    let normalized = normalized_match_text(query);
+    normalized
+        .split_whitespace()
+        .any(|term| term.len() >= 16 || term.chars().any(|ch| ch.is_ascii_digit()))
+        || query
+            .split_whitespace()
+            .any(has_internal_identifier_separator)
+}
+
+fn has_internal_identifier_separator(term: &str) -> bool {
+    let chars = term.chars().collect::<Vec<_>>();
+    chars.windows(3).any(|window| {
+        window[0].is_alphanumeric()
+            && matches!(window[1], '-' | '_' | '/' | '.')
+            && window[2].is_alphanumeric()
+    })
 }
 
 fn rerank_for_directory_diversity(
@@ -1678,6 +2022,7 @@ mod tests {
                 score,
                 matched_lanes: vec!["content".to_owned()],
                 preview: String::new(),
+                symbol: None,
                 agent: None,
                 memory: None,
             },

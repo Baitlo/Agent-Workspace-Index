@@ -107,6 +107,8 @@ awi --index-dir /tmp/my-awi-index serve
 # Search and inspect.
 awi --index-dir /tmp/my-awi-index search "workspace query" --limit 10 --json
 awi --index-dir /tmp/my-awi-index inspect /path/to/file --json
+awi --index-dir /tmp/my-awi-index inspect /path/to/file \
+  --symbol exact_function_name --json
 
 # Resolve instructions applicable to a concrete workspace path.
 awi --index-dir /tmp/my-awi-index search "build and test rules" \
@@ -132,14 +134,18 @@ awi --index-dir /tmp/my-awi-index mcp \
 
 Memory uses a separate Tantivy index and is searched only when
 `--kind agent_memory` is requested, so adding memory cannot change ordinary
-code/data ranking. MCP search uses the compact `compact_v2` shape with a
-1,000-character preview, defaults to 5 hits, and compacts requests above 20 to
-20. Start with one identifier-rich query instead of parallel near-synonym
-searches, and expand only when the first result set lacks evidence. Use
-`workspace_inspect` only after selecting a returned path; when the exact path is
-already known, read it directly with the host's file tools. Search snippets are
-generated from bounded stored source windows, and light directory-diversity
-reranking prevents one artifact folder from filling the result set.
+code/data ranking. MCP search uses the compact `compact_v3` shape with a
+1,000-character preview, stable `file_id`, request-scoped `search_id`, and
+definition metadata for exact symbol hits. It defaults to 5 hits and compacts
+requests above 20 to 20. Pass the returned `search_id` and optional exact
+`symbol` to `workspace_inspect` to link the inspection to its retrieval and
+center the excerpt on the definition. Start with one identifier-rich query
+instead of parallel near-synonym searches, and expand only when the first result
+set lacks evidence. When the exact path is already known, read it directly with
+the host's file tools. Search snippets are generated from bounded stored source
+windows, and light directory-diversity reranking prevents one artifact folder
+from filling the result set. The stdio server supports standard legacy MCP
+`ping` and caps initialize-based negotiation at protocol `2025-11-25`.
 
 ### Semantic Retrieval
 
@@ -259,6 +265,9 @@ start, the producer degrades cleanly to pure periodic reconcile. Access and
 metadata-only events are ignored to prevent self-triggered scans; append-heavy
 `.log`, `.jsonl`, `.ndjson`, `.csv`, `.tsv`, and `.parquet` updates are deferred
 to the periodic pass instead of rebuilding a snapshot for every write.
+Every cycle also rediscovers sources for projects registered by `awi memory`.
+New Agent memory roots are indexed automatically, and registered roots that
+disappear are reconciled so deleted evidence is not served.
 
 ```bash
 # Producer: watch local roots live, reconcile every root at most every 5s,
@@ -272,7 +281,8 @@ awi --index-dir /tmp/awi-reader serve \
   --snapshot-source /shared/awi-publication
 ```
 
-`watch` defaults to every root already registered in the catalog; pass
+`watch` defaults to registered non-memory roots; registered memory projects are
+rediscovered separately on every cycle. Pass
 `--root <path>` one or more times to restrict the set. Retention pruning removes
 older generations after each publish and never deletes the generation the
 pointer currently references, so the shared directory cannot grow without bound.
@@ -360,12 +370,14 @@ MCP audit logging is optional. When enabled, AWI writes private (`0600`) JSONL
 records containing bounded and credential-redacted arguments, caller process,
 duration, outcome, error detail, response bytes, text/structured payload bytes,
 hit/row counts, and separate preview-truncation and limit-compaction flags.
-Schema v3 retains the aggregate `result_truncated` field for compatibility. The
-active log rotates at 64 MiB and retains one previous file.
+Schema v4 retains the aggregate `result_truncated` field for compatibility and
+adds `search_id`, ordered Top-K `file_id`/score/matched-lane evidence, and
+`parent_search_id` on linked inspections. The active log rotates at 64 MiB and
+retains one previous file.
 
 ## Evaluation
 
-The current development evaluation reports:
+The current development-only evaluation reports:
 
 - Recall@10: 1.0
 - Search P95: 6.83 ms
@@ -378,7 +390,10 @@ See
 [`evaluation/two_shot_plus_tongyong_agent_ab_20260920/README.md`](evaluation/two_shot_plus_tongyong_agent_ab_20260920/README.md)
 for the protocol, category breakdown, caveats, and reproducibility artifacts.
 The evaluation set remains a development candidate pending dual human review;
-it is not a frozen release benchmark.
+it is not a frozen release benchmark. These values are diagnostics, not formal
+precision/recall claims. AWI must not publish formal P/R, Inspect@K, or MRR until
+two distinct reviewers independently label the query set, disagreements are
+adjudicated, and the approved labels and reviewer identities are recorded.
 
 ## License
 

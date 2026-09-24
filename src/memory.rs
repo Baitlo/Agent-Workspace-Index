@@ -5,6 +5,7 @@ use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result};
 use serde_json::Value;
+use serde_yaml_ng::Value as YamlValue;
 
 use crate::model::{AgentMemoryLayer, AgentMemoryMetadata, AgentMemorySource};
 
@@ -80,15 +81,61 @@ pub(crate) fn memory_metadata(
     )
     .then(|| session_id(path, source_text))
     .flatten();
+    let (frontmatter_name, frontmatter_description) =
+        source_text.map(memory_frontmatter).unwrap_or_default();
     AgentMemoryMetadata {
         agent: source.agent.clone(),
         layer,
+        name: frontmatter_name,
+        description: frontmatter_description,
         workspace_root: source.workspace_root.clone(),
         project_key: source.project_key.clone(),
         session_id,
         observed_at_ms: mtime_ns.saturating_div(1_000_000),
         raw_history: source.raw_history,
     }
+}
+
+fn memory_frontmatter(source: &str) -> (Option<String>, Option<String>) {
+    let Some(yaml) = frontmatter_yaml(source) else {
+        return (None, None);
+    };
+    let Ok(value) = serde_yaml_ng::from_str::<YamlValue>(yaml) else {
+        return (None, None);
+    };
+    let field = |name: &str, max_chars: usize| {
+        value
+            .get(name)
+            .and_then(YamlValue::as_str)
+            .map(|text| {
+                text.split_whitespace()
+                    .collect::<Vec<_>>()
+                    .join(" ")
+                    .chars()
+                    .take(max_chars)
+                    .collect::<String>()
+            })
+            .filter(|text| !text.is_empty())
+    };
+    (field("name", 160), field("description", 1_024))
+}
+
+fn frontmatter_yaml(source: &str) -> Option<&str> {
+    let mut lines = source.split_inclusive('\n');
+    let first = lines.next()?;
+    if first.trim() != "---" {
+        return None;
+    }
+    let start = first.len();
+    let mut offset = start;
+    for line in lines {
+        let next = offset + line.len();
+        if line.trim() == "---" {
+            return Some(&source[start..offset]);
+        }
+        offset = next;
+    }
+    None
 }
 
 fn discover_trae(

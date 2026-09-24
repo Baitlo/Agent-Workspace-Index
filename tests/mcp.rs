@@ -51,7 +51,7 @@ fn mcp_stdio_exposes_search_inspect_and_query() {
         1,
         "initialize",
         json!({
-            "protocolVersion": "2025-06-18",
+            "protocolVersion": "2026-07-28",
             "capabilities": {},
             "clientInfo": {
                 "name": "awi-integration-test",
@@ -60,12 +60,15 @@ fn mcp_stdio_exposes_search_inspect_and_query() {
         }),
     );
     assert_eq!(initialized["result"]["serverInfo"]["name"], "awi");
+    assert_eq!(initialized["result"]["protocolVersion"], "2025-11-25");
     assert!(
         initialized["result"]["capabilities"]["tools"]
             .as_object()
             .is_some()
     );
     mcp.notify("notifications/initialized", json!({}));
+    let ping = mcp.request(8, "ping", json!({}));
+    assert_eq!(ping["result"], json!({}));
 
     let listed = mcp.request(2, "tools/list", json!({}));
     let tools = listed["result"]["tools"].as_array().unwrap();
@@ -129,8 +132,12 @@ fn mcp_stdio_exposes_search_inspect_and_query() {
     );
     assert_eq!(
         searched["result"]["structuredContent"]["format"],
-        "compact_v2"
+        "compact_v3"
     );
+    let search_id = searched["result"]["structuredContent"]["search_id"]
+        .as_str()
+        .unwrap()
+        .to_owned();
     assert_eq!(
         searched["result"]["structuredContent"]["requested_limit"],
         5
@@ -143,8 +150,33 @@ fn mcp_stdio_exposes_search_inspect_and_query() {
         hits.iter()
             .any(|hit| hit["path"].as_str().unwrap().ends_with("service.rs"))
     );
-    assert!(hits.iter().all(|hit| hit.get("file_id").is_none()));
+    assert!(hits.iter().all(|hit| hit["file_id"].as_i64().is_some()));
     assert!(hits.iter().all(|hit| hit.get("size_bytes").is_none()));
+    let source_hit = hits
+        .iter()
+        .find(|hit| hit["path"].as_str().unwrap().ends_with("service.rs"))
+        .unwrap();
+    assert_eq!(source_hit["symbol"]["name"], "mcp_search_target");
+    assert_eq!(source_hit["symbol"]["line_start"], 1);
+    assert!(
+        source_hit["symbol"]["signature"]
+            .as_str()
+            .unwrap()
+            .contains("mcp_search_target")
+    );
+    assert!(
+        source_hit["matched_lanes"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|lane| lane == "exact_symbol")
+    );
+    assert!(
+        source_hit["preview"]
+            .as_str()
+            .unwrap()
+            .starts_with("function mcp_search_target at lines 1-1")
+    );
 
     let agent_search = mcp.request(
         31,
@@ -193,6 +225,8 @@ fn mcp_stdio_exposes_search_inspect_and_query() {
             "name": "workspace_inspect",
             "arguments": {
                 "path": source,
+                "symbol": "mcp_search_target",
+                "search_id": search_id,
                 "max_symbols": 10
             }
         }),
@@ -217,6 +251,9 @@ fn mcp_stdio_exposes_search_inspect_and_query() {
             .unwrap()
             .contains("mcp_search_target")
     );
+    assert_eq!(inspected["focused_symbol"]["name"], "mcp_search_target");
+    assert_eq!(inspected["focused_symbol"]["line_start"], 1);
+    assert_eq!(inspected["parent_search_id"], search_id);
     assert_eq!(inspected["coverage"]["symbols_truncated"], false);
 
     let outside = fixture.path().join("outside");
@@ -294,10 +331,20 @@ fn mcp_stdio_exposes_search_inspect_and_query() {
         .collect::<Vec<_>>();
     assert_eq!(records.len(), 7);
     assert_eq!(records[0]["tool"], "workspace_search");
-    assert_eq!(records[0]["schema_version"], 3);
+    assert_eq!(records[0]["schema_version"], 4);
     assert_eq!(records[0]["status"], "ok");
+    assert_eq!(records[0]["search_id"], search_id);
     assert_eq!(records[0]["result_count_kind"], "hits");
     assert_eq!(records[0]["result_count"], 1);
+    assert_eq!(records[0]["top_hits"][0]["file_id"], source_hit["file_id"]);
+    assert!(records[0]["top_hits"][0]["score"].as_f64().is_some());
+    assert!(
+        records[0]["top_hits"][0]["matched_lanes"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|lane| lane == "exact_symbol")
+    );
     assert_eq!(records[0]["preview_truncated"], false);
     assert_eq!(records[0]["limit_compacted"], false);
     assert!(
@@ -318,6 +365,7 @@ fn mcp_stdio_exposes_search_inspect_and_query() {
     );
     assert_eq!(records[3]["tool"], "workspace_inspect");
     assert_eq!(records[3]["status"], "ok");
+    assert_eq!(records[3]["parent_search_id"], search_id);
     assert_eq!(records[4]["tool"], "workspace_query");
     assert_eq!(records[4]["status"], "ok");
     assert_eq!(records[4]["result_count_kind"], "rows");

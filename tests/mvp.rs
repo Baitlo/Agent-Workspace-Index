@@ -46,8 +46,24 @@ fn indexes_code_text_and_tabular_metadata_incrementally() {
 
     let symbol_hits = workspace.search("build_workspace_index", 10).unwrap();
     assert!(symbol_hits.iter().any(|hit| {
-        hit.path.ends_with("lib.rs") && hit.matched_lanes.iter().any(|lane| lane == "symbol")
+        hit.path.ends_with("lib.rs") && hit.matched_lanes.iter().any(|lane| lane == "exact_symbol")
     }));
+    let symbol_hit = symbol_hits
+        .iter()
+        .find(|hit| hit.path.ends_with("lib.rs"))
+        .unwrap();
+    assert_eq!(
+        symbol_hit
+            .symbol
+            .as_ref()
+            .map(|symbol| symbol.name.as_str()),
+        Some("build_workspace_index")
+    );
+    assert!(
+        symbol_hit
+            .preview
+            .starts_with("function build_workspace_index at lines 1-1")
+    );
 
     let text_hits = workspace.search("total_spend", 10).unwrap();
     assert!(text_hits.iter().any(|hit| hit.path.ends_with("report.sql")));
@@ -74,6 +90,17 @@ fn indexes_code_text_and_tabular_metadata_incrementally() {
             .text
             .contains("build_workspace_index")
     );
+    let focused = workspace
+        .inspect_symbol(&source, "build_workspace_index", 10, 1_000)
+        .unwrap();
+    assert_eq!(
+        focused
+            .focused_symbol
+            .as_ref()
+            .map(|symbol| symbol.name.as_str()),
+        Some("build_workspace_index")
+    );
+    assert_eq!(focused.content.as_ref().unwrap().start_line, 1);
     let excerpt = workspace.inspect_excerpt(&source, 2, 1, 10).unwrap();
     let excerpt = excerpt.content.unwrap();
     assert_eq!(excerpt.start_line, 2);
@@ -444,6 +471,16 @@ fn indexes_project_scoped_agent_memory_safely_and_incrementally() {
     )
     .unwrap();
     fs::write(
+        memory_a.join("MEMORY.md"),
+        "# Aggregate memory\nDecision Gateway rollout status.\n",
+    )
+    .unwrap();
+    fs::write(
+        memory_a.join("decision_gateway.md"),
+        "---\nname: Decision Gateway\ndescription: Choice, score, and retry routing decisions.\n---\n# Decision\nDecision Gateway rollout status.\n",
+    )
+    .unwrap();
+    fs::write(
         memory_a.join("session_memory_session-a.jsonl"),
         r#"{"intent":"inspect append marker","actions":["first pass"],"outcome":"ready","message_id":"not-indexed"}"#,
     )
@@ -490,7 +527,12 @@ fn indexes_project_scoped_agent_memory_safely_and_incrementally() {
             .unwrap();
     }
 
-    assert_eq!(workspace.status().unwrap().agent_memories, 6);
+    let initial_status = workspace.status().unwrap();
+    assert_eq!(initial_status.agent_memories, 8);
+    assert_eq!(initial_status.memory.registered_sources, 4);
+    assert_eq!(initial_status.memory.active_files, 8);
+    assert_eq!(initial_status.memory.stale_files, 0);
+    assert_eq!(initial_status.memory.missing_files, 0);
     assert!(
         workspace
             .search("validated delta protocol", 10)
@@ -527,6 +569,30 @@ fn indexes_project_scoped_agent_memory_safely_and_incrementally() {
         hits.iter()
             .all(|hit| !Path::new(&hit.path).starts_with(memory_b.as_path()))
     );
+    let ranked_memory = workspace
+        .search_filtered(
+            "decision_gateway rollout status",
+            10,
+            &[],
+            &["agent_memory".to_owned()],
+            None,
+            Some(&project_a),
+        )
+        .unwrap();
+    assert!(
+        ranked_memory[0].path.ends_with("decision_gateway.md"),
+        "frontmatter and exact filename/name matches should outrank aggregate memory: {:?}",
+        ranked_memory
+            .iter()
+            .map(|hit| (&hit.path, hit.score))
+            .collect::<Vec<_>>()
+    );
+    let ranked_metadata = ranked_memory[0].memory.as_ref().unwrap();
+    assert_eq!(ranked_metadata.name.as_deref(), Some("Decision Gateway"));
+    assert_eq!(
+        ranked_metadata.description.as_deref(),
+        Some("Choice, score, and retry routing decisions.")
+    );
 
     let session = memory_a.join("session_memory_session-a.jsonl");
     let inspected = workspace.inspect(&session).unwrap();
@@ -543,17 +609,22 @@ fn indexes_project_scoped_agent_memory_safely_and_incrementally() {
     );
     assert!(sensitive.content.is_none());
 
+    thread::sleep(Duration::from_millis(2));
     fs::write(
         &session,
         r#"{"intent":"inspect append marker","actions":["second pass"],"outcome":"fresh appendix token"}"#,
     )
     .unwrap();
+    let stale_status = workspace.status().unwrap();
+    assert_eq!(stale_status.memory.stale_files, 1);
+    assert!(stale_status.memory.max_source_lag_ms >= 1);
     workspace
         .index_agent_memory_source(
             &source(memory_a, "trae", project_a.clone(), false),
             &IndexOptions::default(),
         )
         .unwrap();
+    assert_eq!(workspace.status().unwrap().memory.stale_files, 0);
     let refreshed = workspace
         .search_filtered(
             "fresh appendix token",
@@ -569,6 +640,7 @@ fn indexes_project_scoped_agent_memory_safely_and_incrementally() {
     assert!(!refreshed[0].preview.contains("message_id"));
 
     fs::remove_file(&session).unwrap();
+    assert_eq!(workspace.status().unwrap().memory.missing_files, 1);
     workspace
         .index_agent_memory_source(
             &source(
@@ -580,6 +652,7 @@ fn indexes_project_scoped_agent_memory_safely_and_incrementally() {
             &IndexOptions::default(),
         )
         .unwrap();
+    assert_eq!(workspace.status().unwrap().memory.missing_files, 0);
     assert!(
         workspace
             .search_filtered(
@@ -962,6 +1035,144 @@ fn watch_producer_auto_publishes_and_reader_follows() {
 
     run_json(&runtime_index, &socket, &["stop", "--json"]);
     wait_until_stopped(&mut reader);
+    producer.child.kill().unwrap();
+    producer.child.wait().unwrap();
+    producer.reaped = true;
+}
+
+#[test]
+fn watch_producer_rediscovers_registered_memory_projects() {
+    let fixture = tempdir().unwrap();
+    let home = fixture.path().join("home");
+    let root = fixture.path().join("workspace");
+    let writer_index = fixture.path().join("writer-index");
+    let publish_dir = fixture.path().join("published");
+    fs::create_dir_all(home.join(".trae-cn/memory")).unwrap();
+    fs::create_dir_all(&root).unwrap();
+    fs::write(root.join("lib.rs"), "pub fn watched_workspace() {}\n").unwrap();
+    fs::write(
+        home.join(".trae-cn/memory/user_profile.md"),
+        "# Profile\nKeep memory current.\n",
+    )
+    .unwrap();
+
+    let registered = Command::new(env!("CARGO_BIN_EXE_awi"))
+        .args(["--index-dir", path(&writer_index)])
+        .arg("memory")
+        .args(["--project-root", path(&root), "--json"])
+        .env("HOME", &home)
+        .output()
+        .unwrap();
+    assert_success(&registered);
+
+    let producer = Command::new(env!("CARGO_BIN_EXE_awi"))
+        .args(["--index-dir", path(&writer_index)])
+        .arg("watch")
+        .args([
+            "--root",
+            path(&root),
+            "--publish-dir",
+            path(&publish_dir),
+            "--interval-ms",
+            "50",
+            "--retain",
+            "1",
+        ])
+        .env("HOME", &home)
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn()
+        .unwrap();
+    let mut producer = ChildGuard::new(producer);
+    wait_for_pointer(&publish_dir, &mut producer);
+
+    let encoded_root = root.to_string_lossy().replace('/', "-");
+    let discovered = home
+        .join(".trae-cn/memory/projects")
+        .join(format!("{encoded_root}--p2-watch"));
+    fs::create_dir_all(&discovered).unwrap();
+    let memory_file = discovered.join("periodic_discovery.md");
+    fs::write(
+        &memory_file,
+        "---\nname: Periodic Discovery\n---\nperiodic rediscovery sentinel\n",
+    )
+    .unwrap();
+
+    let deadline = Instant::now() + START_TIMEOUT;
+    loop {
+        if let Some(status) = producer.child.try_wait().unwrap() {
+            panic!("AWI producer exited before rediscovering memory: {status}");
+        }
+        let output = Command::new(env!("CARGO_BIN_EXE_awi"))
+            .args(["--index-dir", path(&writer_index)])
+            .arg("search")
+            .arg("periodic rediscovery sentinel")
+            .args(["--kind", "agent_memory", "--context-path", path(&root)])
+            .arg("--json")
+            .env("HOME", &home)
+            .output()
+            .unwrap();
+        if output.status.success()
+            && serde_json::from_slice::<Value>(&output.stdout)
+                .ok()
+                .and_then(|value| value.as_array().cloned())
+                .is_some_and(|hits| {
+                    hits.iter().any(|hit| {
+                        hit["path"]
+                            .as_str()
+                            .is_some_and(|path| Path::new(path) == memory_file.as_path())
+                    })
+                })
+        {
+            break;
+        }
+        assert!(
+            Instant::now() < deadline,
+            "watch producer did not rediscover the new memory source"
+        );
+        thread::sleep(Duration::from_millis(20));
+    }
+
+    let status = Command::new(env!("CARGO_BIN_EXE_awi"))
+        .args(["--index-dir", path(&writer_index), "status", "--json"])
+        .env("HOME", &home)
+        .output()
+        .unwrap();
+    assert_success(&status);
+    let status: Value = serde_json::from_slice(&status.stdout).unwrap();
+    assert_eq!(status["memory"]["registered_projects"], 1);
+    assert_eq!(status["memory"]["registered_sources"], 2);
+    assert_eq!(status["memory"]["active_files"], 2);
+    assert_eq!(status["memory"]["stale_files"], 0);
+    assert_eq!(status["memory"]["missing_files"], 0);
+
+    fs::remove_dir_all(&discovered).unwrap();
+    let deadline = Instant::now() + START_TIMEOUT;
+    loop {
+        let output = Command::new(env!("CARGO_BIN_EXE_awi"))
+            .args(["--index-dir", path(&writer_index)])
+            .arg("search")
+            .arg("periodic rediscovery sentinel")
+            .args(["--kind", "agent_memory", "--context-path", path(&root)])
+            .arg("--json")
+            .env("HOME", &home)
+            .output()
+            .unwrap();
+        if output.status.success()
+            && serde_json::from_slice::<Value>(&output.stdout)
+                .ok()
+                .and_then(|value| value.as_array().cloned())
+                .is_some_and(|hits| hits.is_empty())
+        {
+            break;
+        }
+        assert!(
+            Instant::now() < deadline,
+            "watch producer did not remove the missing memory source"
+        );
+        thread::sleep(Duration::from_millis(20));
+    }
+
     producer.child.kill().unwrap();
     producer.child.wait().unwrap();
     producer.reaped = true;

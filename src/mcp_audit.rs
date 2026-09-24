@@ -13,7 +13,7 @@ use rmcp::{ErrorData as McpError, model::CallToolResult};
 use serde::Serialize;
 use serde_json::{Map, Value, json};
 
-const AUDIT_SCHEMA_VERSION: u8 = 3;
+const AUDIT_SCHEMA_VERSION: u8 = 4;
 const DEFAULT_MAX_LOG_BYTES: u64 = 64 * 1024 * 1024;
 const MAX_RECORD_BYTES: usize = 16 * 1024;
 const MAX_STRING_CHARS: usize = 2_048;
@@ -158,6 +158,14 @@ pub(crate) struct McpAuditSpan {
 impl McpAuditSpan {
     pub(crate) fn finish(self, result: &Result<CallToolResult, McpError>) {
         let metrics = response_metrics(self.tool, result);
+        let parent_search_id = (self.tool == "workspace_inspect")
+            .then(|| {
+                self.arguments
+                    .get("parent_search_id")
+                    .and_then(Value::as_str)
+                    .map(str::to_owned)
+            })
+            .flatten();
         let record = AuditRecord {
             schema_version: AUDIT_SCHEMA_VERSION,
             timestamp_unix_ms: self.started_at_unix_ms,
@@ -179,6 +187,9 @@ impl McpAuditSpan {
             result_truncated: metrics.result_truncated,
             preview_truncated: metrics.preview_truncated,
             limit_compacted: metrics.limit_compacted,
+            search_id: metrics.search_id,
+            parent_search_id,
+            top_hits: metrics.top_hits,
         };
         if let Err(error) = self.logger.write(&record) {
             eprintln!(
@@ -221,6 +232,19 @@ struct AuditRecord<'a> {
     preview_truncated: Option<bool>,
     #[serde(skip_serializing_if = "Option::is_none")]
     limit_compacted: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    search_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    parent_search_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    top_hits: Option<Vec<AuditTopHit>>,
+}
+
+#[derive(Serialize)]
+struct AuditTopHit {
+    file_id: i64,
+    score: f64,
+    matched_lanes: Vec<String>,
 }
 
 struct ResponseMetrics {
@@ -235,6 +259,8 @@ struct ResponseMetrics {
     result_truncated: Option<bool>,
     preview_truncated: Option<bool>,
     limit_compacted: Option<bool>,
+    search_id: Option<String>,
+    top_hits: Option<Vec<AuditTopHit>>,
 }
 
 fn response_metrics(
@@ -257,6 +283,8 @@ fn response_metrics(
             result_truncated: None,
             preview_truncated: None,
             limit_compacted: None,
+            search_id: None,
+            top_hits: None,
         },
         Ok(result) => {
             let content = result.structured_content.as_ref();
@@ -332,9 +360,43 @@ fn response_metrics(
                             .and_then(Value::as_bool)
                     })
                     .flatten(),
+                search_id: (tool == "workspace_search")
+                    .then(|| {
+                        content
+                            .and_then(|value| value.get("search_id"))
+                            .and_then(Value::as_str)
+                            .map(str::to_owned)
+                    })
+                    .flatten(),
+                top_hits: (tool == "workspace_search")
+                    .then(|| content.and_then(audit_top_hits))
+                    .flatten(),
             }
         }
     }
+}
+
+fn audit_top_hits(content: &Value) -> Option<Vec<AuditTopHit>> {
+    Some(
+        content
+            .get("hits")?
+            .as_array()?
+            .iter()
+            .filter_map(|hit| {
+                Some(AuditTopHit {
+                    file_id: hit.get("file_id")?.as_i64()?,
+                    score: hit.get("score")?.as_f64()?,
+                    matched_lanes: hit
+                        .get("matched_lanes")?
+                        .as_array()?
+                        .iter()
+                        .filter_map(Value::as_str)
+                        .map(str::to_owned)
+                        .collect(),
+                })
+            })
+            .collect(),
+    )
 }
 
 fn truncation_flag(tool: &str, content: &Value) -> Option<bool> {
@@ -526,7 +588,13 @@ mod tests {
             }),
         );
         let result = Ok(CallToolResult::structured(json!({
-            "hits": [{"path": "result.rs"}],
+            "search_id": "s-test-1",
+            "hits": [{
+                "file_id": 42,
+                "path": "result.rs",
+                "score": 1.25,
+                "matched_lanes": ["exact_symbol", "symbol"]
+            }],
             "previews_truncated": false,
             "limit_compacted": false
         })));
@@ -537,13 +605,20 @@ mod tests {
         assert!(!text.contains("top-secret"));
         let record: Value = serde_json::from_str(text.trim()).unwrap();
         assert_eq!(record["tool"], "workspace_search");
-        assert_eq!(record["schema_version"], 3);
+        assert_eq!(record["schema_version"], 4);
         assert_eq!(record["status"], "ok");
         assert_eq!(record["result_count"], 1);
         assert_eq!(record["result_count_kind"], "hits");
         assert_eq!(record["result_truncated"], false);
         assert_eq!(record["preview_truncated"], false);
         assert_eq!(record["limit_compacted"], false);
+        assert_eq!(record["search_id"], "s-test-1");
+        assert_eq!(record["top_hits"][0]["file_id"], 42);
+        assert_eq!(record["top_hits"][0]["score"], 1.25);
+        assert_eq!(
+            record["top_hits"][0]["matched_lanes"],
+            json!(["exact_symbol", "symbol"])
+        );
         assert!(record["client_process"].as_str().is_some());
         assert!(record["response_bytes"].as_u64().unwrap() > 0);
         assert!(record["text_content_bytes"].as_u64().unwrap() > 0);
@@ -583,7 +658,10 @@ mod tests {
         let fixture = tempdir().unwrap();
         let path = fixture.path().join("calls.jsonl");
         let logger = McpAuditLogger::open(&path).unwrap();
-        let span = logger.span("workspace_inspect", json!({"path": "/missing"}));
+        let span = logger.span(
+            "workspace_inspect",
+            json!({"path": "/missing", "parent_search_id": "s-test-1"}),
+        );
         let result = Ok(CallToolResult::structured_error(json!({
             "error": {
                 "code": "inspect_failed",
@@ -594,6 +672,7 @@ mod tests {
 
         let record: Value =
             serde_json::from_str(fs::read_to_string(&path).unwrap().trim()).unwrap();
+        assert_eq!(record["parent_search_id"], "s-test-1");
         assert_eq!(record["error_code"], "inspect_failed");
         assert_eq!(record["error_message"], "authorization: [REDACTED]");
     }

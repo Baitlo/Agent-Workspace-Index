@@ -462,12 +462,15 @@ fn dispatch(
             .and_then(|value| ResponseEnvelope::success(value).map_err(Into::into)),
         Request::Inspect {
             path,
+            symbol,
             start_line,
             max_lines,
             max_chars,
-        } => workspace
-            .inspect_excerpt(path, start_line, max_lines, max_chars)
-            .and_then(|value| ResponseEnvelope::success(value).map_err(Into::into)),
+        } => match symbol {
+            Some(symbol) => workspace.inspect_symbol(&path, &symbol, max_lines, max_chars),
+            None => workspace.inspect_excerpt(&path, start_line, max_lines, max_chars),
+        }
+        .and_then(|value| ResponseEnvelope::success(value).map_err(Into::into)),
         Request::Query { request } => workspace
             .query(&request)
             .and_then(|value| ResponseEnvelope::success(value).map_err(Into::into)),

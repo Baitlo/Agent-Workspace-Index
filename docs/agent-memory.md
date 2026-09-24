@@ -50,17 +50,22 @@ Every memory hit includes:
 - source Agent;
 - layer: `user_profile`, `project_summary`, `topic_summary`,
   `session_summary`, `memory_note`, or `raw_history`;
+- optional YAML frontmatter `name` and `description`;
 - canonical workspace root and provider project key when available;
 - session ID when it can be derived;
 - observation time and raw-history flag.
 
 When `context_path` or a project root filter is supplied, memory from another
-project is rejected. Exact-project memory ranks ahead of global memory, curated
-summaries rank ahead of raw history, and recency is only a small tie-breaker.
-Content-identical copies from different Agents are collapsed after ranking.
-Memory retrieval is activated with `--kind agent_memory`. Memory documents use
-a dedicated Tantivy index so their vocabulary cannot change ordinary code/data
-IDF statistics or ranking.
+project is rejected. Exact-project memory ranks ahead of global memory. Exact
+filename and frontmatter `name` matches receive the strongest metadata boosts;
+description overlap provides a smaller boost. Identifier-shaped queries
+demote broad `MEMORY.md`/project summaries unless the summary itself exactly
+matches the entity. The normal layer order remains unchanged for broad queries,
+curated summaries rank ahead of raw history, and recency is only a small
+tie-breaker. Content-identical copies from different Agents are collapsed after
+ranking. Memory retrieval is activated with `--kind agent_memory`. Memory
+documents use a dedicated Tantivy index so their vocabulary cannot change
+ordinary code/data IDF statistics or ranking.
 
 ## Parsing And Safety
 
@@ -74,9 +79,20 @@ High-confidence credentials or private keys cause the entire memory file to be
 metadata-only. Raw history is disabled unless explicitly requested, and
 oversized raw files remain metadata-only under the configured content limit.
 
-Registered memory roots participate in the normal watcher and snapshot
-pipeline. Appended summary JSONL is refreshed on the next periodic reconcile;
-append-heavy raw files do not trigger per-write snapshot rebuilds.
+`awi memory` persists the canonical project root and raw-history policy. Every
+producer cycle rediscovers that project's Agent sources before publishing, so
+new provider project directories appear without reinstalling AWI. Previously
+registered roots are also reconciled when they disappear, preventing deleted
+memory from remaining searchable. Appended summary JSONL is refreshed on the
+next periodic reconcile; append-heavy raw files do not trigger per-write
+snapshot rebuilds.
+
+`awi status --json` exposes a `memory` object with registered project/source
+counts, active files, the newest memory generation and relative generation lag,
+filesystem `stale_files`/`missing_files`, maximum source lag, and oldest source
+age. Filesystem stale and missing counts are the authoritative freshness
+signals; a low generation lag alone does not prove that external memory is
+current.
 
 ## Development Validation
 
@@ -85,4 +101,6 @@ curated files from Codex, Trae, and Zcode with zero extraction failures; Gemini
 raw chats remained excluded. The existing 16-case code/data retrieval set stayed
 bit-for-bit stable at Recall@10 `1.0`, MRR `0.6006`, nDCG@10 `0.6950`, and stale
 rate `0`. Release-build P95 was `24.06 ms`. This set is still
-`candidate_pending_dual_review`, not a frozen release gate.
+`candidate_pending_dual_review`, not a frozen release gate. Do not report
+formal precision/recall, Inspect@K, or MRR until two distinct reviewers have
+independently labeled the query set and adjudicated disagreements.

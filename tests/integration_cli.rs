@@ -221,6 +221,11 @@ fn installer_indexes_ancestor_instructions_and_allowlisted_skill_manifests() {
     let status: Value = serde_json::from_slice(&status.stdout).unwrap();
     assert_eq!(status["agent_documents"], 4);
     assert_eq!(status["agent_memories"], 3);
+    assert_eq!(status["memory"]["registered_projects"], 1);
+    assert_eq!(status["memory"]["registered_sources"], 2);
+    assert_eq!(status["memory"]["active_files"], 3);
+    assert_eq!(status["memory"]["stale_files"], 0);
+    assert_eq!(status["memory"]["missing_files"], 0);
 
     let instructions = Command::new(bin.join("awi"))
         .args(["--index-dir", index.to_str().unwrap(), "search"])

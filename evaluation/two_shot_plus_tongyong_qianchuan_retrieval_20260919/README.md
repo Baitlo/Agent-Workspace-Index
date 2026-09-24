@@ -11,7 +11,10 @@ This directory contains a development-only retrieval candidate for AWI. It cover
 
 `dev.json` is marked `candidate_pending_dual_review`. It may only be evaluated with `awi benchmark --allow-draft`. It is not a frozen test set and cannot open the release gate. The evaluator rejects every `split=frozen` file and requires two distinct reviewers before an approved development set can open the review sub-gate.
 
-Do not create or consume a frozen split until the independent reviews are complete and the development metrics satisfy all gates.
+Do not create or consume a frozen split, or report formal precision/recall,
+Inspect@K, or MRR, until the independent reviews are complete, disagreements
+are adjudicated, and the development metrics satisfy all gates. Metrics from a
+candidate set must be labeled development-only diagnostics.
 
 ## Gates
 

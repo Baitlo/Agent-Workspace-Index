@@ -66,8 +66,8 @@ pub struct PublishCycle {
     pub pruned: Vec<i64>,
 }
 
-/// Resolve the roots to reconcile. Explicit roots win; otherwise fall back to
-/// every root already registered in the catalog.
+/// Resolve non-memory roots to reconcile. Explicit roots win; otherwise use
+/// catalog roots that are not refreshed through the memory project registry.
 pub fn resolve_roots(workspace: &WorkspaceIndex, roots: &[PathBuf]) -> Result<Vec<PathBuf>> {
     if roots.is_empty() {
         return workspace.indexed_roots();
@@ -104,8 +104,9 @@ pub fn publish_once(
     roots: &[PathBuf],
     config: &PublisherConfig,
 ) -> Result<PublishCycle> {
-    let mut changed_files = 0_u64;
-    let mut deleted_files = 0_u64;
+    let memory = workspace.refresh_agent_memories(&config.options)?;
+    let mut changed_files = memory.indexed;
+    let mut deleted_files = memory.deleted;
     for root in roots {
         let report = workspace.index_root(root, &config.options)?;
         changed_files += report.indexed;

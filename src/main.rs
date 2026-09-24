@@ -167,6 +167,10 @@ enum Command {
     Inspect {
         path: PathBuf,
 
+        /// Exact indexed symbol to center the excerpt around.
+        #[arg(long)]
+        symbol: Option<String>,
+
         #[arg(long, default_value_t = 1)]
         line_start: usize,
 
@@ -536,6 +540,7 @@ fn main() -> Result<()> {
         }
         Command::Inspect {
             path,
+            symbol,
             line_start,
             max_lines,
             max_chars,
@@ -543,14 +548,20 @@ fn main() -> Result<()> {
         } => {
             let request = Request::Inspect {
                 path: path.clone(),
+                symbol: symbol.clone(),
                 start_line: line_start,
                 max_lines,
                 max_chars,
             };
-            let result: InspectResult =
-                execute(&cli.index_dir, &socket, &request, move |workspace| {
-                    workspace.inspect_excerpt(path, line_start, max_lines, max_chars)
-                })?;
+            let result: InspectResult = execute(
+                &cli.index_dir,
+                &socket,
+                &request,
+                move |workspace| match symbol {
+                    Some(symbol) => workspace.inspect_symbol(path, &symbol, max_lines, max_chars),
+                    None => workspace.inspect_excerpt(path, line_start, max_lines, max_chars),
+                },
+            )?;
             if json {
                 print_json(&result)?;
             } else {

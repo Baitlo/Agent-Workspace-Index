@@ -13,7 +13,7 @@ from pathlib import Path
 
 PROMPTS = [
     "Use only AWI workspace_search. Find the Rust file that implements integrate_cline and report its absolute path.",
-    "Use only AWI workspace_search. Find the documentation mentioning compact_v2 and report the path.",
+    "Use only AWI workspace_search. Find the documentation mentioning compact_v3 and report the path.",
     "Use AWI workspace_search with agent_memory and context_path /home/tiger/Projects/Bona. What commit added cross-agent memory?",
     "Use only AWI workspace_search. Find the test for snapshot refresh not blocking the request path and report the path.",
     "Use only AWI workspace_search. Find the Cline integration implementation and state its current config path.",

@@ -1,11 +1,17 @@
+use std::borrow::Cow;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::time::{SystemTime, UNIX_EPOCH};
 
 use anyhow::{Context, Result};
 use rmcp::{
     ErrorData as McpError, ServerHandler, ServiceExt,
     handler::server::{router::tool::ToolRouter, wrapper::Parameters},
-    model::{CallToolResult, ContentBlock, Implementation, ServerCapabilities, ServerConfig},
+    model::{
+        CallToolResult, ContentBlock, Implementation, ProtocolVersion, ServerCapabilities,
+        ServerConfig,
+    },
     schemars, tool, tool_handler, tool_router,
 };
 use serde::Deserialize;
@@ -74,6 +80,13 @@ pub struct WorkspaceSearchRequest {
 pub struct WorkspaceInspectRequest {
     /// Absolute or current-workspace-relative path already present in the index.
     pub path: PathBuf,
+    /// Exact indexed symbol to center the excerpt around.
+    #[serde(default)]
+    pub symbol: Option<String>,
+    /// Search identifier returned by workspace_search, used to link retrieval
+    /// and inspection in the audit trail.
+    #[serde(default)]
+    pub search_id: Option<String>,
     /// Maximum number of symbols to return. Defaults to 200 and cannot exceed 1000.
     #[serde(default)]
     #[schemars(schema_with = "optional_integer_schema", range(min = 1, max = 1_000))]
@@ -138,6 +151,7 @@ pub struct AwiMcpServer {
     index_dir: PathBuf,
     socket_path: PathBuf,
     audit_logger: Option<Arc<McpAuditLogger>>,
+    search_sequence: Arc<AtomicU64>,
     tool_router: ToolRouter<Self>,
 }
 
@@ -147,6 +161,7 @@ impl AwiMcpServer {
             index_dir,
             socket_path,
             audit_logger: None,
+            search_sequence: Arc::new(AtomicU64::new(0)),
             tool_router: Self::tool_router(),
         }
     }
@@ -161,6 +176,7 @@ impl AwiMcpServer {
             index_dir,
             socket_path,
             audit_logger,
+            search_sequence: Arc::new(AtomicU64::new(0)),
             tool_router: Self::tool_router(),
         })
     }
@@ -169,6 +185,15 @@ impl AwiMcpServer {
         self.audit_logger
             .as_ref()
             .map(|logger| logger.span(tool, arguments))
+    }
+
+    fn next_search_id(&self) -> String {
+        let now = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_millis();
+        let sequence = self.search_sequence.fetch_add(1, Ordering::Relaxed) + 1;
+        format!("s-{now:x}-{:x}-{sequence:x}", std::process::id())
     }
 
     async fn execute(&self, request: Request) -> Result<Value> {
@@ -202,6 +227,7 @@ impl AwiMcpServer {
         &self,
         Parameters(arguments): Parameters<WorkspaceSearchRequest>,
     ) -> Result<CallToolResult, McpError> {
+        let search_id = self.next_search_id();
         let audit = self.audit_span(
             "workspace_search",
             json!({
@@ -210,7 +236,8 @@ impl AwiMcpServer {
                 "roots": &arguments.roots,
                 "kinds": &arguments.kinds,
                 "path_prefix": &arguments.path_prefix,
-                "context_path": &arguments.context_path
+                "context_path": &arguments.context_path,
+                "search_id": &search_id
             }),
         );
         let query = arguments.query.trim();
@@ -277,13 +304,14 @@ impl AwiMcpServer {
         audited(
             audit,
             Ok(bounded_result(json!({
+                "search_id": search_id,
                 "hits": hits,
                 "returned": returned,
                 "requested_limit": requested_limit,
                 "effective_limit": limit,
                 "limit_compacted": requested_limit > limit,
                 "previews_truncated": previews_truncated,
-                "format": "compact_v2"
+                "format": "compact_v3"
             }))),
         )
     }
@@ -309,6 +337,8 @@ impl AwiMcpServer {
             "workspace_inspect",
             json!({
                 "path": &arguments.path,
+                "symbol": &arguments.symbol,
+                "parent_search_id": &arguments.search_id,
                 "max_symbols": arguments.max_symbols,
                 "start_line": arguments.start_line,
                 "max_lines": arguments.max_lines,
@@ -359,6 +389,7 @@ impl AwiMcpServer {
         let value = match self
             .execute(Request::Inspect {
                 path: arguments.path,
+                symbol: arguments.symbol,
                 start_line,
                 max_lines,
                 max_chars,
@@ -414,10 +445,12 @@ impl AwiMcpServer {
             Ok(bounded_result(json!({
                 "file": result.file,
                 "symbols": result.symbols,
+                "focused_symbol": result.focused_symbol,
                 "dataset": result.dataset,
                 "agent": result.agent,
                 "memory": result.memory,
                 "content": result.content,
+                "parent_search_id": arguments.search_id,
                 "coverage": {
                     "total_symbols": total_symbols,
                     "symbols_truncated": total_symbols > max_symbols,
@@ -524,6 +557,10 @@ impl AwiMcpServer {
 
 #[tool_handler(router = self.tool_router)]
 impl ServerHandler for AwiMcpServer {
+    fn supported_protocol_versions(&self) -> Cow<'static, [ProtocolVersion]> {
+        Cow::Borrowed(ProtocolVersion::known_up_to(&ProtocolVersion::V_2025_11_25))
+    }
+
     fn get_info(&self) -> ServerConfig {
         ServerConfig::new(ServerCapabilities::builder().enable_tools().build())
             .with_server_info(
@@ -610,13 +647,15 @@ fn execute_request(index_dir: &Path, socket_path: &Path, request: Request) -> Re
         .map_err(Into::into),
         Request::Inspect {
             path,
+            symbol,
             start_line,
             max_lines,
             max_chars,
-        } => {
-            serde_json::to_value(workspace.inspect_excerpt(path, start_line, max_lines, max_chars)?)
-                .map_err(Into::into)
-        }
+        } => serde_json::to_value(match symbol {
+            Some(symbol) => workspace.inspect_symbol(path, &symbol, max_lines, max_chars)?,
+            None => workspace.inspect_excerpt(path, start_line, max_lines, max_chars)?,
+        })
+        .map_err(Into::into),
         Request::Query { request } => {
             serde_json::to_value(workspace.query(&request)?).map_err(Into::into)
         }
@@ -651,6 +690,7 @@ fn tool_error(code: &str, error: &anyhow::Error) -> CallToolResult {
 
 fn compact_search_hit(hit: SearchHit) -> Value {
     let mut value = json!({
+        "file_id": hit.file_id,
         "path": hit.path,
         "kind": hit.kind,
         "score": hit.score,
@@ -661,6 +701,9 @@ fn compact_search_hit(hit: SearchHit) -> Value {
     let object = value.as_object_mut().expect("search hit is an object");
     if let Some(experiment) = hit.experiment {
         object.insert("experiment".to_owned(), Value::String(experiment));
+    }
+    if let Some(symbol) = hit.symbol {
+        object.insert("symbol".to_owned(), json!(symbol));
     }
     if let Some(agent) = hit.agent {
         object.insert(
