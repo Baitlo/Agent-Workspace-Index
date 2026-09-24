@@ -93,6 +93,8 @@ cargo build --release
 cargo fmt --check
 cargo clippy --all-targets --all-features -- -D warnings
 cargo test --all-features
+python3 -m unittest tests/test_semantic_sidecar.py
+python3 tests/test_audit_session_adoption.py
 ```
 
 ## Basic Usage
@@ -373,7 +375,9 @@ hit/row counts, and separate preview-truncation and limit-compaction flags.
 Schema v4 retains the aggregate `result_truncated` field for compatibility and
 adds `search_id`, ordered Top-K `file_id`/score/matched-lane evidence, and
 `parent_search_id` on linked inspections. The active log rotates at 64 MiB and
-retains one previous file.
+retains one previous file. Project adoption reports use
+[`eligible_session_adoption`](docs/session-adoption.md), not all project
+sessions as the denominator.
 
 ## Evaluation
 

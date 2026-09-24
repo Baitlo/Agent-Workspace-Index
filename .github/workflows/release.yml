@@ -61,8 +61,10 @@ jobs:
           cargo fmt --check
           cargo test --locked --release --all-features
 
-      - name: Test semantic sidecar helpers
-        run: python3 -m unittest tests/test_semantic_sidecar.py
+      - name: Test Python helpers
+        run: |
+          python3 -m unittest tests/test_semantic_sidecar.py
+          python3 tests/test_audit_session_adoption.py
 
       - name: Build release binary
         run: cargo build --locked --release

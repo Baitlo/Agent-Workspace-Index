@@ -79,5 +79,7 @@ jobs:
           target/release/awi --index-dir "$fixture/index" \
             search arm64_native_smoke --json | grep -q 'lib.rs'
 
-      - name: Test semantic sidecar helpers
-        run: python3 -m unittest tests/test_semantic_sidecar.py
+      - name: Test Python helpers
+        run: |
+          python3 -m unittest tests/test_semantic_sidecar.py
+          python3 tests/test_audit_session_adoption.py

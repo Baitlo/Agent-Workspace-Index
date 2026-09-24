@@ -1,0 +1,117 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/Baitlo/Agent-Workspace-Index/docs/session-observation.schema.json",
+  "title": "AWI session adoption observation",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "session_id",
+    "client",
+    "project_root",
+    "eligibility",
+    "stages"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": 1
+    },
+    "session_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "client": {
+      "type": "string",
+      "minLength": 1
+    },
+    "project_root": {
+      "type": "string",
+      "minLength": 1
+    },
+    "eligibility": {
+      "enum": [
+        "eligible",
+        "ineligible",
+        "unknown"
+      ]
+    },
+    "eligibility_reason": {
+      "type": "string"
+    },
+    "eligibility_review": {
+      "$ref": "#/$defs/review"
+    },
+    "stages": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "tool_visible",
+        "namespace_loaded",
+        "search",
+        "inspect",
+        "evidence_adopted"
+      ],
+      "properties": {
+        "tool_visible": {
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "namespace_loaded": {
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "search": {
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "inspect": {
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "evidence_adopted": {
+          "type": [
+            "boolean",
+            "null"
+          ]
+        }
+      }
+    },
+    "evidence_review": {
+      "$ref": "#/$defs/review"
+    }
+  },
+  "$defs": {
+    "review": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "status",
+        "reviewers"
+      ],
+      "properties": {
+        "status": {
+          "enum": [
+            "candidate",
+            "approved"
+          ]
+        },
+        "reviewers": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          },
+          "uniqueItems": true
+        }
+      }
+    }
+  }
+}
