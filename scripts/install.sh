@@ -19,6 +19,8 @@ Options:
                          zed, amazon-q, and crush
   --source-binary PATH   Install an existing AWI binary instead of building from source
   --skip-pi-adapter      Do not install pi-mcp-adapter when Pi is detected
+  --skip-agent-instructions
+                         Do not add the managed AWI block to workspace/AGENTS.md
   --skip-agent-knowledge Do not index ancestor AGENTS.md or discovered SKILL.md files
   --skip-agent-memory    Do not discover or index Agent memory for this workspace
   --include-raw-memory   Also index matching raw chat/session history (opt-in)
@@ -108,6 +110,78 @@ append_skill_manifests() {
     done
 }
 
+awi_agent_instructions() {
+    cat <<'EOF'
+<!-- BEGIN AWI MANAGED INSTRUCTIONS -->
+## AWI Workspace Retrieval
+
+- For unknown code symbols, files, configuration, SQL, data schemas, Agent
+  instructions, Skills, or project history, use AWI `workspace_search` before
+  shell discovery.
+- If the AWI namespace is deferred, use `tool_search` to load
+  `mcp__awi.workspace_search`, then make an actual `workspace_search` call.
+- Start with one identifier-rich query and `limit=5`. Do not issue parallel
+  near-synonym searches. Use `source`, `agent_instructions`, `agent_skill`, or
+  `agent_memory` kinds when known; historical queries also pass this workspace
+  as `context_path`.
+- Treat a non-empty preview as direct indexed evidence. If more detail is
+  required, inspect only the best hit and pass its `path`, `search_id`, and
+  exact `symbol` when available.
+- For CSV, JSON/JSONL, or Parquet aggregation, locate inputs with
+  `workspace_search`, then use `workspace_query` with exact registered roots.
+- Read exact user-provided paths directly. Fall back to `rg` only for unindexed
+  paths, explicit regex matching, or after one AWI refinement fails.
+<!-- END AWI MANAGED INSTRUCTIONS -->
+EOF
+}
+
+inject_awi_agent_instructions() {
+    local instructions="$workspace/AGENTS.md"
+    local begin="<!-- BEGIN AWI MANAGED INSTRUCTIONS -->"
+    local end="<!-- END AWI MANAGED INSTRUCTIONS -->"
+    local block
+    local begin_count=0
+    local end_count=0
+    local mode=0644
+    local temporary="$workspace/.AGENTS.md.awi.$$"
+
+    [[ ! -L "$instructions" ]] ||
+        fail "refusing to replace symlinked Agent instructions: $instructions"
+    if [[ -e "$instructions" ]]; then
+        [[ -f "$instructions" ]] ||
+            fail "Agent instructions path is not a regular file: $instructions"
+        begin_count="$(grep -Fxc -- "$begin" "$instructions" || true)"
+        end_count="$(grep -Fxc -- "$end" "$instructions" || true)"
+        [[ "$begin_count" == "$end_count" && "$begin_count" -le 1 ]] ||
+            fail "malformed AWI managed block in $instructions"
+        mode="$(
+            stat -c '%a' "$instructions" 2>/dev/null ||
+                stat -f '%Lp' "$instructions"
+        )"
+    fi
+
+    block="$(awi_agent_instructions)"
+    if [[ "$begin_count" == 1 ]]; then
+        if ! awk -v begin="$begin" -v end="$end" -v block="$block" '
+            $0 == begin { print block; managed = 1; next }
+            managed && $0 == end { managed = 0; next }
+            !managed { print }
+            END { if (managed) exit 42 }
+        ' "$instructions" >"$temporary"; then
+            rm -f "$temporary"
+            fail "replace AWI managed block in $instructions"
+        fi
+    elif [[ -f "$instructions" && -s "$instructions" ]]; then
+        awk -v block="$block" '{ print } END { print ""; print block }' \
+            "$instructions" >"$temporary"
+    else
+        printf '%s\n' "$block" >"$temporary"
+    fi
+    chmod "$mode" "$temporary"
+    mv -f "$temporary" "$instructions"
+    printf 'Updated AWI instructions in %s\n' "$instructions"
+}
+
 repo_root="$(absolute_dir "$(dirname -- "${BASH_SOURCE[0]}")/..")"
 workspace="$PWD"
 index_dir=""
@@ -115,6 +189,7 @@ bin_dir="${AWI_INSTALL_BIN_DIR:-$HOME/.local/bin}"
 clients="all"
 source_binary="${AWI_SOURCE_BINARY:-}"
 install_pi_adapter=true
+inject_agent_instructions=true
 index_agent_knowledge=true
 index_agent_memory=true
 include_raw_memory=false
@@ -149,6 +224,10 @@ while (($# > 0)); do
             ;;
         --skip-pi-adapter)
             install_pi_adapter=false
+            shift
+            ;;
+        --skip-agent-instructions)
+            inject_agent_instructions=false
             shift
             ;;
         --skip-agent-knowledge)
@@ -206,6 +285,10 @@ install_target="$bin_dir/awi"
 temporary_target="$bin_dir/.awi.install.$$"
 install -m 0755 "$source_binary" "$temporary_target"
 mv -f "$temporary_target" "$install_target"
+
+if "$inject_agent_instructions"; then
+    inject_awi_agent_instructions
+fi
 
 printf 'Building initial index for %s...\n' "$workspace"
 "$install_target" --index-dir "$index_dir" reconcile "$workspace" --json

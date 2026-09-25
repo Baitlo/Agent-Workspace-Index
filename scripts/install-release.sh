@@ -6,18 +6,29 @@ repository="${AWI_RELEASE_REPOSITORY:-Baitlo/Agent-Workspace-Index}"
 version="${AWI_VERSION:-latest}"
 bin_dir="${AWI_INSTALL_BIN_DIR:-$HOME/.local/bin}"
 release_base_url="${AWI_RELEASE_BASE_URL:-}"
+workspace=""
+workspace_args=()
 
 usage() {
 	cat <<'EOF'
-Install a prebuilt AWI binary for Linux x86_64 or arm64.
+Install a prebuilt AWI release for Linux x86_64 or arm64.
 
 Usage:
   install-release.sh [options]
 
 Options:
-  --version VERSION  Release tag such as v0.1.0 (default: latest)
-  --bin-dir PATH     Binary install directory (default: ~/.local/bin)
-  -h, --help         Show this help
+  --workspace PATH       Also index this workspace and register Agent clients
+  --version VERSION      Release tag such as v0.2.0 (default: latest)
+  --index-dir PATH       Local index directory for --workspace
+  --bin-dir PATH         Binary install directory (default: ~/.local/bin)
+  --clients LIST         Comma-separated clients for --workspace (default: all)
+  --skip-pi-adapter      Do not install the Pi MCP adapter
+  --skip-agent-instructions
+                         Do not add the managed AWI block to workspace/AGENTS.md
+  --skip-agent-knowledge Do not index ancestor AGENTS.md or discovered Skills
+  --skip-agent-memory    Do not discover project-scoped Agent memory
+  --include-raw-memory   Include matching raw Agent history (opt-in)
+  -h, --help             Show this help
 EOF
 }
 
@@ -28,6 +39,11 @@ fail() {
 
 while (($# > 0)); do
 	case "$1" in
+	--workspace)
+		(($# >= 2)) || fail "--workspace requires a value"
+		workspace="$2"
+		shift 2
+		;;
 	--version)
 		(($# >= 2)) || fail "--version requires a value"
 		version="$2"
@@ -38,6 +54,15 @@ while (($# > 0)); do
 		bin_dir="$2"
 		shift 2
 		;;
+	--index-dir | --clients)
+		(($# >= 2)) || fail "$1 requires a value"
+		workspace_args+=("$1" "$2")
+		shift 2
+		;;
+	--skip-pi-adapter | --skip-agent-instructions | --skip-agent-knowledge | --skip-agent-memory | --include-raw-memory)
+		workspace_args+=("$1")
+		shift
+		;;
 	-h | --help)
 		usage
 		exit 0
@@ -47,6 +72,10 @@ while (($# > 0)); do
 		;;
 	esac
 done
+
+if [[ -z "$workspace" && ${#workspace_args[@]} -gt 0 ]]; then
+	fail "workspace setup options require --workspace"
+fi
 
 [[ "$(uname -s)" == "Linux" ]] || fail "prebuilt releases currently support Linux only"
 case "$(uname -m)" in
@@ -103,6 +132,17 @@ checksum="$(
 tar --extract --gzip --file "$temporary/$archive" --directory "$temporary"
 source_binary="$temporary/awi-${target}/awi"
 [[ -x "$source_binary" ]] || fail "release archive does not contain an AWI executable"
+
+if [[ -n "$workspace" ]]; then
+	installer="$temporary/awi-${target}/install.sh"
+	[[ -x "$installer" ]] || fail "release archive does not contain install.sh"
+	"$installer" \
+		--source-binary "$source_binary" \
+		--workspace "$workspace" \
+		--bin-dir "$bin_dir" \
+		"${workspace_args[@]}"
+	exit 0
+fi
 
 mkdir -p "$bin_dir"
 temporary_target="$bin_dir/.awi.install.$$"

@@ -24,12 +24,15 @@ creates provenance attestations and one `SHA256SUMS` file.
    the Cargo package version and publishes the GitHub Release.
 5. Verify both archives, `SHA256SUMS`, and attestations on the release page.
 6. Download each archive and run `awi --version` on matching hardware.
+7. Run the public `install-release.sh --workspace <fixture>` path and verify the
+   binary, local index, managed top-level `AGENTS.md` block, and client
+   integration report.
 
 Example:
 
 ```bash
-git tag -a v0.1.0 -m "AWI v0.1.0"
-git push origin v0.1.0
+git tag -a v0.2.0 -m "AWI v0.2.0"
+git push origin v0.2.0
 ```
 
 Release assets intentionally do not include Python, LanceDB,

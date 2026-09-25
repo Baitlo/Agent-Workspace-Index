@@ -136,6 +136,11 @@ fn installer_indexes_ancestor_instructions_and_allowlisted_skill_manifests() {
         "# Project Rules\nVerify release evidence.\n",
     )
     .unwrap();
+    fs::write(
+        workspace.join("AGENTS.md"),
+        "# Repository Rules\nKeep this user-authored instruction.\n",
+    )
+    .unwrap();
     fs::write(&context_file, "pub fn release() {}\n").unwrap();
     fs::write(
         &skill,
@@ -219,7 +224,7 @@ fn installer_indexes_ancestor_instructions_and_allowlisted_skill_manifests() {
         .unwrap();
     assert!(status.status.success());
     let status: Value = serde_json::from_slice(&status.stdout).unwrap();
-    assert_eq!(status["agent_documents"], 4);
+    assert_eq!(status["agent_documents"], 5);
     assert_eq!(status["agent_memories"], 3);
     assert_eq!(status["memory"]["registered_projects"], 1);
     assert_eq!(status["memory"]["registered_sources"], 2);
@@ -270,6 +275,117 @@ fn installer_indexes_ancestor_instructions_and_allowlisted_skill_manifests() {
     assert!(raw.status.success());
     let raw: Value = serde_json::from_slice(&raw.stdout).unwrap();
     assert_eq!(raw.as_array().unwrap().len(), 0);
+
+    let instructions = fs::read_to_string(workspace.join("AGENTS.md")).unwrap();
+    assert!(instructions.contains("Keep this user-authored instruction."));
+    assert!(instructions.contains("## AWI Workspace Retrieval"));
+    assert_eq!(
+        instructions
+            .matches("<!-- BEGIN AWI MANAGED INSTRUCTIONS -->")
+            .count(),
+        1
+    );
+
+    let repeated = Command::new("bash")
+        .arg(Path::new(env!("CARGO_MANIFEST_DIR")).join("scripts/install.sh"))
+        .args(["--workspace", workspace.to_str().unwrap()])
+        .args(["--index-dir", index.to_str().unwrap()])
+        .args(["--bin-dir", bin.to_str().unwrap()])
+        .args(["--source-binary", env!("CARGO_BIN_EXE_awi")])
+        .args(["--clients", "qwen"])
+        .env("HOME", &home)
+        .env("XDG_CONFIG_HOME", fixture.path().join("config"))
+        .env("PATH", "/usr/bin:/bin")
+        .output()
+        .unwrap();
+    assert_success(&repeated);
+    let instructions = fs::read_to_string(workspace.join("AGENTS.md")).unwrap();
+    assert_eq!(
+        instructions
+            .matches("<!-- BEGIN AWI MANAGED INSTRUCTIONS -->")
+            .count(),
+        1
+    );
+}
+
+#[test]
+fn release_installer_bootstraps_workspace_from_prebuilt_archive() {
+    let fixture = tempdir().unwrap();
+    let home = fixture.path().join("home");
+    let workspace = fixture.path().join("workspace");
+    let index = fixture.path().join("index");
+    let bin = fixture.path().join("installed");
+    let release = fixture.path().join("release");
+    let target = match std::env::consts::ARCH {
+        "x86_64" => "x86_64-unknown-linux-gnu",
+        "aarch64" => "aarch64-unknown-linux-gnu",
+        architecture => panic!("unsupported test architecture: {architecture}"),
+    };
+    let package_name = format!("awi-{target}");
+    let package = release.join(&package_name);
+    let archive_name = format!("{package_name}.tar.gz");
+    fs::create_dir_all(&workspace).unwrap();
+    fs::create_dir_all(&package).unwrap();
+    fs::write(workspace.join("lib.rs"), "pub fn release_install() {}\n").unwrap();
+    fs::write(
+        package.join("awi"),
+        format!(
+            "#!/usr/bin/env bash\nexec '{}' \"$@\"\n",
+            env!("CARGO_BIN_EXE_awi")
+        ),
+    )
+    .unwrap();
+    fs::copy(
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("scripts/install.sh"),
+        package.join("install.sh"),
+    )
+    .unwrap();
+    for path in [package.join("awi"), package.join("install.sh")] {
+        fs::set_permissions(path, fs::Permissions::from_mode(0o755)).unwrap();
+    }
+    let archived = Command::new("tar")
+        .current_dir(&release)
+        .args(["--create", "--gzip", "--file"])
+        .arg(&archive_name)
+        .arg(&package_name)
+        .output()
+        .unwrap();
+    assert_success(&archived);
+    let checksum = Command::new("sha256sum")
+        .current_dir(&release)
+        .arg(&archive_name)
+        .output()
+        .unwrap();
+    assert_success(&checksum);
+    fs::write(release.join("SHA256SUMS"), checksum.stdout).unwrap();
+
+    let output = Command::new("bash")
+        .arg(Path::new(env!("CARGO_MANIFEST_DIR")).join("scripts/install-release.sh"))
+        .args(["--workspace", workspace.to_str().unwrap()])
+        .args(["--index-dir", index.to_str().unwrap()])
+        .args(["--bin-dir", bin.to_str().unwrap()])
+        .args(["--clients", "qwen"])
+        .args(["--skip-agent-knowledge", "--skip-agent-memory"])
+        .env(
+            "AWI_RELEASE_BASE_URL",
+            format!("file://{}", release.display()),
+        )
+        .env("HOME", &home)
+        .env("XDG_CONFIG_HOME", fixture.path().join("config"))
+        .env("PATH", "/usr/bin:/bin")
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "release installer failed: stdout={}, stderr={}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(bin.join("awi").is_file());
+    assert!(index.join("catalog.sqlite3").is_file());
+    let instructions = fs::read_to_string(workspace.join("AGENTS.md")).unwrap();
+    assert!(instructions.contains("## AWI Workspace Retrieval"));
+    assert!(String::from_utf8_lossy(&output.stdout).contains("AWI installation complete"));
 }
 
 #[test]
@@ -336,7 +452,11 @@ mkdir -p "$prefix/node_modules/pi-mcp-adapter"
         .args(["--bin-dir", installed_bin.to_str().unwrap()])
         .args(["--source-binary", env!("CARGO_BIN_EXE_awi")])
         .args(["--clients", "pi"])
-        .args(["--skip-agent-knowledge", "--skip-agent-memory"])
+        .args([
+            "--skip-agent-instructions",
+            "--skip-agent-knowledge",
+            "--skip-agent-memory",
+        ])
         .env("HOME", &home)
         .env("PI_CODING_AGENT_DIR", &pi_home)
         .env("PATH", format!("{}:/usr/bin:/bin", test_bin.display()))
@@ -350,6 +470,7 @@ mkdir -p "$prefix/node_modules/pi-mcp-adapter"
     );
     assert!(pi_home.join("adapter-installed").is_file());
     assert!(pi_home.join("npm/node_modules/pi-mcp-adapter").is_dir());
+    assert!(!workspace.join("AGENTS.md").exists());
     assert_eq!(
         read_json(&pi_home.join("mcp.json"))["mcpServers"]["awi"]["transport"],
         "stdio"
@@ -419,6 +540,16 @@ fn assert_statuses_count(report: &Value, expected: &str, count: usize) {
     assert!(
         clients.iter().all(|client| client["status"] == expected),
         "unexpected report: {report}"
+    );
+}
+
+fn assert_success(output: &std::process::Output) {
+    assert!(
+        output.status.success(),
+        "command failed: status={:?}, stdout={}, stderr={}",
+        output.status.code(),
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
     );
 }
 

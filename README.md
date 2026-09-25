@@ -33,27 +33,35 @@ GitHub Releases provide native binaries for:
 - `x86_64-unknown-linux-gnu`
 - `aarch64-unknown-linux-gnu`
 
-Install the latest binary with the checksum-verifying installer:
+Install and configure AWI for the current repository in one command:
+
+```bash
+curl -fsSL \
+  https://raw.githubusercontent.com/Baitlo/Agent-Workspace-Index/main/scripts/install-release.sh |
+  bash -s -- --workspace "$PWD"
+```
+
+The installer detects the Linux architecture, downloads the release archive and
+`SHA256SUMS`, verifies the checksum, installs the binary, updates a managed AWI
+section in the workspace's top-level `AGENTS.md`, builds the initial index,
+discovers Agent knowledge and curated project memory, and registers every
+detected supported Agent client. Existing `AGENTS.md` content is preserved and
+re-running the installer replaces rather than duplicates the managed section.
+
+For environments that require reviewing a downloaded script before execution:
 
 ```bash
 curl -fsSLO \
   https://raw.githubusercontent.com/Baitlo/Agent-Workspace-Index/main/scripts/install-release.sh
-bash install-release.sh
+less install-release.sh
+bash install-release.sh --workspace /absolute/path/to/your/repository
 ```
 
-Pin a release with `--version v0.1.0`, or choose another destination with
-`--bin-dir`. The binaries are built natively on Ubuntu 22.04 GitHub-hosted
-runners and require a compatible glibc and `libstdc++`.
-
-The release archive also contains `install.sh`. To install the binary, build an
-initial index, and register detected Agent clients in one operation:
-
-```bash
-tar -xzf awi-x86_64-unknown-linux-gnu.tar.gz
-awi-x86_64-unknown-linux-gnu/install.sh \
-  --source-binary "$PWD/awi-x86_64-unknown-linux-gnu/awi" \
-  --workspace /absolute/path/to/your/repository
-```
+Omit `--workspace` to install only the `awi` binary. Pin a release with
+`--version v0.2.0`, choose another destination with `--bin-dir`, restrict
+clients with `--clients`, or disable the managed instruction block with
+`--skip-agent-instructions`. The binaries are built natively on Ubuntu 22.04
+GitHub-hosted runners and require a compatible glibc and `libstdc++`.
 
 Semantic retrieval remains optional. It additionally requires Python,
 LanceDB, `llama-cpp-python`, and a compatible GGUF embedding model.
@@ -69,14 +77,15 @@ installer from an AWI checkout:
 bash scripts/install.sh --workspace /absolute/path/to/your/repository
 ```
 
-The first run builds and installs `awi`, creates a local index outside the
-workspace, indexes ancestor `AGENTS.md` files and `SKILL.md` manifests found in
-allowlisted Agent directories, indexes curated memory associated with that
-workspace, detects installed Agent clients, and registers the AWI MCP server
-with each supported client. The operation is idempotent. Pass
-`--skip-agent-knowledge` or `--skip-agent-memory` to disable either source
-class. Raw chats remain excluded unless `--include-raw-memory` is supplied.
-Rust and Cargo are required only when building from source.
+The first run builds and installs `awi`, updates the workspace's managed AWI
+instructions, creates a local index outside the workspace, indexes ancestor
+`AGENTS.md` files and `SKILL.md` manifests found in allowlisted Agent
+directories, indexes curated memory associated with that workspace, detects
+installed Agent clients, and registers the AWI MCP server with each supported
+client. The operation is idempotent. Pass `--skip-agent-instructions`,
+`--skip-agent-knowledge`, or `--skip-agent-memory` to disable those steps. Raw
+chats remain excluded unless `--include-raw-memory` is supplied. Rust and Cargo
+are required only when building from source.
 
 If Pi is detected, the installer also installs the pinned
 `pi-mcp-adapter@2.36.0`, because Pi intentionally has no built-in MCP client.

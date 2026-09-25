@@ -123,4 +123,4 @@ jobs:
             --verify-tag \
             --title "AWI $GITHUB_REF_NAME" \
             --generate-notes \
-            --notes "Native Linux binaries for x86_64 and arm64. Semantic retrieval remains optional and requires Python, LanceDB, llama-cpp-python, and a compatible GGUF model."
+            --notes "Native Linux binaries for x86_64 and arm64. The release installer supports one-command workspace indexing, managed AGENTS.md instructions, and MCP client registration. Semantic retrieval remains optional and requires Python, LanceDB, llama-cpp-python, and a compatible GGUF model."
