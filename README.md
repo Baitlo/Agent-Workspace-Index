@@ -322,12 +322,14 @@ awi integrate --client codex,gemini,opencode,qwen,cline,zed,amazon-q,crush \
 
 The command is idempotent and reports one status per client:
 `configured`, `already_configured`, `would_configure`, `needs_attention`,
-`not_installed`, `unsupported`, or `failed`. It currently uses the official MCP
-CLI for Codex, Gemini, and Claude Code, and native JSON configuration for the
-other clients:
+`not_installed`, `unsupported`, or `failed`. The registration method or
+configuration target for every supported client is:
 
-| Client | Registration target |
+| Client | Registration method or target |
 |---|---|
+| Codex | Official `codex mcp add` CLI; persisted in `~/.codex/config.toml` |
+| Gemini CLI | Official `gemini mcp add --scope user` CLI; persisted in `~/.gemini/settings.json` |
+| Claude Code | Official `claude mcp add --scope user` CLI; persisted in `~/.claude.json` |
 | [GitHub Copilot CLI](https://docs.github.com/en/copilot/how-tos/copilot-cli/customize-copilot/add-mcp-servers) | `~/.copilot/mcp-config.json` |
 | TraeCode | `<project>/.trae/mcp.json` |
 | Zcode | `~/.zcode/cli/config.json` at `mcp.servers` |
