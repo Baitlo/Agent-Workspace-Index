@@ -161,22 +161,30 @@ inject_awi_agent_instructions() {
     fi
 
     block="$(awi_agent_instructions)"
+    local block_file
+    block_file="$(mktemp "${TMPDIR:-/tmp}/awi-block.XXXXXX")"
+    printf '%s\n' "$block" >"$block_file"
     if [[ "$begin_count" == 1 ]]; then
-        if ! awk -v begin="$begin" -v end="$end" -v block="$block" '
-            $0 == begin { print block; managed = 1; next }
+        if ! awk -v begin="$begin" -v end="$end" -v block_file="$block_file" '
+            $0 == begin {
+                while ((getline block_line < block_file) > 0) print block_line
+                close(block_file)
+                managed = 1
+                next
+            }
             managed && $0 == end { managed = 0; next }
             !managed { print }
             END { if (managed) exit 42 }
         ' "$instructions" >"$temporary"; then
-            rm -f "$temporary"
+            rm -f "$temporary" "$block_file"
             fail "replace AWI managed block in $instructions"
         fi
     elif [[ -f "$instructions" && -s "$instructions" ]]; then
-        awk -v block="$block" '{ print } END { print ""; print block }' \
-            "$instructions" >"$temporary"
+        { cat "$instructions"; printf '\n'; cat "$block_file"; } >"$temporary"
     else
-        printf '%s\n' "$block" >"$temporary"
+        cat "$block_file" >"$temporary"
     fi
+    rm -f "$block_file"
     chmod "$mode" "$temporary"
     mv -f "$temporary" "$instructions"
     printf 'Updated AWI instructions in %s\n' "$instructions"
