@@ -83,3 +83,53 @@ jobs:
         run: |
           python3 -m unittest tests/test_semantic_sidecar.py
           python3 tests/test_audit_session_adoption.py
+
+  macos:
+    name: macOS ${{ matrix.arch }}
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: aarch64
+            runner: macos-15
+          - arch: x86_64
+            runner: macos-15-intel
+
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v6
+
+      - name: Install Rust
+        run: |
+          rustup set auto-self-update disable
+          toolchain="$(sed -n 's/^channel = "\(.*\)"$/\1/p' rust-toolchain.toml)"
+          rustup toolchain install "$toolchain" --profile minimal --component clippy,rustfmt
+          rustup default "$toolchain"
+
+      - name: Verify native architecture
+        run: |
+          rustc -vV
+          uname -m
+          test "$(rustc -vV | sed -n 's/^host: //p')" = "${{ matrix.arch }}-apple-darwin"
+
+      - name: Build native release
+        run: cargo build --locked --release
+
+      - name: Smoke native binary
+        run: |
+          target/release/awi --version
+          fixture="$(mktemp -d)"
+          trap 'rm -rf "$fixture"' EXIT
+          mkdir -p "$fixture/workspace"
+          printf 'pub fn macos_native_smoke() {}\n' > "$fixture/workspace/lib.rs"
+          target/release/awi --index-dir "$fixture/index" \
+            reconcile "$fixture/workspace" --json
+          target/release/awi --index-dir "$fixture/index" \
+            search macos_native_smoke --json | grep -q 'lib.rs'
+
+      - name: Test Python helpers
+        run: |
+          python3 -m unittest tests/test_semantic_sidecar.py
+          python3 tests/test_audit_session_adoption.py

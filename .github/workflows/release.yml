@@ -27,12 +27,19 @@ jobs:
           - runner: ubuntu-22.04-arm
             target: aarch64-unknown-linux-gnu
             full_test: false
+          - runner: macos-15
+            target: aarch64-apple-darwin
+            full_test: false
+          - runner: macos-15-intel
+            target: x86_64-apple-darwin
+            full_test: false
 
     steps:
       - name: Check out source
         uses: actions/checkout@v6
 
       - name: Install native build dependencies
+        if: runner.os == 'Linux'
         run: |
           sudo apt-get update
           sudo apt-get install --yes build-essential cmake pkg-config
@@ -123,4 +130,4 @@ jobs:
             --verify-tag \
             --title "AWI $GITHUB_REF_NAME" \
             --generate-notes \
-            --notes "Native Linux binaries for x86_64 and arm64. The release installer supports one-command workspace indexing, managed AGENTS.md instructions, and MCP client registration. Semantic retrieval remains optional and requires Python, LanceDB, llama-cpp-python, and a compatible GGUF model."
+            --notes "Native Linux binaries for x86_64 and arm64, plus native macOS binaries for Apple Silicon and Intel. The release installer supports one-command workspace indexing, managed AGENTS.md instructions, and MCP client registration. Semantic retrieval remains optional and requires Python, LanceDB, llama-cpp-python, and a compatible GGUF model."

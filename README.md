@@ -26,12 +26,14 @@ ranking, deduplication, and safety semantics. See
 [Cross-Agent memory indexing](docs/agent-memory.md) for memory sources and the
 raw-history boundary.
 
-## Prebuilt Linux Binaries
+## Prebuilt Linux And macOS Binaries
 
 GitHub Releases provide native binaries for:
 
 - `x86_64-unknown-linux-gnu`
 - `aarch64-unknown-linux-gnu`
+- `aarch64-apple-darwin`
+- `x86_64-apple-darwin`
 
 Install and configure AWI for the current repository in one command:
 
@@ -60,8 +62,10 @@ bash install-release.sh --workspace /absolute/path/to/your/repository
 Omit `--workspace` to install only the `awi` binary. Pin a release with
 `--version v0.2.0`, choose another destination with `--bin-dir`, restrict
 clients with `--clients`, or disable the managed instruction block with
-`--skip-agent-instructions`. The binaries are built natively on Ubuntu 22.04
-GitHub-hosted runners and require a compatible glibc and `libstdc++`.
+`--skip-agent-instructions`. The Linux binaries are built natively on
+Ubuntu 22.04 GitHub-hosted runners and require a compatible glibc and
+`libstdc++`. The macOS binaries are built natively on macOS 15 runners for
+Apple Silicon and Intel.
 
 Semantic retrieval remains optional. It additionally requires Python,
 LanceDB, `llama-cpp-python`, and a compatible GGUF embedding model.

@@ -11,7 +11,7 @@ workspace_args=()
 
 usage() {
 	cat <<'EOF'
-Install a prebuilt AWI release for Linux x86_64 or arm64.
+Install a prebuilt AWI release for Linux x86_64/arm64 or macOS Apple Silicon/Intel.
 
 Usage:
   install-release.sh [options]
@@ -77,22 +77,48 @@ if [[ -z "$workspace" && ${#workspace_args[@]} -gt 0 ]]; then
 	fail "workspace setup options require --workspace"
 fi
 
-[[ "$(uname -s)" == "Linux" ]] || fail "prebuilt releases currently support Linux only"
-case "$(uname -m)" in
-x86_64 | amd64)
-	target="x86_64-unknown-linux-gnu"
+case "$(uname -s)" in
+Linux)
+	case "$(uname -m)" in
+	x86_64 | amd64)
+		target="x86_64-unknown-linux-gnu"
+		;;
+	aarch64 | arm64)
+		target="aarch64-unknown-linux-gnu"
+		;;
+	*)
+		fail "unsupported Linux architecture: $(uname -m)"
+		;;
+	esac
 	;;
-aarch64 | arm64)
-	target="aarch64-unknown-linux-gnu"
+Darwin)
+	case "$(uname -m)" in
+	arm64)
+		target="aarch64-apple-darwin"
+		;;
+	x86_64)
+		target="x86_64-apple-darwin"
+		;;
+	*)
+		fail "unsupported macOS architecture: $(uname -m)"
+		;;
+	esac
 	;;
 *)
-	fail "unsupported Linux architecture: $(uname -m)"
+	fail "prebuilt releases currently support Linux and macOS only"
 	;;
 esac
 
-for command in curl tar sha256sum install; do
+for command in curl tar install; do
 	command -v "$command" >/dev/null 2>&1 || fail "$command is required"
 done
+if command -v sha256sum >/dev/null 2>&1; then
+	sha256_check() { sha256sum --check -; }
+elif command -v shasum >/dev/null 2>&1; then
+	sha256_check() { shasum -a 256 --check -; }
+else
+	fail "sha256sum or shasum is required"
+fi
 
 if [[ -n "$release_base_url" ]]; then
 	release_url="${release_base_url%/}"
@@ -126,7 +152,7 @@ checksum="$(
 [[ -n "$checksum" ]] || fail "release checksum is missing for $archive"
 (
 	cd "$temporary"
-	printf '%s\n' "$checksum" | sha256sum --check -
+	printf '%s\n' "$checksum" | sha256_check
 )
 
 tar --extract --gzip --file "$temporary/$archive" --directory "$temporary"
