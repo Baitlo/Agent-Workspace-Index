@@ -6,13 +6,15 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use anyhow::{Context, Result};
 use rmcp::{
-    ErrorData as McpError, ServerHandler, ServiceExt,
+    ErrorData as McpError, RoleServer, ServerHandler, ServiceExt,
     handler::server::{router::tool::ToolRouter, wrapper::Parameters},
     model::{
-        CallToolResult, ContentBlock, Implementation, ProtocolVersion, ServerCapabilities,
-        ServerConfig,
+        CallToolResult, ContentBlock, Implementation, InitializeRequestParams, InitializeResult,
+        ProtocolVersion, ServerCapabilities, ServerConfig,
     },
-    schemars, tool, tool_handler, tool_router,
+    schemars,
+    service::RequestContext,
+    tool, tool_handler, tool_router,
 };
 use serde::Deserialize;
 use serde_json::{Value, json};
@@ -557,6 +559,18 @@ impl AwiMcpServer {
 
 #[tool_handler(router = self.tool_router)]
 impl ServerHandler for AwiMcpServer {
+    async fn initialize(
+        &self,
+        request: InitializeRequestParams,
+        context: RequestContext<RoleServer>,
+    ) -> Result<InitializeResult, McpError> {
+        if let Some(logger) = &self.audit_logger {
+            logger.observe_client_name(&request.client_info.name);
+        }
+        context.peer.set_peer_info(request.clone());
+        self.negotiate_initialize(&request)
+    }
+
     fn supported_protocol_versions(&self) -> Cow<'static, [ProtocolVersion]> {
         Cow::Borrowed(ProtocolVersion::known_up_to(&ProtocolVersion::V_2025_11_25))
     }

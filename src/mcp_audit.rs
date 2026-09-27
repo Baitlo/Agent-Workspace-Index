@@ -1,9 +1,10 @@
+use std::env;
 use std::fs::{self, File, OpenOptions};
 use std::io::Write;
 use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::{Arc, OnceLock};
+use std::sync::{Arc, OnceLock, RwLock};
 use std::time::{Instant, SystemTime, UNIX_EPOCH};
 
 use anyhow::{Context, Result};
@@ -13,7 +14,7 @@ use rmcp::{ErrorData as McpError, model::CallToolResult};
 use serde::Serialize;
 use serde_json::{Map, Value, json};
 
-const AUDIT_SCHEMA_VERSION: u8 = 4;
+const AUDIT_SCHEMA_VERSION: u8 = 5;
 const DEFAULT_MAX_LOG_BYTES: u64 = 64 * 1024 * 1024;
 const MAX_RECORD_BYTES: usize = 16 * 1024;
 const MAX_STRING_CHARS: usize = 2_048;
@@ -28,6 +29,9 @@ pub(crate) struct McpAuditLogger {
     sequence: AtomicU64,
     max_log_bytes: u64,
     client_process: Option<String>,
+    client_name: RwLock<Option<String>>,
+    session_id: Option<String>,
+    synthetic: bool,
 }
 
 impl McpAuditLogger {
@@ -45,13 +49,32 @@ impl McpAuditLogger {
         let lock_path = sibling_path(path, ".lock");
         secure_append_file(path)?;
         secure_append_file(&lock_path)?;
+        let process = parent_process_identity();
         Ok(Arc::new(Self {
             path: path.to_owned(),
             lock_path,
             sequence: AtomicU64::new(0),
             max_log_bytes,
-            client_process: parent_process_name(),
+            client_process: process.client_process,
+            client_name: RwLock::new(
+                optional_env("AWI_MCP_CLIENT_NAME")
+                    .and_then(|value| normalize_client_name(&value))
+                    .or(process.client_name),
+            ),
+            session_id: optional_env("AWI_MCP_SESSION_ID"),
+            synthetic: env_flag("AWI_MCP_SYNTHETIC"),
         }))
+    }
+
+    pub(crate) fn observe_client_name(&self, value: &str) {
+        let Some(value) = normalize_client_name(value) else {
+            return;
+        };
+        let mut client_name = self
+            .client_name
+            .write()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        *client_name = Some(value);
     }
 
     pub(crate) fn span(self: &Arc<Self>, tool: &'static str, arguments: Value) -> McpAuditSpan {
@@ -158,6 +181,12 @@ pub(crate) struct McpAuditSpan {
 impl McpAuditSpan {
     pub(crate) fn finish(self, result: &Result<CallToolResult, McpError>) {
         let metrics = response_metrics(self.tool, result);
+        let client_name = self
+            .logger
+            .client_name
+            .read()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .clone();
         let parent_search_id = (self.tool == "workspace_inspect")
             .then(|| {
                 self.arguments
@@ -171,6 +200,9 @@ impl McpAuditSpan {
             timestamp_unix_ms: self.started_at_unix_ms,
             pid: std::process::id(),
             client_process: self.logger.client_process.as_deref(),
+            client_name: client_name.as_deref(),
+            session_id: self.logger.session_id.as_deref(),
+            synthetic: self.logger.synthetic,
             sequence: self.sequence,
             tool: self.tool,
             arguments: self.arguments,
@@ -207,6 +239,11 @@ struct AuditRecord<'a> {
     pid: u32,
     #[serde(skip_serializing_if = "Option::is_none")]
     client_process: Option<&'a str>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    client_name: Option<&'a str>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    session_id: Option<&'a str>,
+    synthetic: bool,
     sequence: u64,
     tool: &'a str,
     arguments: Value,
@@ -547,16 +584,122 @@ fn unix_time_ms() -> u64 {
         .unwrap_or(u64::MAX)
 }
 
-fn parent_process_name() -> Option<String> {
-    let status = fs::read_to_string("/proc/self/status").ok()?;
-    let parent_pid = status.lines().find_map(|line| {
+#[derive(Default)]
+struct ParentProcessIdentity {
+    client_process: Option<String>,
+    client_name: Option<String>,
+}
+
+fn parent_process_identity() -> ParentProcessIdentity {
+    let mut identity = ParentProcessIdentity::default();
+    let Some(mut pid) = process_parent_pid(std::process::id()) else {
+        return identity;
+    };
+    for depth in 0..8 {
+        let comm = fs::read_to_string(format!("/proc/{pid}/comm"))
+            .ok()
+            .map(|value| sanitize_text(value.trim()))
+            .filter(|value| !value.is_empty());
+        if depth == 0 {
+            identity.client_process.clone_from(&comm);
+        }
+        let command = fs::read(format!("/proc/{pid}/cmdline"))
+            .ok()
+            .map(|value| {
+                value
+                    .split(|byte| *byte == 0)
+                    .filter_map(|part| std::str::from_utf8(part).ok())
+                    .collect::<Vec<_>>()
+                    .join(" ")
+            })
+            .unwrap_or_default();
+        if identity.client_name.is_none() {
+            let evidence = format!("{} {command}", comm.as_deref().unwrap_or_default());
+            identity.client_name = known_client_name(&evidence).map(str::to_owned);
+        }
+        let Some(parent) = process_parent_pid(pid) else {
+            break;
+        };
+        if parent == 0 || parent == pid {
+            break;
+        }
+        pid = parent;
+    }
+    identity
+}
+
+fn process_parent_pid(pid: u32) -> Option<u32> {
+    let status = fs::read_to_string(format!("/proc/{pid}/status")).ok()?;
+    status.lines().find_map(|line| {
         line.strip_prefix("PPid:")
             .map(str::trim)
             .and_then(|value| value.parse::<u32>().ok())
-    })?;
-    let name = fs::read_to_string(format!("/proc/{parent_pid}/comm")).ok()?;
-    let name = sanitize_text(name.trim());
-    (!name.is_empty()).then_some(name)
+    })
+}
+
+fn known_client_name(value: &str) -> Option<&'static str> {
+    let value = value.to_ascii_lowercase();
+    value
+        .split(|character: char| !character.is_ascii_alphanumeric())
+        .find_map(|token| match token {
+            "amazonq" => Some("amazon-q"),
+            "claude" | "claudecode" => Some("claude"),
+            "cline" => Some("cline"),
+            "codex" => Some("codex"),
+            "copilot" | "githubcopilot" => Some("copilot"),
+            "crush" => Some("crush"),
+            "cursor" | "cursoragent" => Some("cursor"),
+            "gemini" => Some("gemini"),
+            "kimi" | "kimicode" => Some("kimi"),
+            "opencode" => Some("opencode"),
+            "pi" | "picodingagent" => Some("pi"),
+            "qwen" | "qwencode" => Some("qwen"),
+            "trae" | "traecode" | "traecli" => Some("trae"),
+            "windsurf" | "windsurfcascade" => Some("windsurf"),
+            "zcode" | "zcodecli" => Some("zcode"),
+            "zed" | "zededitor" => Some("zed"),
+            _ => None,
+        })
+}
+
+fn normalize_client_name(value: &str) -> Option<String> {
+    if let Some(client) = known_client_name(value) {
+        return Some(client.to_owned());
+    }
+    let mut normalized = String::new();
+    let mut previous_separator = false;
+    for character in value.trim().chars() {
+        if character.is_ascii_alphanumeric() {
+            normalized.push(character.to_ascii_lowercase());
+            previous_separator = false;
+        } else if !previous_separator && !normalized.is_empty() {
+            normalized.push('-');
+            previous_separator = true;
+        }
+        if normalized.len() >= 80 {
+            break;
+        }
+    }
+    while normalized.ends_with('-') {
+        normalized.pop();
+    }
+    (!normalized.is_empty()).then_some(normalized)
+}
+
+fn optional_env(name: &str) -> Option<String> {
+    env::var(name)
+        .ok()
+        .map(|value| truncate_chars(&sanitize_text(value.trim()), 256))
+        .filter(|value| !value.is_empty())
+}
+
+fn env_flag(name: &str) -> bool {
+    env::var(name).is_ok_and(|value| {
+        matches!(
+            value.trim().to_ascii_lowercase().as_str(),
+            "1" | "true" | "yes" | "on"
+        )
+    })
 }
 
 fn value_string(value: &Value) -> String {
@@ -580,6 +723,7 @@ mod tests {
         let fixture = tempdir().unwrap();
         let path = fixture.path().join("calls.jsonl");
         let logger = McpAuditLogger::open(&path).unwrap();
+        logger.observe_client_name("OpenAI Codex");
         let span = logger.span(
             "workspace_search",
             json!({
@@ -605,7 +749,9 @@ mod tests {
         assert!(!text.contains("top-secret"));
         let record: Value = serde_json::from_str(text.trim()).unwrap();
         assert_eq!(record["tool"], "workspace_search");
-        assert_eq!(record["schema_version"], 4);
+        assert_eq!(record["schema_version"], 5);
+        assert_eq!(record["client_name"], "codex");
+        assert_eq!(record["synthetic"], false);
         assert_eq!(record["status"], "ok");
         assert_eq!(record["result_count"], 1);
         assert_eq!(record["result_count_kind"], "hits");
@@ -675,5 +821,15 @@ mod tests {
         assert_eq!(record["parent_search_id"], "s-test-1");
         assert_eq!(record["error_code"], "inspect_failed");
         assert_eq!(record["error_message"], "authorization: [REDACTED]");
+    }
+
+    #[test]
+    fn normalizes_known_and_custom_client_names() {
+        assert_eq!(normalize_client_name("Zcode CLI").as_deref(), Some("zcode"));
+        assert_eq!(
+            normalize_client_name("AWI Integration Test").as_deref(),
+            Some("awi-integration-test")
+        );
+        assert_eq!(normalize_client_name("  ").as_deref(), None);
     }
 }

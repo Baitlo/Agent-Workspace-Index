@@ -385,12 +385,14 @@ entries.
 
 MCP audit logging is optional. When enabled, AWI writes private (`0600`) JSONL
 records containing bounded and credential-redacted arguments, caller process,
-duration, outcome, error detail, response bytes, text/structured payload bytes,
-hit/row counts, and separate preview-truncation and limit-compaction flags.
-Schema v4 retains the aggregate `result_truncated` field for compatibility and
-adds `search_id`, ordered Top-K `file_id`/score/matched-lane evidence, and
-`parent_search_id` on linked inspections. The active log rotates at 64 MiB and
-retains one previous file. Project adoption reports use
+standardized client name, optional session ID, synthetic-call marker, duration,
+outcome, error detail, response bytes, text/structured payload bytes, hit/row
+counts, and separate preview-truncation and limit-compaction flags. Schema v5
+retains the v4 search/inspect linkage fields and adds `client_name`, `session_id`,
+and `synthetic`. Set explicit metadata with `AWI_MCP_CLIENT_NAME`,
+`AWI_MCP_SESSION_ID`, and `AWI_MCP_SYNTHETIC`; MCP initialize `clientInfo.name`
+overrides process inference. The active log rotates at 64 MiB and retains one
+previous file. Project adoption reports use
 [`eligible_session_adoption`](docs/session-adoption.md), not all project
 sessions as the denominator.
 

@@ -54,7 +54,7 @@ fn mcp_stdio_exposes_search_inspect_and_query() {
             "protocolVersion": "2026-07-28",
             "capabilities": {},
             "clientInfo": {
-                "name": "awi-integration-test",
+                "name": "OpenAI Codex",
                 "version": "0.1.0"
             }
         }),
@@ -331,7 +331,10 @@ fn mcp_stdio_exposes_search_inspect_and_query() {
         .collect::<Vec<_>>();
     assert_eq!(records.len(), 7);
     assert_eq!(records[0]["tool"], "workspace_search");
-    assert_eq!(records[0]["schema_version"], 4);
+    assert_eq!(records[0]["schema_version"], 5);
+    assert_eq!(records[0]["client_name"], "codex");
+    assert_eq!(records[0]["session_id"], "test-session");
+    assert_eq!(records[0]["synthetic"], true);
     assert_eq!(records[0]["status"], "ok");
     assert_eq!(records[0]["search_id"], search_id);
     assert_eq!(records[0]["result_count_kind"], "hits");
@@ -394,6 +397,9 @@ impl McpProcess {
             .args(["--index-dir", path(index_dir), "--socket", path(socket)])
             .arg("mcp")
             .args(["--audit-log", path(audit_log)])
+            .env("AWI_MCP_CLIENT_NAME", "codex")
+            .env("AWI_MCP_SESSION_ID", "test-session")
+            .env("AWI_MCP_SYNTHETIC", "true")
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::inherit())
