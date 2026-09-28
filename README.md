@@ -423,4 +423,4 @@ adjudicated, and the approved labels and reviewer identities are recorded.
 
 ## License
 
-MIT
+Non-Commercial License. Free for personal, academic, and non-profit use. Commercial use requires prior written consent. See [LICENSE](LICENSE) for details.

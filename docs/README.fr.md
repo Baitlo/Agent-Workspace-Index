@@ -265,4 +265,4 @@ Voir [`evaluation/two_shot_plus_tongyong_agent_ab_20260920/README.md`](../evalua
 
 ## Licence
 
-MIT
+Licence non commerciale. Gratuit pour un usage personnel, académique et non lucratif. Toute utilisation commerciale nécessite un accord écrit préalable. Voir [LICENSE](../LICENSE) pour plus de détails.

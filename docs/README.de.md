@@ -265,4 +265,4 @@ Siehe [`evaluation/two_shot_plus_tongyong_agent_ab_20260920/README.md`](../evalu
 
 ## Lizenz
 
-MIT
+Nicht-kommerzielle Lizenz. Kostenlos für persönliche, akademische und gemeinnützige Nutzung. Jede kommerzielle Nutzung erfordert eine vorherige schriftliche Zustimmung. Details siehe [LICENSE](../LICENSE).
