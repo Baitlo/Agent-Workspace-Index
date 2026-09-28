@@ -1,5 +1,7 @@
 # AWI: Agent Workspace Index
 
+**English** · [中文](docs/README.zh.md) · [日本語](docs/README.ja.md) · [한국어](docs/README.ko.md) · [Русский](docs/README.ru.md) · [Français](docs/README.fr.md) · [Deutsch](docs/README.de.md)
+
 AWI is a local-first unified index for code, data, and Agent operational
 knowledge. It indexes source code, SQL, documents, logs, JSON/JSONL, CSV/TSV,
 Parquet, `AGENTS.md`, Agent Skills, and project-scoped cross-Agent memory through
