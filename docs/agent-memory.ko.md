@@ -1,6 +1,6 @@
 # 크로스 에이전트 메모리 인덱싱
 
-AWI는 지원되는 코딩 에이전트에서 프로젝트 관련 메모리를 검색하고 기존 `workspace_search` 및 `workspace_inspect` 도구를 통해 검색할 수 있도록 할 수 있습니다. 별도의 MCP 도구를 추가하지 않습니다.
+[English](agent-memory.md) · [中文](agent-memory.zh.md) · [繁體中文](agent-memory.zh-TW.md) · [日本語](agent-memory.ja.md) · **한국어** · [Русский](agent-memory.ru.md) · [Français](agent-memory.fr.md) · [Deutsch](agent-memory.de.md) · [Português](agent-memory.pt.md) · [Español](agent-memory.es.md) · [العربية](agent-memory.ar.md) · [Italiano](agent-memory.it.md) · [Ελληνικά](agent-memory.el.md) · [ไทย](agent-memory.th.md) · [Bahasa Melayu](agent-memory.ms.md)
 
 ## 사용법
 

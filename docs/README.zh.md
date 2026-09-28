@@ -1,6 +1,6 @@
 # AWI: Agent Workspace Index
 
-**[English](../README.md)** · **中文** · [日本語](README.ja.md) · [한국어](README.ko.md) · [Русский](README.ru.md) · [Français](README.fr.md) · [Deutsch](README.de.md)
+[English](../README.md) · **中文** · [繁體中文](README.zh-TW.md) · [日本語](README.ja.md) · [한국어](README.ko.md) · [Русский](README.ru.md) · [Français](README.fr.md) · [Deutsch](README.de.md) · [Português](README.pt.md) · [Español](README.es.md) · [العربية](README.ar.md) · [Italiano](README.it.md) · [Ελληνικά](README.el.md) · [ไทย](README.th.md) · [Bahasa Melayu](README.ms.md)
 
 AWI 是一个本地优先的统一索引，用于代码、数据和 Agent 操作知识。它通过一个受限的 CLI 和 Model Context Protocol (MCP) 界面索引源代码、SQL、文档、日志、JSON/JSONL、CSV/TSV、Parquet、`AGENTS.md`、Agent Skills 以及项目级的跨 Agent 记忆。
 

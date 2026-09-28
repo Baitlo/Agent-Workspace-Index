@@ -1,6 +1,6 @@
 # 에이전트 지식 인덱싱
 
-AWI는 다른 MCP 도구를 추가하지 않고도 소스 코드 및 데이터와 함께 에이전트 운영 지침을 인덱싱합니다.
+[English](agent-knowledge.md) · [中文](agent-knowledge.zh.md) · [繁體中文](agent-knowledge.zh-TW.md) · [日本語](agent-knowledge.ja.md) · **한국어** · [Русский](agent-knowledge.ru.md) · [Français](agent-knowledge.fr.md) · [Deutsch](agent-knowledge.de.md) · [Português](agent-knowledge.pt.md) · [Español](agent-knowledge.es.md) · [العربية](agent-knowledge.ar.md) · [Italiano](agent-knowledge.it.md) · [Ελληνικά](agent-knowledge.el.md) · [ไทย](agent-knowledge.th.md) · [Bahasa Melayu](agent-knowledge.ms.md)
 
 크로스 에이전트 프로젝트 기록은 `agent_memory`로 별도로 처리됩니다. [크로스 에이전트 메모리 인덱싱](agent-memory.md)을 참조하세요.
 

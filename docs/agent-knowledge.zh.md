@@ -1,6 +1,6 @@
 # Agent 知识索引
 
-AWI 在源代码和数据旁边索引 Agent 操作指令，而无需添加另一个 MCP 工具。
+[English](agent-knowledge.md) · **中文** · [繁體中文](agent-knowledge.zh-TW.md) · [日本語](agent-knowledge.ja.md) · [한국어](agent-knowledge.ko.md) · [Русский](agent-knowledge.ru.md) · [Français](agent-knowledge.fr.md) · [Deutsch](agent-knowledge.de.md) · [Português](agent-knowledge.pt.md) · [Español](agent-knowledge.es.md) · [العربية](agent-knowledge.ar.md) · [Italiano](agent-knowledge.it.md) · [Ελληνικά](agent-knowledge.el.md) · [ไทย](agent-knowledge.th.md) · [Bahasa Melayu](agent-knowledge.ms.md)
 
 跨 Agent 项目历史单独作为 `agent_memory` 处理；请参阅[跨 Agent 记忆索引](agent-memory.md)。
 

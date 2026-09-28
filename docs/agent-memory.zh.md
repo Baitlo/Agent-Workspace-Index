@@ -1,6 +1,6 @@
 # 跨 Agent 记忆索引
 
-AWI 可以从支持的编码 Agent 中发现与项目相关的记忆，并通过现有的 `workspace_search` 和 `workspace_inspect` 工具使其可搜索。它不会添加单独的 MCP 工具。
+[English](agent-memory.md) · **中文** · [繁體中文](agent-memory.zh-TW.md) · [日本語](agent-memory.ja.md) · [한국어](agent-memory.ko.md) · [Русский](agent-memory.ru.md) · [Français](agent-memory.fr.md) · [Deutsch](agent-memory.de.md) · [Português](agent-memory.pt.md) · [Español](agent-memory.es.md) · [العربية](agent-memory.ar.md) · [Italiano](agent-memory.it.md) · [Ελληνικά](agent-memory.el.md) · [ไทย](agent-memory.th.md) · [Bahasa Melayu](agent-memory.ms.md)
 
 ## 用法
 

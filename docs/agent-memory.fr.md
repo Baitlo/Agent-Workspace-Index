@@ -1,6 +1,6 @@
 # Indexation de la mémoire inter-agents
 
-AWI peut découvrir des souvenirs pertinents pour le projet à partir d'agents de codage pris en charge et les rendre consultables via les outils existants `workspace_search` et `workspace_inspect`. Il n'ajoute pas d'outil MCP séparé.
+[English](agent-memory.md) · [中文](agent-memory.zh.md) · [繁體中文](agent-memory.zh-TW.md) · [日本語](agent-memory.ja.md) · [한국어](agent-memory.ko.md) · [Русский](agent-memory.ru.md) · **Français** · [Deutsch](agent-memory.de.md) · [Português](agent-memory.pt.md) · [Español](agent-memory.es.md) · [العربية](agent-memory.ar.md) · [Italiano](agent-memory.it.md) · [Ελληνικά](agent-memory.el.md) · [ไทย](agent-memory.th.md) · [Bahasa Melayu](agent-memory.ms.md)
 
 ## Utilisation
 

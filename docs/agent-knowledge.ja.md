@@ -1,6 +1,6 @@
 # エージェント知識インデックス
 
-AWI は、別の MCP ツールを追加せずに、ソースコードやデータと並んでエージェント操作指示をインデックスします。
+[English](agent-knowledge.md) · [中文](agent-knowledge.zh.md) · [繁體中文](agent-knowledge.zh-TW.md) · **日本語** · [한국어](agent-knowledge.ko.md) · [Русский](agent-knowledge.ru.md) · [Français](agent-knowledge.fr.md) · [Deutsch](agent-knowledge.de.md) · [Português](agent-knowledge.pt.md) · [Español](agent-knowledge.es.md) · [العربية](agent-knowledge.ar.md) · [Italiano](agent-knowledge.it.md) · [Ελληνικά](agent-knowledge.el.md) · [ไทย](agent-knowledge.th.md) · [Bahasa Melayu](agent-knowledge.ms.md)
 
 クロスエージェントプロジェクト履歴は `agent_memory` として個別に処理されます。[クロスエージェントメモリインデックス](agent-memory.md)を参照してください。
 

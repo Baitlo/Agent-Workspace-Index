@@ -1,6 +1,6 @@
 # Agentenwissensindizierung
 
-AWI indiziert Agentenbetriebsanweisungen neben Quellcode und Daten, ohne ein weiteres MCP-Tool hinzuzufügen.
+[English](agent-knowledge.md) · [中文](agent-knowledge.zh.md) · [繁體中文](agent-knowledge.zh-TW.md) · [日本語](agent-knowledge.ja.md) · [한국어](agent-knowledge.ko.md) · [Русский](agent-knowledge.ru.md) · [Français](agent-knowledge.fr.md) · **Deutsch** · [Português](agent-knowledge.pt.md) · [Español](agent-knowledge.es.md) · [العربية](agent-knowledge.ar.md) · [Italiano](agent-knowledge.it.md) · [Ελληνικά](agent-knowledge.el.md) · [ไทย](agent-knowledge.th.md) · [Bahasa Melayu](agent-knowledge.ms.md)
 
 Die agentenübergreifende Projekthistorie wird separat als `agent_memory` behandelt; siehe [Agentenübergreifende Gedächtnisindizierung](agent-memory.md).
 

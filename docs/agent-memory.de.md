@@ -1,6 +1,6 @@
 # Agentenübergreifende Gedächtnisindizierung
 
-AWI kann projektrelevantes Gedächtnis aus unterstützten Coding-Agents entdecken und es über die bestehenden Tools `workspace_search` und `workspace_inspect` durchsuchbar machen. Es fügt kein separates MCP-Tool hinzu.
+[English](agent-memory.md) · [中文](agent-memory.zh.md) · [繁體中文](agent-memory.zh-TW.md) · [日本語](agent-memory.ja.md) · [한국어](agent-memory.ko.md) · [Русский](agent-memory.ru.md) · [Français](agent-memory.fr.md) · **Deutsch** · [Português](agent-memory.pt.md) · [Español](agent-memory.es.md) · [العربية](agent-memory.ar.md) · [Italiano](agent-memory.it.md) · [Ελληνικά](agent-memory.el.md) · [ไทย](agent-memory.th.md) · [Bahasa Melayu](agent-memory.ms.md)
 
 ## Verwendung
 

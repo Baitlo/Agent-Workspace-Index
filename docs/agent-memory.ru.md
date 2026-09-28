@@ -1,6 +1,6 @@
 # Индексация межагентной памяти
 
-AWI может обнаруживать память, относящуюся к проекту, из поддерживаемых агентов кодирования и делать её доступной для поиска через существующие инструменты `workspace_search` и `workspace_inspect`. Он не добавляет отдельный инструмент MCP.
+[English](agent-memory.md) · [中文](agent-memory.zh.md) · [繁體中文](agent-memory.zh-TW.md) · [日本語](agent-memory.ja.md) · [한국어](agent-memory.ko.md) · **Русский** · [Français](agent-memory.fr.md) · [Deutsch](agent-memory.de.md) · [Português](agent-memory.pt.md) · [Español](agent-memory.es.md) · [العربية](agent-memory.ar.md) · [Italiano](agent-memory.it.md) · [Ελληνικά](agent-memory.el.md) · [ไทย](agent-memory.th.md) · [Bahasa Melayu](agent-memory.ms.md)
 
 ## Использование
 

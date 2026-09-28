@@ -1,6 +1,6 @@
 # Индексация знаний агента
 
-AWI индексирует операционные инструкции агента наряду с исходным кодом и данными без добавления ещё одного инструмента MCP.
+[English](agent-knowledge.md) · [中文](agent-knowledge.zh.md) · [繁體中文](agent-knowledge.zh-TW.md) · [日本語](agent-knowledge.ja.md) · [한국어](agent-knowledge.ko.md) · **Русский** · [Français](agent-knowledge.fr.md) · [Deutsch](agent-knowledge.de.md) · [Português](agent-knowledge.pt.md) · [Español](agent-knowledge.es.md) · [العربية](agent-knowledge.ar.md) · [Italiano](agent-knowledge.it.md) · [Ελληνικά](agent-knowledge.el.md) · [ไทย](agent-knowledge.th.md) · [Bahasa Melayu](agent-knowledge.ms.md)
 
 Межагентная история проекта обрабатывается отдельно как `agent_memory`; см. [Индексация межагентной памяти](agent-memory.md).
 

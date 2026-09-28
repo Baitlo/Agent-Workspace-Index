@@ -1,6 +1,6 @@
 # AWI: Agent Workspace Index
 
-**[English](../README.md)** · [中文](README.zh.md) · [日本語](README.ja.md) · **한국어** · [Русский](README.ru.md) · [Français](README.fr.md) · [Deutsch](README.de.md)
+[English](../README.md) · [中文](README.zh.md) · [繁體中文](README.zh-TW.md) · [日本語](README.ja.md) · **한국어** · [Русский](README.ru.md) · [Français](README.fr.md) · [Deutsch](README.de.md) · [Português](README.pt.md) · [Español](README.es.md) · [العربية](README.ar.md) · [Italiano](README.it.md) · [Ελληνικά](README.el.md) · [ไทย](README.th.md) · [Bahasa Melayu](README.ms.md)
 
 AWI는 코드, 데이터 및 에이전트 운영 지식을 위한 로컬 우선 통합 인덱스입니다. 하나의 제한된 CLI 및 Model Context Protocol (MCP) 인터페이스를 통해 소스 코드, SQL, 문서, 로그, JSON/JSONL, CSV/TSV, Parquet, `AGENTS.md`, 에이전트 스킬 및 프로젝트 범위의 크로스 에이전트 메모리를 인덱싱합니다.
 

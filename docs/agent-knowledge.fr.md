@@ -1,6 +1,6 @@
 # Indexation des connaissances de l'agent
 
-AWI indexe les instructions opérationnelles de l'agent aux côtés du code source et des données sans ajouter un autre outil MCP.
+[English](agent-knowledge.md) · [中文](agent-knowledge.zh.md) · [繁體中文](agent-knowledge.zh-TW.md) · [日本語](agent-knowledge.ja.md) · [한국어](agent-knowledge.ko.md) · [Русский](agent-knowledge.ru.md) · **Français** · [Deutsch](agent-knowledge.de.md) · [Português](agent-knowledge.pt.md) · [Español](agent-knowledge.es.md) · [العربية](agent-knowledge.ar.md) · [Italiano](agent-knowledge.it.md) · [Ελληνικά](agent-knowledge.el.md) · [ไทย](agent-knowledge.th.md) · [Bahasa Melayu](agent-knowledge.ms.md)
 
 L'historique du projet inter-agents est traité séparément en tant que `agent_memory` ; voir [Indexation de la mémoire inter-agents](agent-memory.md).
 

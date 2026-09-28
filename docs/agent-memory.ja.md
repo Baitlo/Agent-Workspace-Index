@@ -1,6 +1,6 @@
 # クロスエージェントメモリインデックス
 
-AWI は、サポートされているコーディングエージェントからプロジェクト関連のメモリを発見し、既存の `workspace_search` および `workspace_inspect` ツールを通じて検索可能にできます。別の MCP ツールは追加しません。
+[English](agent-memory.md) · [中文](agent-memory.zh.md) · [繁體中文](agent-memory.zh-TW.md) · **日本語** · [한국어](agent-memory.ko.md) · [Русский](agent-memory.ru.md) · [Français](agent-memory.fr.md) · [Deutsch](agent-memory.de.md) · [Português](agent-memory.pt.md) · [Español](agent-memory.es.md) · [العربية](agent-memory.ar.md) · [Italiano](agent-memory.it.md) · [Ελληνικά](agent-memory.el.md) · [ไทย](agent-memory.th.md) · [Bahasa Melayu](agent-memory.ms.md)
 
 ## 使用方法
 
