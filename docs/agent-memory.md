@@ -1,5 +1,7 @@
 # Cross-Agent Memory Indexing
 
+**English** · [中文](agent-memory.zh.md) · [日本語](agent-memory.ja.md) · [한국어](agent-memory.ko.md) · [Русский](agent-memory.ru.md) · [Français](agent-memory.fr.md) · [Deutsch](agent-memory.de.md)
+
 AWI can discover project-relevant memory from supported coding Agents and make
 it searchable through the existing `workspace_search` and `workspace_inspect`
 tools. It does not add a separate MCP tool.

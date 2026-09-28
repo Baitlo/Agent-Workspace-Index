@@ -1,5 +1,7 @@
 # Agent Knowledge Indexing
 
+**English** · [中文](agent-knowledge.zh.md) · [日本語](agent-knowledge.ja.md) · [한국어](agent-knowledge.ko.md) · [Русский](agent-knowledge.ru.md) · [Français](agent-knowledge.fr.md) · [Deutsch](agent-knowledge.de.md)
+
 AWI indexes Agent operating instructions alongside source code and data without
 adding another MCP tool.
 
