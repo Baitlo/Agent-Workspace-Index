@@ -44,7 +44,10 @@ fn configures_new_clients_privately_and_idempotently() {
         );
     }
 
-    assert_eq!(read_json(&paths[0])["mcpServers"]["awi"]["timeout"], 45_000);
+    assert_eq!(
+        read_json(&paths[0])["mcpServers"]["awi"]["timeout"],
+        600_000
+    );
     assert_eq!(
         read_json(&paths[1])["mcpServers"]["awi"]["transport"]["type"],
         "stdio"
@@ -53,8 +56,11 @@ fn configures_new_clients_privately_and_idempotently() {
         read_json(&paths[2])["context_servers"]["awi"]["command"],
         "/bin/echo"
     );
-    assert_eq!(read_json(&paths[3])["mcpServers"]["awi"]["timeout"], 45_000);
-    assert_eq!(read_json(&paths[4])["mcp"]["awi"]["timeout"], 45);
+    assert_eq!(
+        read_json(&paths[3])["mcpServers"]["awi"]["timeout"],
+        600_000
+    );
+    assert_eq!(read_json(&paths[4])["mcp"]["awi"]["timeout"], 600);
 
     let second = run_integrate(fixture.path(), &home, &config_home, &bin);
     assert!(

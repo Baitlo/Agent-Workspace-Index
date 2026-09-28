@@ -11,8 +11,9 @@ use serde::Serialize;
 use serde_json::{Value, json};
 
 const SERVER_NAME: &str = "awi";
-const MCP_TIMEOUT_MS: u64 = 45_000;
-const MCP_TIMEOUT_SECONDS: u64 = MCP_TIMEOUT_MS / 1_000;
+const MCP_STARTUP_TIMEOUT_MS: u64 = 600_000;
+const MCP_TOOL_TIMEOUT_MS: u64 = 45_000;
+const MCP_STARTUP_TIMEOUT_SECONDS: u64 = MCP_STARTUP_TIMEOUT_MS / 1_000;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum IntegrationClient {
@@ -384,7 +385,7 @@ fn integrate_gemini(
         "--transport".to_owned(),
         "stdio".to_owned(),
         "--timeout".to_owned(),
-        MCP_TIMEOUT_MS.to_string(),
+        MCP_STARTUP_TIMEOUT_MS.to_string(),
         "--description".to_owned(),
         "AWI workspace code and data retrieval".to_owned(),
     ]);
@@ -907,7 +908,7 @@ fn merge_zcode_mcp(mut root: Value, server: &McpServerSpec) -> Result<Value> {
             "args": server.args,
             "env": {},
             "enabled": true,
-            "timeoutMs": MCP_TIMEOUT_MS
+            "timeoutMs": MCP_STARTUP_TIMEOUT_MS
         }),
     );
     Ok(root)
@@ -934,7 +935,7 @@ fn merge_opencode_mcp(mut root: Value, server: &McpServerSpec) -> Result<Value> 
             "type": "local",
             "command": command,
             "enabled": true,
-            "timeout": MCP_TIMEOUT_MS
+            "timeout": MCP_STARTUP_TIMEOUT_MS
         }),
     );
     Ok(root)
@@ -985,7 +986,7 @@ fn merge_copilot_mcp(mut root: Value, server: &McpServerSpec) -> Result<Value> {
             "args": server.args,
             "env": {},
             "tools": ["*"],
-            "timeout": MCP_TIMEOUT_MS
+            "timeout": MCP_STARTUP_TIMEOUT_MS
         }),
     );
     Ok(root)
@@ -1011,8 +1012,8 @@ fn merge_kimi_mcp(mut root: Value, server: &McpServerSpec) -> Result<Value> {
             "args": server.args,
             "env": {},
             "enabled": true,
-            "startupTimeoutMs": MCP_TIMEOUT_MS,
-            "toolTimeoutMs": MCP_TIMEOUT_MS
+            "startupTimeoutMs": MCP_STARTUP_TIMEOUT_MS,
+            "toolTimeoutMs": MCP_TOOL_TIMEOUT_MS
         }),
     );
     Ok(root)
@@ -1026,8 +1027,8 @@ fn merge_json_mcp(root: Value, server: &McpServerSpec) -> Result<Value> {
             "command": server.command,
             "args": server.args,
             "env": {
-                "START_MCP_TIMEOUT_MS": MCP_TIMEOUT_MS.to_string(),
-                "RUN_MCP_TIMEOUT_MS": MCP_TIMEOUT_MS.to_string()
+                "START_MCP_TIMEOUT_MS": MCP_STARTUP_TIMEOUT_MS.to_string(),
+                "RUN_MCP_TIMEOUT_MS": MCP_TOOL_TIMEOUT_MS.to_string()
             }
         }),
     )
@@ -1041,7 +1042,7 @@ fn merge_qwen_mcp(root: Value, server: &McpServerSpec) -> Result<Value> {
             "command": server.command,
             "args": server.args,
             "env": {},
-            "timeout": MCP_TIMEOUT_MS
+            "timeout": MCP_STARTUP_TIMEOUT_MS
         }),
     )
 }
@@ -1094,7 +1095,7 @@ fn merge_amazon_q_mcp(root: Value, server: &McpServerSpec) -> Result<Value> {
             "command": server.command,
             "args": server.args,
             "env": {},
-            "timeout": MCP_TIMEOUT_MS
+            "timeout": MCP_STARTUP_TIMEOUT_MS
         }),
     )
 }
@@ -1109,7 +1110,7 @@ fn merge_crush_mcp(root: Value, server: &McpServerSpec) -> Result<Value> {
             "args": server.args,
             "env": {},
             "disabled": false,
-            "timeout": MCP_TIMEOUT_SECONDS
+            "timeout": MCP_STARTUP_TIMEOUT_SECONDS
         }),
     )
 }
@@ -1560,6 +1561,14 @@ mod tests {
         .unwrap();
         assert_eq!(merged["preserved"], true);
         assert_eq!(merged["mcpServers"]["other"]["command"], "/bin/other");
+        assert_eq!(
+            merged["mcpServers"]["awi"]["env"]["START_MCP_TIMEOUT_MS"],
+            "600000"
+        );
+        assert_eq!(
+            merged["mcpServers"]["awi"]["env"]["RUN_MCP_TIMEOUT_MS"],
+            "45000"
+        );
         assert!(json_server_matches(
             merged.pointer("/mcpServers/awi"),
             &server
@@ -1600,7 +1609,7 @@ mod tests {
             merged.pointer("/mcp/servers/awi"),
             &server
         ));
-        assert_eq!(merged["mcp"]["servers"]["awi"]["timeoutMs"], 45_000);
+        assert_eq!(merged["mcp"]["servers"]["awi"]["timeoutMs"], 600_000);
     }
 
     #[test]
@@ -1706,7 +1715,7 @@ mod tests {
             merged.pointer("/mcpServers/awi"),
             &server
         ));
-        assert_eq!(merged["mcpServers"]["awi"]["startupTimeoutMs"], 45_000);
+        assert_eq!(merged["mcpServers"]["awi"]["startupTimeoutMs"], 600_000);
         assert_eq!(merged["mcpServers"]["awi"]["toolTimeoutMs"], 45_000);
     }
 
@@ -1730,7 +1739,7 @@ mod tests {
         ] {
             assert_eq!(merged["preserved"], true);
             assert_eq!(merged["mcpServers"]["other"]["command"], "/bin/other");
-            assert_eq!(merged["mcpServers"]["awi"]["timeout"], 45_000);
+            assert_eq!(merged["mcpServers"]["awi"]["timeout"], 600_000);
             assert!(json_server_matches(
                 merged.pointer("/mcpServers/awi"),
                 &server
@@ -1821,7 +1830,7 @@ mod tests {
         assert_eq!(merged_again, merged);
         assert_eq!(merged["mcp"]["other"]["type"], "http");
         assert_eq!(merged["mcp"]["awi"]["type"], "stdio");
-        assert_eq!(merged["mcp"]["awi"]["timeout"], 45);
+        assert_eq!(merged["mcp"]["awi"]["timeout"], 600);
         assert!(crush_server_matches(merged.pointer("/mcp/awi"), &server));
     }
 

@@ -169,6 +169,7 @@ pub(crate) fn materialize_latest(
 
     let generations_dir = cache_dir.join("generations");
     fs::create_dir_all(&generations_dir)?;
+    remove_stale_materializations(&generations_dir)?;
     let local = generations_dir.join(&pointer.directory);
     if local.exists() {
         if verify_snapshot(&local).is_ok() {
@@ -187,15 +188,45 @@ pub(crate) fn materialize_latest(
         make_writable(&staging)?;
         fs::remove_dir_all(&staging)?;
     }
-    copy_tree(&source, &staging)?;
-    verify_snapshot(&staging)?;
-    make_writable(&staging)?;
-    fs::rename(&staging, &local)?;
-    sync_directory(&generations_dir)?;
-    Ok(ActivatedSnapshot {
-        generation: pointer.generation,
-        path: local,
-    })
+    let result = (|| {
+        copy_tree(&source, &staging)?;
+        verify_snapshot(&staging)?;
+        make_writable(&staging)?;
+        fs::rename(&staging, &local)?;
+        sync_directory(&generations_dir)?;
+        Ok(ActivatedSnapshot {
+            generation: pointer.generation,
+            path: local,
+        })
+    })();
+    if result.is_err() && staging.exists() {
+        let _ = make_writable(&staging);
+        let _ = fs::remove_dir_all(&staging);
+    }
+    result
+}
+
+fn remove_stale_materializations(generations_dir: &Path) -> Result<()> {
+    for entry in fs::read_dir(generations_dir)
+        .with_context(|| format!("list snapshot cache {}", generations_dir.display()))?
+    {
+        let entry = entry?;
+        if !entry.file_type()?.is_dir() {
+            continue;
+        }
+        let name = entry.file_name();
+        let Some(name) = name.to_str() else {
+            continue;
+        };
+        if !name.starts_with(".generation-") || !name.contains(".tmp-") {
+            continue;
+        }
+        let path = entry.path();
+        make_writable(&path)?;
+        fs::remove_dir_all(&path)
+            .with_context(|| format!("remove stale snapshot materialization {}", path.display()))?;
+    }
+    Ok(())
 }
 
 pub(crate) fn read_pointer(publish_dir: &Path) -> Result<SnapshotPointer> {
@@ -510,6 +541,15 @@ mod tests {
             .unwrap(),
             b"vectors"
         );
+
+        let stale = cache
+            .join("generations")
+            .join(".generation-00000000000000000007.tmp-123");
+        fs::create_dir_all(&stale).unwrap();
+        fs::write(stale.join("partial"), b"incomplete").unwrap();
+        make_read_only(&stale).unwrap();
+        materialize_latest(&publish_dir, &cache).unwrap();
+        assert!(!stale.exists());
     }
 
     #[test]

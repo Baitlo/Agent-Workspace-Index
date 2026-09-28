@@ -305,7 +305,10 @@ pointer currently references, so the shared directory cannot grow without bound.
 For Codex, `scripts/awi-mcp-snapshot-wrapper.sh` starts or reuses one local
 snapshot daemon before launching the stdio adapter. Configure
 `AWI_SNAPSHOT_SOURCE` and `AWI_MCP_AUDIT_LOG`, then register the wrapper as a
-global MCP server.
+global MCP server. Mutable snapshot data remains under `AWI_RUNTIME_DIR`, while
+the Unix socket and startup lock default to `~/.local/state/awi-$UID` so cleanup
+of temporary caches cannot unlink the live control socket. Cold materialization
+waits up to 10 minutes by default; override it with `AWI_START_TIMEOUT_MS`.
 
 ### One-command Agent Integration
 
