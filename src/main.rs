@@ -139,7 +139,7 @@ enum Command {
         json: bool,
     },
 
-    /// Search paths, text, symbols, Agent knowledge, and dataset schemas.
+    /// Search all indexed code, data, Agent knowledge, and memory.
     Search {
         query: String,
 
@@ -149,6 +149,7 @@ enum Command {
         #[arg(long = "root")]
         roots: Vec<PathBuf>,
 
+        /// Narrow retrieval to one or more file kinds.
         #[arg(long = "kind")]
         kinds: Vec<String>,
 

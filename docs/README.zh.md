@@ -100,10 +100,10 @@ awi --index-dir /tmp/my-awi-index reconcile ~/.agents/skills/example/SKILL.md --
 awi --index-dir /tmp/my-awi-index search "diagnose deployment failures" \
   --kind agent_skill --json
 
-# 发现此项目的精选记忆并搜索。
+# 发现此项目的精选记忆，然后搜索所有已索引类型。
 awi --index-dir /tmp/my-awi-index memory --project-root /path/to/workspace
 awi --index-dir /tmp/my-awi-index search "previous rollout decision" \
-  --kind agent_memory --context-path /path/to/workspace --json
+  --context-path /path/to/workspace --json
 
 # 启动 MCP stdio 适配器。
 awi --index-dir /tmp/my-awi-index mcp
@@ -113,7 +113,7 @@ awi --index-dir /tmp/my-awi-index mcp \
   --audit-log /shared/awi/runtime/calls.jsonl
 ```
 
-记忆使用独立的 Tantivy 索引，仅在请求 `--kind agent_memory` 时搜索，因此添加记忆不会改变普通代码/数据排序。MCP 搜索使用紧凑的 `compact_v3` 格式，具有 1,000 字符预览、稳定的 `file_id`、请求范围的 `search_id` 以及精确符号命中的定义元数据。默认返回 5 条结果，超过 20 的请求会压缩到 20。将返回的 `search_id` 和可选的精确 `symbol` 传递给 `workspace_inspect`，以将检查链接到其检索并居中显示定义处的摘录。从一条包含丰富标识符的查询开始，而不是并行发送近义查询，仅在第一批结果缺乏证据时才扩展。当已知确切路径时，直接使用宿主的文件工具读取。搜索片段是从有界存储的源窗口生成的，轻量级目录多样性重新排序可防止一个构件文件夹填满结果集。stdio 服务器支持标准旧版 MCP `ping`，并将基于初始化的协商限制在协议 `2025-11-25`。
+不传 `--kind` 的搜索会包含所有已索引类型：代码、文本、结构化数据、Agent 指令、Skills 和项目级记忆。传入 `--kind` 会收窄结果，例如 `--kind agent_memory` 表示仅检索记忆。记忆使用独立的 Tantivy 索引，因此其词汇不会改变普通代码/数据的 IDF 统计。MCP 搜索使用紧凑的 `compact_v3` 格式，具有 1,000 字符预览、稳定的 `file_id`、请求范围的 `search_id` 以及精确符号命中的定义元数据。默认返回 5 条结果，超过 20 的请求会压缩到 20。将返回的 `search_id` 和可选的精确 `symbol` 传递给 `workspace_inspect`，以将检查链接到其检索并居中显示定义处的摘录。从一条包含丰富标识符的查询开始，而不是并行发送近义查询，仅在第一批结果缺乏证据时才扩展。当已知确切路径时，直接使用宿主的文件工具读取。搜索片段是从有界存储的源窗口生成的，轻量级目录多样性重新排序可防止一个构件文件夹填满结果集。stdio 服务器支持标准旧版 MCP `ping`，并将基于初始化的协商限制在协议 `2025-11-25`。
 
 ### 语义检索
 

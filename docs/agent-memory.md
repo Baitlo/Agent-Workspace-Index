@@ -18,7 +18,12 @@ awi --index-dir /tmp/my-awi-index memory \
   --project-root /absolute/path/to/workspace \
   --include-raw
 
-# Search only memory associated with the current project.
+# Search all indexed kinds, including memory associated with the current project.
+awi --index-dir /tmp/my-awi-index search "previous deployment decision" \
+  --context-path /absolute/path/to/workspace \
+  --json
+
+# Narrow the same query to memory only.
 awi --index-dir /tmp/my-awi-index search "previous deployment decision" \
   --kind agent_memory \
   --context-path /absolute/path/to/workspace \
@@ -65,9 +70,10 @@ demote broad `MEMORY.md`/project summaries unless the summary itself exactly
 matches the entity. The normal layer order remains unchanged for broad queries,
 curated summaries rank ahead of raw history, and recency is only a small
 tie-breaker. Content-identical copies from different Agents are collapsed after
-ranking. Memory retrieval is activated with `--kind agent_memory`. Memory
-documents use a dedicated Tantivy index so their vocabulary cannot change
-ordinary code/data IDF statistics or ranking.
+ranking. Memory retrieval participates by default when no kind filter is supplied.
+`--kind agent_memory` narrows the result set to memory only. Memory documents
+use a dedicated Tantivy index so their vocabulary cannot change ordinary
+code/data IDF statistics.
 
 ## Parsing And Safety
 

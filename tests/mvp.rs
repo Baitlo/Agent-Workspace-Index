@@ -291,7 +291,7 @@ fn indexes_agent_knowledge_with_scope_metadata_and_deduplication() {
         "# Other Policy\nUse unrelated evidence for deployment.\n",
     )
     .unwrap();
-    fs::write(&context_file, "fn main() {}\n").unwrap();
+    fs::write(&context_file, "fn release_evidence() {}\n").unwrap();
 
     let skill = r#"---
 name: evidence-check
@@ -373,13 +373,25 @@ Read [acceptance](references/acceptance.md).
         .unwrap();
     assert_eq!(skills.len(), 1);
     assert_eq!(skills[0].kind, FileKind::AgentSkill);
+    let default_hits = workspace.search("release evidence", 10).unwrap();
     assert!(
-        workspace
-            .search("release evidence", 10)
-            .unwrap()
+        default_hits
             .iter()
-            .all(|hit| hit.kind != FileKind::AgentSkill)
+            .any(|hit| hit.kind == FileKind::AgentSkill)
     );
+    assert!(default_hits.iter().any(|hit| hit.kind == FileKind::Source));
+    let source_only = workspace
+        .search_filtered(
+            "release evidence",
+            10,
+            &[],
+            &["source".to_owned()],
+            None,
+            Some(&context_file),
+        )
+        .unwrap();
+    assert!(!source_only.is_empty());
+    assert!(source_only.iter().all(|hit| hit.kind == FileKind::Source));
 
     let inspected = workspace.inspect(skills_root.join("one/SKILL.md")).unwrap();
     let metadata = inspected.agent.unwrap();
@@ -463,7 +475,11 @@ fn indexes_project_scoped_agent_memory_safely_and_incrementally() {
     fs::create_dir_all(project_b.join("src")).unwrap();
     fs::create_dir_all(&memory_a).unwrap();
     fs::create_dir_all(&memory_b).unwrap();
-    fs::write(project_a.join("src/lib.rs"), "fn alpha() {}\n").unwrap();
+    fs::write(
+        project_a.join("src/lib.rs"),
+        "fn alpha() {}\n// validated delta protocol\n",
+    )
+    .unwrap();
     fs::write(project_b.join("src/lib.rs"), "fn beta() {}\n").unwrap();
     fs::write(
         memory_a.join("project_memory.md"),
@@ -490,6 +506,13 @@ fn indexes_project_scoped_agent_memory_safely_and_incrementally() {
         "token = ghp_abcdefghijklmnopqrstuvwxyz1234567890\n",
     )
     .unwrap();
+    for index in 0..20 {
+        fs::write(
+            memory_a.join(format!("history-{index}.md")),
+            format!("# Historical note {index}\nvalidated delta protocol\n"),
+        )
+        .unwrap();
+    }
     fs::write(
         memory_b.join("project_memory.md"),
         "# Other memory\nforeign omega protocol\n",
@@ -528,18 +551,30 @@ fn indexes_project_scoped_agent_memory_safely_and_incrementally() {
     }
 
     let initial_status = workspace.status().unwrap();
-    assert_eq!(initial_status.agent_memories, 8);
+    assert_eq!(initial_status.agent_memories, 28);
     assert_eq!(initial_status.memory.registered_sources, 4);
-    assert_eq!(initial_status.memory.active_files, 8);
+    assert_eq!(initial_status.memory.active_files, 28);
     assert_eq!(initial_status.memory.stale_files, 0);
     assert_eq!(initial_status.memory.missing_files, 0);
+    let default_hits = workspace.search("validated delta protocol", 10).unwrap();
     assert!(
-        workspace
-            .search("validated delta protocol", 10)
-            .unwrap()
+        default_hits
             .iter()
-            .all(|hit| hit.kind != FileKind::AgentMemory)
+            .any(|hit| hit.kind == FileKind::AgentMemory)
     );
+    assert!(default_hits.iter().any(|hit| hit.kind == FileKind::Source));
+    let source_only = workspace
+        .search_filtered(
+            "validated delta protocol",
+            10,
+            std::slice::from_ref(&project_a),
+            &["source".to_owned()],
+            None,
+            Some(&project_a),
+        )
+        .unwrap();
+    assert!(!source_only.is_empty());
+    assert!(source_only.iter().all(|hit| hit.kind == FileKind::Source));
     let hits = workspace
         .search_filtered(
             "validated delta protocol",

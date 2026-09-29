@@ -42,6 +42,7 @@ const EXACT_MEMORY_FILENAME_BOOST: f32 = 0.25;
 const EXACT_MEMORY_NAME_BOOST: f32 = 0.22;
 const MEMORY_DESCRIPTION_BOOST: f32 = 0.04;
 const AGGREGATE_MEMORY_PENALTY: f32 = 0.08;
+const DEFAULT_MEMORY_SCORE_WEIGHT: f32 = 0.1;
 const EXACT_SYMBOL_BOOST: f32 = 1.5;
 const SAME_DIRECTORY_MMR_PENALTY: f32 = 0.00125;
 const MATCH_PREVIEW_CHARS: usize = 1_000;
@@ -522,11 +523,13 @@ impl WorkspaceIndex {
         } else {
             limit.saturating_mul(10).max(100)
         };
-        let include_agent_lane = context_path.is_some()
+        let include_all_kinds = kind_filter.is_empty();
+        let include_agent_lane = include_all_kinds
+            || context_path.is_some()
             || kind_filter
                 .iter()
                 .any(|kind| matches!(kind, FileKind::AgentInstructions | FileKind::AgentSkill));
-        let include_memory = kind_filter.contains(&FileKind::AgentMemory);
+        let include_memory = include_all_kinds || kind_filter.contains(&FileKind::AgentMemory);
         let generation = self.catalog.latest_completed_generation()?;
         let cache_key = serde_json::to_string(&(
             &self.index_dir,
@@ -589,10 +592,15 @@ impl WorkspaceIndex {
                     self.search
                         .search(query, overfetch, overfetch, include_agent_lane)?;
                 if include_memory {
-                    candidates.extend(
-                        self.memory_search
-                            .search(query, overfetch, overfetch, false)?,
-                    );
+                    let mut memory_candidates = self
+                        .memory_search
+                        .search(query, overfetch, overfetch, false)?;
+                    if include_all_kinds {
+                        for candidate in &mut memory_candidates {
+                            candidate.score *= DEFAULT_MEMORY_SCORE_WEIGHT;
+                        }
+                    }
+                    candidates.extend(memory_candidates);
                     candidates.sort_by(|left, right| {
                         right
                             .score
@@ -601,7 +609,6 @@ impl WorkspaceIndex {
                     });
                     let mut seen = HashSet::new();
                     candidates.retain(|candidate| seen.insert(candidate.file_id));
-                    candidates.truncate(overfetch);
                 }
                 Ok::<_, anyhow::Error>(candidates)
             })();
@@ -628,7 +635,7 @@ impl WorkspaceIndex {
                     candidates = merge_semantic_candidates(
                         candidates,
                         semantic,
-                        overfetch,
+                        overfetch.saturating_mul(if include_memory { 3 } else { 2 }),
                         self.semantic.vector_weight(),
                     );
                 }
@@ -750,21 +757,27 @@ impl WorkspaceIndex {
                 score += APPLICABLE_INSTRUCTION_BOOST + depth as f32 * INSTRUCTION_DEPTH_BOOST;
             }
             if let Some(metadata) = &memory {
-                score += if metadata.workspace_root.is_some() && applicable_memory {
+                let memory_boost = if metadata.workspace_root.is_some() && applicable_memory {
                     EXACT_PROJECT_MEMORY_BOOST
                 } else {
                     GLOBAL_MEMORY_BOOST
                 };
-                score += f32::from(metadata.layer.summary_priority()) * MEMORY_LAYER_BOOST;
-                score += memory_recency_boost(metadata.observed_at_ms);
+                let memory_boost = memory_boost
+                    + f32::from(metadata.layer.summary_priority()) * MEMORY_LAYER_BOOST
+                    + memory_recency_boost(metadata.observed_at_ms);
                 let memory_match = memory_metadata_match(query, &file.name, metadata);
-                score += memory_match.boost;
+                let mut memory_boost = memory_boost + memory_match.boost;
                 if is_specific_query(query)
                     && metadata.layer == crate::model::AgentMemoryLayer::ProjectSummary
                     && !memory_match.exact_entity
                 {
-                    score -= AGGREGATE_MEMORY_PENALTY;
+                    memory_boost -= AGGREGATE_MEMORY_PENALTY;
                 }
+                score += if include_all_kinds {
+                    memory_boost * DEFAULT_MEMORY_SCORE_WEIGHT
+                } else {
+                    memory_boost
+                };
             }
             let symbol = exact_symbols_by_file.get(&file.id).cloned();
             if symbol.is_some() {

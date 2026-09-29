@@ -136,10 +136,10 @@ awi --index-dir /tmp/my-awi-index reconcile ~/.agents/skills/example/SKILL.md --
 awi --index-dir /tmp/my-awi-index search "diagnose deployment failures" \
   --kind agent_skill --json
 
-# Discover curated memory for this project and search it.
+# Discover curated memory for this project, then search all indexed kinds.
 awi --index-dir /tmp/my-awi-index memory --project-root /path/to/workspace
 awi --index-dir /tmp/my-awi-index search "previous rollout decision" \
-  --kind agent_memory --context-path /path/to/workspace --json
+  --context-path /path/to/workspace --json
 
 # Start the MCP stdio adapter.
 awi --index-dir /tmp/my-awi-index mcp
@@ -149,9 +149,12 @@ awi --index-dir /tmp/my-awi-index mcp \
   --audit-log /shared/awi/runtime/calls.jsonl
 ```
 
-Memory uses a separate Tantivy index and is searched only when
-`--kind agent_memory` is requested, so adding memory cannot change ordinary
-code/data ranking. MCP search uses the compact `compact_v3` shape with a
+Searches without `--kind` include every indexed kind: code, text, structured
+data, Agent instructions, Skills, and project-scoped memory. Supplying
+`--kind` narrows the result set; for example, `--kind agent_memory` is
+memory-only retrieval. Memory uses a separate Tantivy index, so its vocabulary
+cannot change ordinary code/data IDF statistics. MCP search uses the compact
+`compact_v3` shape with a
 1,000-character preview, stable `file_id`, request-scoped `search_id`, and
 definition metadata for exact symbol hits. It defaults to 5 hits and compacts
 requests above 20 to 20. Pass the returned `search_id` and optional exact

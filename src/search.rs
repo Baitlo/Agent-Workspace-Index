@@ -134,7 +134,7 @@ impl SearchIndex {
         result_limit: usize,
         include_agent_lane: bool,
     ) -> Result<Vec<SearchCandidate>> {
-        let base_exclusions = (!include_agent_lane).then_some(AGENT_KINDS);
+        let base_exclusions = Some(AGENT_KINDS);
         let mut lanes = vec![
             LaneSpec {
                 name: "path",

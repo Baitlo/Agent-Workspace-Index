@@ -39,7 +39,7 @@ awi search "build and test rules" \
 
 AWI schließt `AGENTS.md`-Dateien aus, deren Bereich kein Vorfahre des Kontextpfads ist. Anwendbare Dateien werden nach Bereichstiefe geordnet, sodass die nächstgelegenen Anweisungen zuerst kommen. Nach dieser Rangfolge werden inhaltsidentische Agentendokumente reduziert, was kopierte Skill- und Worktree-Duplikate unterdrückt, ohne die nächstgelegene anwendbare Anweisung zu verlieren.
 
-Verwenden Sie `--kind agent_skill` für einen Skill-zentrierten Abruf. Agentendokumente werden aus gewöhnlichen Code-/Datensuchen herausgehalten; die dedizierte Agentenspur wird durch einen Agententypfilter oder `context_path` aktiviert.
+Ohne Typfilter werden Agent-Anweisungen und Skills zusammen mit Code und Daten durchsucht. Verwenden Sie `--kind agent_skill` oder `--kind agent_instructions` nur zur Eingrenzung auf einen Agent-Dokumenttyp. `context_path` aktiviert die Gültigkeitsfilterung und Rangfolge der Anweisungen.
 
 ## Sicherheit
 

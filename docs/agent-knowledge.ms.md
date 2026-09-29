@@ -39,7 +39,7 @@ awi search "build and test rules" \
 
 AWI mengecualikan fail `AGENTS.md` yang skopnya bukan moyang laluan konteks. Fail yang terpakai disusun mengikut kedalaman skop supaya arahan terdekat didahulukan. Selepas susunan ini, dokumen Ejen dengan kandungan yang sama dilipat, yang menyekat pendua Skill dan worktree yang disalin tanpa kehilangan arahan terdekat yang terpakai.
 
-Gunakan `--kind agent_skill` untuk capaian berfokus Skill. Dokumen Ejen dikecualikan daripada carian kod/data biasa; lorong Ejen khusus diaktifkan oleh penapis jenis Ejen atau `context_path`.
+Tanpa penapis jenis, arahan Agent dan Skills dicari bersama kod dan data. Gunakan `--kind agent_skill` atau `--kind agent_instructions` hanya untuk mengehadkan carian kepada satu jenis dokumen Agent. `context_path` menggunakan penapisan dan susunan skop arahan.
 
 ## Keselamatan
 

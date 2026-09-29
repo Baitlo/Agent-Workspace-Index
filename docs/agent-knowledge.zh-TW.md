@@ -39,7 +39,7 @@ awi search "build and test rules" \
 
 AWI 排除其作用域不是上下文路徑祖先的 `AGENTS.md` 檔案。適用的檔案按作用域深度排名，因此最近的指令排在最前面。在此排名之後，內容相同的 Agent 文件會被折疊，這會抑制複製的 Skill 和 worktree 重複項，而不會丟失最近的適用指令。
 
-使用 `--kind agent_skill` 進行以 Skill 為中心的檢索。Agent 文件被排除在普通代碼/數據搜尋之外；專用 Agent 通道由 Agent 類型篩選器或 `context_path` 啟動。
+未提供類型篩選器時，Agent 指令和 Skills 會與程式碼、資料共同參與檢索。只有需要縮小到某種 Agent 文件時才使用 `--kind agent_skill` 或 `--kind agent_instructions`。傳入 `context_path` 會套用指令作用域篩選和排序。
 
 ## 安全
 

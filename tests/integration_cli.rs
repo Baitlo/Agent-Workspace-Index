@@ -272,6 +272,24 @@ fn installer_indexes_ancestor_instructions_and_allowlisted_skill_manifests() {
     let memories: Value = serde_json::from_slice(&memories.stdout).unwrap();
     assert_eq!(memories[0]["memory"]["agent"], "trae");
 
+    let default_search = Command::new(bin.join("awi"))
+        .args(["--index-dir", index.to_str().unwrap(), "search"])
+        .arg("release checksum")
+        .args(["--context-path"])
+        .arg(&context_file)
+        .arg("--json")
+        .output()
+        .unwrap();
+    assert!(default_search.status.success());
+    let default_search: Value = serde_json::from_slice(&default_search.stdout).unwrap();
+    assert!(
+        default_search
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|hit| hit["kind"] == "agent_memory")
+    );
+
     let raw = Command::new(bin.join("awi"))
         .args(["--index-dir", index.to_str().unwrap(), "search"])
         .arg("must remain opt in")
@@ -285,6 +303,7 @@ fn installer_indexes_ancestor_instructions_and_allowlisted_skill_manifests() {
     let instructions = fs::read_to_string(workspace.join("AGENTS.md")).unwrap();
     assert!(instructions.contains("Keep this user-authored instruction."));
     assert!(instructions.contains("## AWI Workspace Retrieval"));
+    assert!(instructions.contains("Omit `kinds` by default"));
     assert_eq!(
         instructions
             .matches("<!-- BEGIN AWI MANAGED INSTRUCTIONS -->")

@@ -58,9 +58,10 @@ come first. Content-identical Agent documents are collapsed after this ranking,
 which suppresses copied Skill and worktree duplicates without losing the
 nearest applicable instruction.
 
-Use `--kind agent_skill` for Skill-focused retrieval. Agent documents are kept
-out of ordinary code/data searches; the dedicated Agent lane is activated by an
-Agent kind filter or `context_path`.
+Searches without a kind filter include Agent instructions and Skills alongside
+code and data. Use `--kind agent_skill` or `--kind agent_instructions` only to
+narrow retrieval to one Agent document type. Passing `context_path` applies
+instruction scope filtering and ranking.
 
 ## Safety
 

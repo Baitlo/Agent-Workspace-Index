@@ -66,7 +66,8 @@ pub struct WorkspaceSearchRequest {
     /// agent_instructions for AGENTS.md; agent_skill for SKILL.md;
     /// agent_memory for project-scoped cross-Agent memory;
     /// semi_structured for .json; tabular for .csv/.tsv/.jsonl/.ndjson/.parquet.
-    /// Omit this filter when the file kind is uncertain.
+    /// Omit this filter to search every indexed kind, including Agent knowledge
+    /// and memory. Set it only when the request should be narrowed.
     #[serde(default)]
     pub kinds: Option<Vec<String>>,
     /// Optional absolute or root-relative path prefix.
@@ -213,8 +214,9 @@ impl AwiMcpServer {
     /// Skills, memory, or dataset schemas in an indexed workspace. Start with one
     /// identifier-rich query and limit 5; do not issue parallel near-synonym
     /// searches. Inspect the best hit, then refine once only if evidence is
-    /// missing. For prior decisions/history, set kinds=["agent_memory"] and pass
-    /// context_path. If the exact path is already known, use a file reader directly.
+    /// missing. Omit kinds to search every indexed kind; set kinds only to narrow
+    /// the corpus. Pass context_path for project-scoped memory and applicable
+    /// instructions. If the exact path is already known, use a file reader directly.
     #[tool(
         name = "workspace_search",
         annotations(
@@ -587,9 +589,9 @@ impl ServerHandler for AwiMcpServer {
             .with_instructions(
                 "For any code, symbol, document, Agent instruction, skill, memory, or dataset lookup inside \
                  an indexed workspace, use workspace_search first, before shell grep or file \
-                 walking. For prior decisions, history, or cross-Agent memory, set \
-                 kinds=[\"agent_memory\"] and pass context_path. Pass context_path when resolving \
-                 applicable AGENTS.md instructions. Start with one identifier-rich query and \
+                 walking. Omit kinds to search all indexed code, data, Agent knowledge, \
+                 and memory; set kinds only to narrow the corpus. Pass context_path for \
+                 project-scoped memory and applicable AGENTS.md instructions. Start with one identifier-rich query and \
                  limit 5; do not issue parallel near-synonym searches. Inspect the best hit, \
                  then refine once only if the first result set lacks evidence. \
                  Non-empty previews are direct excerpts from the indexed generation and are \

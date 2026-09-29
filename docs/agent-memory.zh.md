@@ -14,7 +14,12 @@ awi --index-dir /tmp/my-awi-index memory \
   --project-root /absolute/path/to/workspace \
   --include-raw
 
-# 仅搜索与当前项目关联的记忆。
+# 搜索所有已索引类型，包括与当前项目关联的记忆。
+awi --index-dir /tmp/my-awi-index search "previous deployment decision" \
+  --context-path /absolute/path/to/workspace \
+  --json
+
+# 将同一查询收窄为仅搜索记忆。
 awi --index-dir /tmp/my-awi-index search "previous deployment decision" \
   --kind agent_memory \
   --context-path /absolute/path/to/workspace \
@@ -48,7 +53,7 @@ Argos/SRE 会话目录被有意排除，因为它们需要 Argos 诊断工作流
 - 可派生时的会话 ID；
 - 观察时间和原始历史标志。
 
-当提供 `context_path` 或项目根过滤器时，来自另一个项目的记忆会被拒绝。精确项目记忆排名领先于全局记忆。精确文件名和 frontmatter `name` 匹配获得最强的元数据提升；描述重叠提供较小的提升。标识符形状的查询会降低广泛的 `MEMORY.md`/项目摘要的权重，除非摘要本身与实体完全匹配。对于广泛查询，正常的层级顺序保持不变，精选摘要排名领先于原始历史，而新近度只是一个小平局决胜因素。排名后，来自不同 Agent 的内容相同副本会被折叠。记忆检索通过 `--kind agent_memory` 激活。记忆文档使用专用的 Tantivy 索引，因此它们的词汇不会改变普通代码/数据 IDF 统计或排名。
+当提供 `context_path` 或项目根过滤器时，来自另一个项目的记忆会被拒绝。精确项目记忆排名领先于全局记忆。精确文件名和 frontmatter `name` 匹配获得最强的元数据提升；描述重叠提供较小的提升。标识符形状的查询会降低广泛的 `MEMORY.md`/项目摘要的权重，除非摘要本身与实体完全匹配。对于广泛查询，正常的层级顺序保持不变，精选摘要排名领先于原始历史，而新近度只是一个小平局决胜因素。排名后，来自不同 Agent 的内容相同副本会被折叠。不提供类型过滤器时，记忆默认参与检索；`--kind agent_memory` 仅用于将结果收窄为记忆。记忆文档使用专用的 Tantivy 索引，因此它们的词汇不会改变普通代码/数据的 IDF 统计。
 
 ## 解析和安全
 

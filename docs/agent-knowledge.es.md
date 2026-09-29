@@ -39,7 +39,7 @@ awi search "build and test rules" \
 
 AWI excluye archivos `AGENTS.md` cuyo ámbito no es un ancestro de la ruta de contexto. Los archivos aplicables se clasifican por profundidad de ámbito para que las instrucciones más cercanas vengan primero. Después de esta clasificación, los documentos del Agente con contenido idéntico se colapsan, lo que suprime duplicados de Skill y worktree copiados sin perder la instrucción aplicable más cercana.
 
-Use `--kind agent_skill` para recuperación centrada en Skill. Los documentos del Agente se mantienen fuera de búsquedas comunes de código/datos; la vía dedicada del Agente se activa mediante un filtro de tipo de Agente o `context_path`.
+Sin filtro de tipo, las instrucciones del Agente y las Skills se buscan junto con el código y los datos. Use `--kind agent_skill` o `--kind agent_instructions` solo para limitar la búsqueda a un tipo de documento del Agente. `context_path` aplica el filtrado y la clasificación por alcance de las instrucciones.
 
 ## Seguridad
 

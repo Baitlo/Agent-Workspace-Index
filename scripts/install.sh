@@ -121,9 +121,10 @@ awi_agent_instructions() {
 - If the AWI namespace is deferred, use `tool_search` to load
   `mcp__awi.workspace_search`, then make an actual `workspace_search` call.
 - Start with one identifier-rich query and `limit=5`. Do not issue parallel
-  near-synonym searches. Use `source`, `agent_instructions`, `agent_skill`, or
-  `agent_memory` kinds when known; historical queries also pass this workspace
-  as `context_path`.
+  near-synonym searches. Omit `kinds` by default so code, data, Agent knowledge,
+  and memory all participate. Set `kinds` only to intentionally narrow the
+  corpus. Pass this workspace as `context_path` for scoped memory and
+  instructions.
 - Treat a non-empty preview as direct indexed evidence. If more detail is
   required, inspect only the best hit and pass its `path`, `search_id`, and
   exact `symbol` when available.
