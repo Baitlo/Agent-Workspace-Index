@@ -121,6 +121,52 @@ enum Command {
         duckdb_timeout_seconds: u64,
     },
 
+    /// Run a resumable producer with durable events, bounded scans and checkpoints.
+    Produce {
+        #[arg(long = "root")]
+        roots: Vec<PathBuf>,
+        #[arg(long = "project-root")]
+        project_roots: Vec<PathBuf>,
+        /// Discover SKILL.md roots beneath these specific directories only.
+        #[arg(long = "skill-dir")]
+        skill_dirs: Vec<PathBuf>,
+        #[arg(long)]
+        publish_dir: PathBuf,
+        /// Verified seed used only when both local catalog and own publication are absent.
+        #[arg(long)]
+        bootstrap_source: Option<PathBuf>,
+        #[arg(long)]
+        inbox: PathBuf,
+        #[arg(long)]
+        status_file: PathBuf,
+        #[arg(long, default_value_t = 300_000)]
+        scan_interval_ms: u64,
+        #[arg(long, default_value_t = 60_000)]
+        memory_interval_ms: u64,
+        #[arg(long, default_value_t = 30_000)]
+        publish_interval_ms: u64,
+        #[arg(long, default_value_t = 512)]
+        batch_files: usize,
+        #[arg(long, default_value_t = 2_000)]
+        batch_budget_ms: u64,
+        #[arg(long, default_value_t = 3)]
+        retain: usize,
+        #[arg(long, default_value_t = 4)]
+        max_content_mib: u64,
+        #[arg(long, default_value_t = 256)]
+        max_profile_mib: u64,
+        #[arg(long, default_value_t = 15)]
+        duckdb_timeout_seconds: u64,
+    },
+
+    /// Durably enqueue changed paths without waiting for the indexer.
+    Enqueue {
+        #[arg(long)]
+        inbox: PathBuf,
+        #[arg(required = true)]
+        paths: Vec<PathBuf>,
+    },
+
     /// Index explicitly changed or deleted files beneath known roots.
     Notify {
         #[arg(required = true)]
@@ -210,6 +256,10 @@ enum Command {
     Benchmark {
         #[arg(long)]
         gold: PathBuf,
+
+        /// Evaluate one pinned snapshot or collection; index-dir is its local cache.
+        #[arg(long)]
+        snapshot_source: Option<PathBuf>,
 
         #[arg(long)]
         output: Option<PathBuf>,
@@ -460,6 +510,51 @@ fn main() -> Result<()> {
             };
             watch_publisher(&cli.index_dir, &roots, &config)?;
         }
+        Command::Produce {
+            roots,
+            project_roots,
+            skill_dirs,
+            publish_dir,
+            bootstrap_source,
+            inbox,
+            status_file,
+            scan_interval_ms,
+            memory_interval_ms,
+            publish_interval_ms,
+            batch_files,
+            batch_budget_ms,
+            retain,
+            max_content_mib,
+            max_profile_mib,
+            duckdb_timeout_seconds,
+        } => {
+            awi::producer::run(
+                &cli.index_dir,
+                &awi::producer::ProducerConfig {
+                    roots,
+                    project_roots,
+                    skill_dirs,
+                    publish_dir,
+                    bootstrap_source,
+                    inbox,
+                    status_file,
+                    scan_interval: Duration::from_millis(scan_interval_ms),
+                    memory_interval: Duration::from_millis(memory_interval_ms),
+                    publish_interval: Duration::from_millis(publish_interval_ms),
+                    batch_files,
+                    batch_budget: Duration::from_millis(batch_budget_ms),
+                    retain,
+                    options: IndexOptions {
+                        max_content_bytes: mib(max_content_mib),
+                        max_profile_bytes: mib(max_profile_mib),
+                        duckdb_timeout_seconds,
+                    },
+                },
+            )?;
+        }
+        Command::Enqueue { inbox, paths } => {
+            print_json(&serde_json::json!({"event": awi::producer::enqueue(&inbox, &paths)?}))?;
+        }
         Command::Notify {
             paths,
             max_content_mib,
@@ -636,25 +731,30 @@ fn main() -> Result<()> {
         }
         Command::Benchmark {
             gold,
+            snapshot_source,
             output,
             allow_draft,
         } => {
             let gold = load_gold(&gold, allow_draft)?;
-            let workspace = WorkspaceIndex::open(&cli.index_dir)
-                .with_context(|| format!("open AWI index {}", cli.index_dir.display()))?;
-            workspace
-                .warm_retrieval()
-                .context("warm retrieval before benchmark")?;
-            let semantic = workspace.status()?.semantic;
-            if semantic.enabled && !semantic.available {
-                anyhow::bail!(
-                    "semantic retrieval is configured but unavailable: {}",
-                    semantic
-                        .error
-                        .unwrap_or_else(|| "semantic snapshot is missing".to_owned())
-                );
-            }
-            let report = evaluate_retrieval(&workspace, &gold)?;
+            let report = if let Some(source) = snapshot_source {
+                awi::benchmark::evaluate_snapshot(&source, &cli.index_dir, &gold)?
+            } else {
+                let workspace = WorkspaceIndex::open(&cli.index_dir)
+                    .with_context(|| format!("open AWI index {}", cli.index_dir.display()))?;
+                workspace
+                    .warm_retrieval()
+                    .context("warm retrieval before benchmark")?;
+                let semantic = workspace.status()?.semantic;
+                if semantic.enabled && !semantic.available {
+                    anyhow::bail!(
+                        "semantic retrieval is configured but unavailable: {}",
+                        semantic
+                            .error
+                            .unwrap_or_else(|| "semantic snapshot is missing".to_owned())
+                    );
+                }
+                evaluate_retrieval(&workspace, &gold)?
+            };
             if let Some(output) = output {
                 if let Some(parent) = output.parent() {
                     std::fs::create_dir_all(parent)?;

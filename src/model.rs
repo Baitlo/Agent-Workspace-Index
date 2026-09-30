@@ -332,12 +332,21 @@ pub struct SemanticBuildReport {
 }
 
 #[derive(Debug, Clone)]
+pub(crate) struct LaneEvidence {
+    pub name: String,
+    pub score: f32,
+    pub weight: f32,
+    pub contribution: f32,
+}
+
+#[derive(Debug, Clone)]
 pub(crate) struct SearchCandidate {
     pub file_id: i64,
     pub path: String,
     pub generation: i64,
     pub score: f32,
     pub lanes: Vec<String>,
+    pub evidence: Vec<LaneEvidence>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -352,6 +361,8 @@ pub struct SearchHit {
     pub generation: i64,
     pub score: f32,
     pub matched_lanes: Vec<String>,
+    #[serde(skip)]
+    pub(crate) evidence: Vec<LaneEvidence>,
     pub preview: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub symbol: Option<SymbolRecord>,
@@ -460,6 +471,8 @@ pub struct NotifyReport {
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct IndexStatus {
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub shards: Vec<ShardStatus>,
     pub completed_generation: Option<i64>,
     pub running_generations: u64,
     pub failed_generations: u64,
@@ -480,6 +493,15 @@ pub struct IndexStatus {
     pub retrieval: RetrievalStatus,
     #[serde(default)]
     pub serving: ServingStatus,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ShardStatus {
+    pub name: String,
+    pub index_dir: PathBuf,
+    #[serde(flatten)]
+    pub visibility: crate::collection::Visibility,
+    pub status: IndexStatus,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]

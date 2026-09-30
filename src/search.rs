@@ -5,7 +5,7 @@ use std::path::Path;
 use anyhow::{Context, Result};
 use rayon::prelude::*;
 use tantivy::collector::TopDocs;
-use tantivy::query::{BooleanQuery, Query, QueryParser, TermQuery, TermSetQuery};
+use tantivy::query::{BooleanQuery, Query, QueryParser, RegexQuery, TermQuery, TermSetQuery};
 use tantivy::schema::{
     Field, INDEXED, IndexRecordOption, STORED, STRING, Schema, TantivyDocument, Value,
 };
@@ -23,6 +23,7 @@ const MEMORY_KINDS: &[&str] = &["agent_memory"];
 pub(crate) struct SearchIndex {
     index: Index,
     fields: SearchFields,
+    pub(crate) visibility: crate::collection::Visibility,
 }
 
 #[derive(Clone, Copy)]
@@ -55,6 +56,7 @@ struct LaneHit {
     file_id: i64,
     path: String,
     generation: i64,
+    score: f32,
 }
 
 impl SearchIndex {
@@ -83,7 +85,11 @@ impl SearchIndex {
             stored_content: schema.get_field("preview")?,
             generation: schema.get_field("generation")?,
         };
-        Ok(Self { index, fields })
+        Ok(Self {
+            index,
+            fields,
+            visibility: crate::collection::Visibility::default(),
+        })
     }
 
     pub(crate) fn apply_changes(
@@ -124,6 +130,16 @@ impl SearchIndex {
             ))?;
         }
         writer.commit().context("commit Tantivy generation")?;
+        writer
+            .wait_merging_threads()
+            .context("finish Tantivy merges before snapshot publication")?;
+        Ok(())
+    }
+
+    pub(crate) fn collect_obsolete_files(&self) -> Result<()> {
+        let writer = self.index.writer::<TantivyDocument>(WRITER_HEAP_BYTES)?;
+        writer.garbage_collect_files().wait()?;
+        writer.wait_merging_threads()?;
         Ok(())
     }
 
@@ -235,9 +251,17 @@ impl SearchIndex {
                     generation: hit.generation,
                     score: 0.0,
                     lanes: Vec::new(),
+                    evidence: Vec::new(),
                 });
-                entry.score += weight / (RRF_K + rank);
+                let contribution = weight / (RRF_K + rank);
+                entry.score += contribution;
                 entry.lanes.push(lane.to_owned());
+                entry.evidence.push(crate::model::LaneEvidence {
+                    name: lane.to_owned(),
+                    score: hit.score,
+                    weight,
+                    contribution,
+                });
             }
         }
 
@@ -359,6 +383,25 @@ impl SearchIndex {
                 )
             }));
         }
+        for kind in &self.visibility.exclude_kinds {
+            clauses.push((
+                tantivy::query::Occur::MustNot,
+                Box::new(TermQuery::new(
+                    Term::from_field_text(self.fields.kind, kind),
+                    IndexRecordOption::Basic,
+                )),
+            ));
+        }
+        for path in &self.visibility.exclude_paths {
+            let prefix = regex::escape(path.to_string_lossy().trim_end_matches('/'));
+            clauses.push((
+                tantivy::query::Occur::MustNot,
+                Box::new(RegexQuery::from_pattern(
+                    &format!("{prefix}(/.*)?"),
+                    self.fields.path_exact,
+                )?),
+            ));
+        }
         let query = BooleanQuery::new(clauses);
         let lane_limit = if path_suffix.is_some() {
             limit.max(100)
@@ -375,7 +418,7 @@ impl SearchIndex {
 
         let mut hits = top_docs
             .into_iter()
-            .map(|(_score, address)| {
+            .map(|(score, address)| {
                 let document: TantivyDocument = searcher.doc(address)?;
                 let file_id = document
                     .get_first(self.fields.file_id)
@@ -394,6 +437,7 @@ impl SearchIndex {
                     file_id: i64::try_from(file_id).context("file_id exceeds i64")?,
                     path,
                     generation: i64::try_from(generation).context("generation exceeds i64")?,
+                    score,
                 })
             })
             .collect::<Result<Vec<_>>>()?;

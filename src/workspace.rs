@@ -210,6 +210,9 @@ impl WorkspaceIndex {
         let root = match fs::canonicalize(requested_root) {
             Ok(root) => root,
             Err(error) => {
+                if error.kind() != std::io::ErrorKind::NotFound {
+                    return Err(error).context("resolve index root; preserving existing entries");
+                }
                 let absolute = if requested_root.is_absolute() {
                     requested_root.to_owned()
                 } else {
@@ -343,6 +346,12 @@ impl WorkspaceIndex {
             refresh.sources = refresh.sources.saturating_add(report.sources.len() as u64);
             discovered_paths.extend(report.sources.iter().map(|source| source.path.clone()));
             for source_report in report.reports {
+                if source_report.failed > 0 {
+                    anyhow::bail!(
+                        "Agent memory refresh failed for {}",
+                        source_report.root.display()
+                    );
+                }
                 refresh.indexed = refresh.indexed.saturating_add(source_report.indexed);
                 refresh.deleted = refresh.deleted.saturating_add(source_report.deleted);
             }
@@ -357,7 +366,10 @@ impl WorkspaceIndex {
                 .map_or(!managed_projects.is_empty(), |workspace| {
                     managed_projects.contains(workspace)
                 });
-            if managed {
+            if managed
+                && fs::symlink_metadata(&source.path)
+                    .is_err_and(|error| error.kind() == std::io::ErrorKind::NotFound)
+            {
                 refresh.deleted = refresh
                     .deleted
                     .saturating_add(self.retire_agent_memory_source(&source.path)?);
@@ -408,11 +420,55 @@ impl WorkspaceIndex {
         self.index_root(&source.path, options)
     }
 
+    /// Register scan ownership without crawling the directory.
+    pub(crate) fn register_scan_root(&self, root: &Path) -> Result<()> {
+        let _writer_lock = acquire_writer_lock(&self.index_dir)?;
+        self.catalog.register_root(root)
+    }
+
+    pub(crate) fn register_memory_project(&self, root: &Path) -> Result<()> {
+        let _writer_lock = acquire_writer_lock(&self.index_dir)?;
+        self.catalog
+            .register_agent_memory_project(&fs::canonicalize(root)?, false)
+    }
+
+    pub(crate) fn scan_file_page(
+        &self,
+        root: &Path,
+        after_id: i64,
+        limit: usize,
+    ) -> Result<Vec<(i64, PathBuf)>> {
+        self.catalog.file_page(root, after_id, limit)
+    }
+
+    pub(crate) fn needs_update(&self, path: &Path) -> Result<bool> {
+        let existing = self.catalog.existing_file(&path.to_string_lossy())?;
+        match fs::symlink_metadata(path) {
+            Ok(metadata) if metadata.is_file() => Ok(existing.is_none_or(|file| {
+                !file.generation_completed
+                    || file.size_bytes != metadata.len()
+                    || file.mtime_ns != mtime_ns(&metadata)
+            })),
+            Ok(_) => Ok(false),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(existing.is_some()),
+            Err(error) => Err(error).context("stat scan candidate; preserving catalog"),
+        }
+    }
+
     pub fn notify_paths(
         &mut self,
         paths: &[PathBuf],
         options: &IndexOptions,
     ) -> Result<NotifyReport> {
+        Ok(self.notify_paths_budgeted(paths, options, None)?.0)
+    }
+
+    pub(crate) fn notify_paths_budgeted(
+        &mut self,
+        paths: &[PathBuf],
+        options: &IndexOptions,
+        deadline: Option<Instant>,
+    ) -> Result<(NotifyReport, Vec<PathBuf>)> {
         if paths.is_empty() {
             anyhow::bail!("notify requires at least one path");
         }
@@ -445,19 +501,26 @@ impl WorkspaceIndex {
             requested: paths.len() as u64,
             roots: Vec::with_capacity(grouped.len()),
         };
+        let mut attempted = Vec::new();
         for (root_id, (root, mut paths)) in grouped {
+            if deadline.is_some_and(|d| Instant::now() >= d) {
+                break;
+            }
             paths.sort();
             paths.dedup();
             let (_, generation) = self.catalog.start_generation(&root)?;
-            let result = self.notify_root_inner(&root, root_id, generation, &paths, options);
+            let result =
+                self.notify_root_inner(&root, root_id, generation, &paths, options, deadline);
             if let Err(error) = &result {
                 let _ = self
                     .catalog
                     .fail_generation(generation, &format!("{error:#}"));
             }
-            output.roots.push(result?);
+            let report = result?;
+            attempted.extend(paths.into_iter().take(report.discovered as usize));
+            output.roots.push(report);
         }
-        Ok(output)
+        Ok((output, attempted))
     }
 
     pub fn search(&self, query: &str, limit: usize) -> Result<Vec<SearchHit>> {
@@ -472,6 +535,36 @@ impl WorkspaceIndex {
         kinds: &[String],
         path_prefix: Option<&str>,
         context_path: Option<&Path>,
+    ) -> Result<Vec<SearchHit>> {
+        self.search_in_scope(query, limit, roots, kinds, path_prefix, context_path, false)
+    }
+
+    pub(crate) fn set_visibility(&mut self, visibility: &crate::collection::Visibility) {
+        self.search.visibility = visibility.clone();
+        self.memory_search.visibility = visibility.clone();
+    }
+
+    pub(crate) fn registered_roots(&self) -> Result<Vec<PathBuf>> {
+        Ok(self
+            .catalog
+            .roots()?
+            .into_iter()
+            .map(|(_, path)| path)
+            .collect())
+    }
+
+    /// A collection validates scopes against the union before dispatching to
+    /// individual catalogs; applicable memory/instructions may live elsewhere.
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) fn search_in_scope(
+        &self,
+        query: &str,
+        limit: usize,
+        roots: &[PathBuf],
+        kinds: &[String],
+        path_prefix: Option<&str>,
+        context_path: Option<&Path>,
+        collection_validated: bool,
     ) -> Result<Vec<SearchHit>> {
         if query.trim().is_empty() {
             anyhow::bail!("search query must not be empty");
@@ -492,12 +585,15 @@ impl WorkspaceIndex {
                     matched = true;
                 }
             }
-            if !matched {
+            if !matched && !collection_validated {
                 anyhow::bail!(
                     "search root {} does not contain an indexed workspace root",
                     canonical.display()
                 );
             }
+        }
+        if collection_validated && !roots.is_empty() && root_filter.is_empty() {
+            root_filter.insert(String::new());
         }
         let kind_filter = kinds
             .iter()
@@ -505,6 +601,7 @@ impl WorkspaceIndex {
             .collect::<Result<Vec<_>>>()?;
         let context_path = context_path.map(resolve_context_path).transpose()?;
         if let Some(context_path) = &context_path
+            && !collection_validated
             && !registered_roots
                 .iter()
                 .any(|(_, root)| root.is_dir() && context_path.starts_with(root))
@@ -540,6 +637,8 @@ impl WorkspaceIndex {
             kinds,
             path_prefix,
             &context_path,
+            &self.search.visibility,
+            collection_validated,
         ))
         .context("encode search cache key")?;
         if let Some(output) = self.metrics.get_cached(&cache_key) {
@@ -598,6 +697,10 @@ impl WorkspaceIndex {
                     if include_all_kinds {
                         for candidate in &mut memory_candidates {
                             candidate.score *= DEFAULT_MEMORY_SCORE_WEIGHT;
+                            for evidence in &mut candidate.evidence {
+                                evidence.weight *= DEFAULT_MEMORY_SCORE_WEIGHT;
+                                evidence.contribution *= DEFAULT_MEMORY_SCORE_WEIGHT;
+                            }
                         }
                     }
                     candidates.extend(memory_candidates);
@@ -667,6 +770,7 @@ impl WorkspaceIndex {
                     generation,
                     score: 0.0,
                     lanes: vec!["exact_symbol".to_owned()],
+                    evidence: Vec::new(),
                 });
             }
         }
@@ -700,6 +804,10 @@ impl WorkspaceIndex {
                 continue;
             };
             if file.generation != candidate.generation
+                || !self
+                    .search
+                    .visibility
+                    .allows(Path::new(&file.absolute_path), file.kind.as_str())
                 || (!kind_filter.is_empty() && !kind_filter.contains(&file.kind))
                 || (file.kind == FileKind::AgentMemory && !include_memory)
             {
@@ -796,6 +904,7 @@ impl WorkspaceIndex {
                     generation: file.generation,
                     score,
                     matched_lanes: candidate.lanes,
+                    evidence: candidate.evidence,
                     preview: String::new(),
                     symbol,
                     agent,
@@ -825,7 +934,12 @@ impl WorkspaceIndex {
             }
             true
         });
-        let mut ranked_hits = rerank_for_directory_diversity(ranked_hits, limit);
+        let mut ranked_hits = if collection_validated {
+            ranked_hits.truncate(limit);
+            ranked_hits
+        } else {
+            rerank_for_directory_diversity(ranked_hits, limit)
+        };
         let catalog_filter_duration = catalog_started_at.elapsed();
         let preview_started_at = Instant::now();
         self.focus_search_previews(query, &mut ranked_hits);
@@ -1162,6 +1276,20 @@ impl WorkspaceIndex {
         self.semantic.seal(generation, &expected)
     }
 
+    pub(crate) fn prepare_checkpoint_generation(&mut self) -> Result<()> {
+        let _writer_lock = acquire_writer_lock(&self.index_dir)?;
+        self.catalog.ensure_complete_files()?;
+        let root = self
+            .catalog
+            .roots()?
+            .into_iter()
+            .next()
+            .context("no producer roots")?
+            .1;
+        let (root_id, generation) = self.catalog.start_generation(&root)?;
+        self.catalog.complete_generation(root_id, generation)
+    }
+
     pub fn publish_snapshot(&mut self, publish_dir: impl AsRef<Path>) -> Result<SnapshotManifest> {
         let _writer_lock = acquire_writer_lock(&self.index_dir)?;
         let generation = self
@@ -1175,6 +1303,8 @@ impl WorkspaceIndex {
             .map(|file| (file.id, file.generation))
             .collect::<Vec<_>>();
         self.semantic.seal(generation, &expected)?;
+        self.search.collect_obsolete_files()?;
+        self.memory_search.collect_obsolete_files()?;
         self.catalog.prune_generation_rows(generation)?;
         self.catalog.checkpoint()?;
         publish(
@@ -1375,6 +1505,7 @@ impl WorkspaceIndex {
         Ok(())
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn notify_root_inner(
         &mut self,
         root: &Path,
@@ -1382,6 +1513,7 @@ impl WorkspaceIndex {
         generation: i64,
         paths: &[PathBuf],
         options: &IndexOptions,
+        deadline: Option<Instant>,
     ) -> Result<IndexReport> {
         let profiler =
             DuckDbProfiler::new(options.duckdb_timeout_seconds, options.max_profile_bytes);
@@ -1394,8 +1526,25 @@ impl WorkspaceIndex {
         let mut deleted_paths = Vec::new();
 
         for path in paths {
+            if deadline.is_some_and(|d| Instant::now() >= d) {
+                break;
+            }
             report.discovered += 1;
-            if !path.exists() {
+            let metadata = match fs::symlink_metadata(path) {
+                Ok(metadata) => Some(metadata),
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => None,
+                Err(error) => {
+                    report.failed += 1;
+                    self.catalog.record_failure(
+                        generation,
+                        &path.to_string_lossy(),
+                        "notify_stat",
+                        &error.to_string(),
+                    )?;
+                    continue;
+                }
+            };
+            if metadata.is_none() {
                 let path_text = path.to_string_lossy();
                 if self
                     .catalog
@@ -1408,7 +1557,7 @@ impl WorkspaceIndex {
                 }
                 continue;
             }
-            if !path.is_file() {
+            if !metadata.is_some_and(|metadata| metadata.is_file()) {
                 report.failed += 1;
                 self.catalog.record_failure(
                     generation,
@@ -1719,15 +1868,18 @@ fn content_excerpt(
     }))
 }
 
-fn notification_path(path: &Path) -> Result<PathBuf> {
+pub(crate) fn notification_path(path: &Path) -> Result<PathBuf> {
     let absolute = if path.is_absolute() {
         path.to_owned()
     } else {
         std::env::current_dir()?.join(path)
     };
-    if absolute.exists() {
-        return fs::canonicalize(&absolute)
-            .with_context(|| format!("resolve notified path {}", absolute.display()));
+    // Walk to the nearest existing ancestor for removed subtrees. Only ENOENT
+    // permits deletion; EACCES/EIO must remain retryable errors.
+    match fs::canonicalize(&absolute) {
+        Ok(canonical) => return Ok(canonical),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+        Err(error) => return Err(error).context("resolve notified path"),
     }
     let parent = absolute
         .parent()
@@ -1735,12 +1887,13 @@ fn notification_path(path: &Path) -> Result<PathBuf> {
     let name = absolute
         .file_name()
         .context("notified path has no file name")?;
-    Ok(fs::canonicalize(parent)
-        .with_context(|| format!("resolve notified path parent {}", parent.display()))?
-        .join(name))
+    if name == ".." || name == "." {
+        anyhow::bail!("invalid notified path");
+    }
+    Ok(notification_path(parent)?.join(name))
 }
 
-fn resolve_context_path(path: &Path) -> Result<PathBuf> {
+pub(crate) fn resolve_context_path(path: &Path) -> Result<PathBuf> {
     let absolute = if path.is_absolute() {
         path.to_owned()
     } else {
@@ -1973,29 +2126,57 @@ fn has_internal_identifier_separator(term: &str) -> bool {
     })
 }
 
-fn rerank_for_directory_diversity(
-    mut candidates: Vec<(SearchHit, Option<String>)>,
+pub(crate) fn rerank_for_directory_diversity(
+    candidates: Vec<(SearchHit, Option<String>)>,
     limit: usize,
 ) -> Vec<(SearchHit, Option<String>)> {
+    rerank_with_directory_penalty(candidates, limit, SAME_DIRECTORY_MMR_PENALTY, false)
+}
+
+pub(crate) fn rerank_collection_diversity(
+    candidates: Vec<(SearchHit, Option<String>)>,
+    limit: usize,
+) -> Vec<(SearchHit, Option<String>)> {
+    // Broad shards often contain many neighboring outputs from one experiment.
+    // Penalize repeated directories progressively, relative to ordinary scores;
+    // exact-symbol and applicable-instruction boosts retain their precedence.
+    let best = candidates
+        .iter()
+        .map(|(h, _)| h.score)
+        .filter(|score| *score < 0.5)
+        .fold(0.0_f32, f32::max);
+    rerank_with_directory_penalty(
+        candidates,
+        limit,
+        (best * 0.1).max(SAME_DIRECTORY_MMR_PENALTY),
+        true,
+    )
+}
+
+fn rerank_with_directory_penalty(
+    mut candidates: Vec<(SearchHit, Option<String>)>,
+    limit: usize,
+    penalty: f32,
+    progressive: bool,
+) -> Vec<(SearchHit, Option<String>)> {
     let mut selected = Vec::with_capacity(limit.min(candidates.len()));
-    let mut selected_parents = HashSet::new();
+    let mut selected_parents = HashMap::<PathBuf, usize>::new();
+    let discount = |parents: &HashMap<PathBuf, usize>, hit: &SearchHit| {
+        let count = parents.get(parent_path(&hit.path)).copied().unwrap_or(0);
+        let output = matches!(hit.kind, FileKind::SemiStructured | FileKind::Tabular);
+        if progressive && output {
+            penalty * count as f32
+        } else {
+            SAME_DIRECTORY_MMR_PENALTY * count.min(1) as f32
+        }
+    };
     while selected.len() < limit && !candidates.is_empty() {
         let mut best_index = 0;
         for index in 1..candidates.len() {
             let candidate = &candidates[index].0;
             let best = &candidates[best_index].0;
-            let candidate_score = candidate.score
-                - if selected_parents.contains(parent_path(&candidate.path)) {
-                    SAME_DIRECTORY_MMR_PENALTY
-                } else {
-                    0.0
-                };
-            let best_score = best.score
-                - if selected_parents.contains(parent_path(&best.path)) {
-                    SAME_DIRECTORY_MMR_PENALTY
-                } else {
-                    0.0
-                };
+            let candidate_score = candidate.score - discount(&selected_parents, candidate);
+            let best_score = best.score - discount(&selected_parents, best);
             if candidate_score > best_score
                 || (candidate_score == best_score && candidate.path < best.path)
             {
@@ -2004,10 +2185,8 @@ fn rerank_for_directory_diversity(
         }
         let mut candidate = candidates.swap_remove(best_index);
         let parent = parent_path(&candidate.0.path).to_owned();
-        if selected_parents.contains(&parent) {
-            candidate.0.score -= SAME_DIRECTORY_MMR_PENALTY;
-        }
-        selected_parents.insert(parent);
+        candidate.0.score -= discount(&selected_parents, &candidate.0);
+        *selected_parents.entry(parent).or_default() += 1;
         selected.push(candidate);
     }
     selected
@@ -2034,6 +2213,7 @@ mod tests {
                 generation: 1,
                 score,
                 matched_lanes: vec!["content".to_owned()],
+                evidence: Vec::new(),
                 preview: String::new(),
                 symbol: None,
                 agent: None,
@@ -2054,6 +2234,26 @@ mod tests {
         let selected = rerank_for_directory_diversity(candidates, 2);
         assert_eq!(selected[0].0.path, "/workspace/a/first.json");
         assert_eq!(selected[1].0.path, "/workspace/b/implementation.sql");
+    }
+
+    #[test]
+    fn collection_keeps_independent_evidence_among_repeated_outputs() {
+        let mut candidates = (0..20)
+            .map(|i| {
+                let mut hit = ranked_hit(&format!("/data/run/output{i}.json"), 0.1);
+                hit.0.kind = FileKind::SemiStructured;
+                hit
+            })
+            .collect::<Vec<_>>();
+        candidates.push(ranked_hit("/code/build.sql", 0.08));
+        candidates.push(ranked_hit("/code/exact.rs", 1.5));
+        let selected = rerank_collection_diversity(candidates, 5);
+        assert_eq!(selected[0].0.path, "/code/exact.rs");
+        assert!(
+            selected
+                .iter()
+                .any(|(hit, _)| hit.path == "/code/build.sql")
+        );
     }
 
     #[test]

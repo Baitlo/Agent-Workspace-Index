@@ -15,6 +15,7 @@ import socket
 import threading
 import time
 from collections import Counter, OrderedDict
+from datetime import timedelta
 from pathlib import Path
 from typing import Any
 
@@ -762,6 +763,11 @@ class Sidecar:
             )
         if already_sealed:
             return existing
+        # Seal is called by the exclusive local writer. Snapshot readers use
+        # separate immutable copies, so they never depend on these old versions.
+        # Keep unverified fragments for crash recovery; only committed history
+        # is eligible for immediate cleanup.
+        table.optimize(cleanup_older_than=timedelta(0), delete_unverified=False)
         payload = {
             "format_version": 1,
             "generation": generation,

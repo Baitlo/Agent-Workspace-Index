@@ -24,7 +24,7 @@ pub struct SnapshotManifest {
     pub files: Vec<SnapshotFile>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SnapshotPointer {
     pub format_version: u32,
     pub generation: i64,
@@ -36,6 +36,7 @@ pub struct SnapshotPointer {
 pub struct ActivatedSnapshot {
     pub generation: i64,
     pub path: PathBuf,
+    pub identity: String,
 }
 
 pub(crate) fn publish(
@@ -80,6 +81,10 @@ pub(crate) fn publish(
             &index_dir.join("memory-tantivy"),
             &staging.join("memory-tantivy"),
         )?;
+        let producer_state = index_dir.join("producer-state.sqlite3");
+        if producer_state.exists() {
+            copy_tree(&producer_state, &staging.join("producer-state.sqlite3"))?;
+        }
         if include_semantic {
             let semantic_database = index_dir.join("semantic.lance");
             let semantic_manifest = index_dir.join("semantic-manifest.json");
@@ -140,12 +145,14 @@ pub(crate) fn materialize_latest(
     publish_dir: &Path,
     cache_dir: &Path,
 ) -> Result<ActivatedSnapshot> {
-    let pointer_path = publish_dir.join("current.json");
-    let pointer: SnapshotPointer = serde_json::from_slice(
-        &fs::read(&pointer_path)
-            .with_context(|| format!("read snapshot pointer {}", pointer_path.display()))?,
-    )
-    .with_context(|| format!("decode snapshot pointer {}", pointer_path.display()))?;
+    materialize_pointer(publish_dir, cache_dir, &read_pointer(publish_dir)?)
+}
+
+pub(crate) fn materialize_pointer(
+    publish_dir: &Path,
+    cache_dir: &Path,
+    pointer: &SnapshotPointer,
+) -> Result<ActivatedSnapshot> {
     if pointer.format_version != SNAPSHOT_FORMAT_VERSION {
         anyhow::bail!(
             "unsupported snapshot pointer version {}",
@@ -153,10 +160,18 @@ pub(crate) fn materialize_latest(
         );
     }
     validate_directory_name(&pointer.directory)?;
+    if pointer.manifest_blake3.len() != 64
+        || !pointer
+            .manifest_blake3
+            .bytes()
+            .all(|byte| byte.is_ascii_hexdigit())
+    {
+        anyhow::bail!("invalid snapshot manifest hash");
+    }
 
     let source = publish_dir.join("generations").join(&pointer.directory);
-    let source_manifest = verify_snapshot(&source)?;
     let manifest_bytes = fs::read(source.join("manifest.json"))?;
+    let source_manifest: SnapshotManifest = serde_json::from_slice(&manifest_bytes)?;
     if blake3::hash(&manifest_bytes).to_hex().as_str() != pointer.manifest_blake3 {
         anyhow::bail!(
             "snapshot manifest checksum mismatch at {}",
@@ -170,12 +185,21 @@ pub(crate) fn materialize_latest(
     let generations_dir = cache_dir.join("generations");
     fs::create_dir_all(&generations_dir)?;
     remove_stale_materializations(&generations_dir)?;
-    let local = generations_dir.join(&pointer.directory);
+    let identity = blake3::hash(&serde_json::to_vec(pointer)?)
+        .to_hex()
+        .to_string();
+    let local = generations_dir.join(format!("{}-{identity}", pointer.directory));
     if local.exists() {
-        if verify_snapshot(&local).is_ok() {
+        if verify_snapshot(&local).is_ok()
+            && blake3::hash(&fs::read(local.join("manifest.json"))?)
+                .to_hex()
+                .as_str()
+                == pointer.manifest_blake3
+        {
             return Ok(ActivatedSnapshot {
                 generation: pointer.generation,
                 path: local,
+                identity,
             });
         }
         make_writable(&local)?;
@@ -190,6 +214,9 @@ pub(crate) fn materialize_latest(
     }
     let result = (|| {
         copy_tree(&source, &staging)?;
+        if fs::read(staging.join("manifest.json"))? != manifest_bytes {
+            anyhow::bail!("snapshot manifest changed during materialization");
+        }
         verify_snapshot(&staging)?;
         make_writable(&staging)?;
         fs::rename(&staging, &local)?;
@@ -197,6 +224,7 @@ pub(crate) fn materialize_latest(
         Ok(ActivatedSnapshot {
             generation: pointer.generation,
             path: local,
+            identity,
         })
     })();
     if result.is_err() && staging.exists() {
@@ -426,7 +454,7 @@ fn hash_file(path: &Path) -> Result<String> {
     Ok(hasher.finalize().to_hex().to_string())
 }
 
-fn write_json_sync(path: &Path, value: &impl Serialize) -> Result<()> {
+pub(crate) fn write_json_sync(path: &Path, value: &impl Serialize) -> Result<()> {
     let mut file = OpenOptions::new()
         .create(true)
         .truncate(true)

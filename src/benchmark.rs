@@ -121,10 +121,42 @@ pub fn load_gold(path: &Path, allow_draft: bool) -> Result<RetrievalGoldSet> {
 }
 
 pub fn evaluate(index: &WorkspaceIndex, gold: &RetrievalGoldSet) -> Result<RetrievalReport> {
+    evaluate_search(gold, |query| index.search(query, 10))
+}
+
+/// Benchmark the same pinned collection used by snapshot readers.
+pub fn evaluate_snapshot(
+    source: &Path,
+    cache: &Path,
+    gold: &RetrievalGoldSet,
+) -> Result<RetrievalReport> {
+    let active = crate::collection::refresh(source, cache, None)?.context("no snapshot")?;
+    let mut reader = crate::reader::ReaderIndex::open(&active.path)?;
+    reader.warm_retrieval()?;
+    let status = reader.status()?;
+    for semantic in
+        std::iter::once(&status.semantic).chain(status.shards.iter().map(|s| &s.status.semantic))
+    {
+        if semantic.enabled && !semantic.available {
+            anyhow::bail!(
+                "snapshot semantic retrieval unavailable: {:?}",
+                semantic.error
+            );
+        }
+    }
+    evaluate_search(gold, |query| {
+        reader.search_filtered(query, 10, &[], &[], None, None)
+    })
+}
+
+fn evaluate_search(
+    gold: &RetrievalGoldSet,
+    mut search: impl FnMut(&str) -> Result<Vec<SearchHit>>,
+) -> Result<RetrievalReport> {
     let mut results = Vec::with_capacity(gold.cases.len());
     for case in &gold.cases {
         let started = Instant::now();
-        let hits = index.search(&case.query, 10)?;
+        let hits = search(&case.query)?;
         let latency_ms = started.elapsed().as_secs_f64() * 1_000.0;
         let relevant_ranks = hits
             .iter()

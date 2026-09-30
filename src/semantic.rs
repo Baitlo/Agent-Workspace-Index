@@ -718,8 +718,15 @@ pub(crate) fn merge_semantic_candidates(
                 generation: candidate.generation,
                 score: 0.0,
                 lanes: Vec::new(),
+                evidence: Vec::new(),
             });
         entry.score += contribution;
+        entry.evidence.push(crate::model::LaneEvidence {
+            name: "semantic".to_owned(),
+            score: candidate.score,
+            weight: vector_weight,
+            contribution,
+        });
         entry.lanes.push("semantic".to_owned());
         entry.lanes = entry
             .lanes
@@ -812,6 +819,7 @@ mod tests {
             generation: 3,
             score,
             lanes: vec!["content".to_owned()],
+            evidence: Vec::new(),
         }
     }
 

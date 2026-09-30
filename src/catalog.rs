@@ -210,6 +210,33 @@ impl Catalog {
         Ok((root_id, self.connection.last_insert_rowid()))
     }
 
+    pub(crate) fn register_root(&self, root: &Path) -> Result<()> {
+        self.connection.execute(
+            "INSERT OR IGNORE INTO roots(path) VALUES (?1)",
+            [root.to_string_lossy().as_ref()],
+        )?;
+        Ok(())
+    }
+
+    pub(crate) fn file_page(
+        &self,
+        root: &Path,
+        after_id: i64,
+        limit: usize,
+    ) -> Result<Vec<(i64, PathBuf)>> {
+        let mut statement = self.connection.prepare(
+            "SELECT f.id, f.absolute_path FROM files f
+             WHERE f.root_id = (SELECT id FROM roots WHERE path = ?1)
+               AND f.id > ?2 AND f.deleted = 0 ORDER BY f.id LIMIT ?3",
+        )?;
+        Ok(statement
+            .query_map(
+                params![root.to_string_lossy(), after_id, limit as i64],
+                |row| Ok((row.get(0)?, PathBuf::from(row.get::<_, String>(1)?))),
+            )?
+            .collect::<rusqlite::Result<Vec<_>>>()?)
+    }
+
     pub(crate) fn roots(&self) -> Result<Vec<(i64, PathBuf)>> {
         let mut statement = self
             .connection
@@ -705,6 +732,18 @@ impl Catalog {
         Ok(paths)
     }
 
+    pub(crate) fn ensure_complete_files(&self) -> Result<()> {
+        let incomplete: bool = self.connection.query_row(
+            "SELECT EXISTS(SELECT 1 FROM files WHERE deleted=0 AND generation_completed=0)",
+            [],
+            |row| row.get(0),
+        )?;
+        if incomplete {
+            anyhow::bail!("uncommitted catalog files must be replayed before publication");
+        }
+        Ok(())
+    }
+
     pub(crate) fn latest_completed_generation(&self) -> Result<Option<i64>> {
         self.connection
             .query_row(
@@ -1046,6 +1085,7 @@ impl Catalog {
             |row| row.get::<_, Option<i64>>(0),
         )?;
         Ok(IndexStatus {
+            shards: Vec::new(),
             completed_generation: self.latest_completed_generation()?,
             running_generations: self.count("generations", "status = 'running'")?,
             failed_generations: self.count("generations", "status = 'failed'")?,

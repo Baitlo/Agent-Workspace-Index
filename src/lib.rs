@@ -1,5 +1,7 @@
 pub mod benchmark;
 mod catalog;
+mod change_ledger;
+pub mod collection;
 pub mod daemon;
 mod data;
 mod extract;
@@ -9,8 +11,10 @@ mod mcp_audit;
 pub mod memory;
 mod metrics;
 mod model;
+pub mod producer;
 pub mod protocol;
 pub mod publisher;
+mod reader;
 mod search;
 mod semantic;
 pub mod snapshot;

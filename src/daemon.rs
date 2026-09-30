@@ -13,11 +13,11 @@ use anyhow::{Context, Result};
 use fs4::fs_std::FileExt;
 use serde_json::{Value, json};
 
-use crate::WorkspaceIndex;
 use crate::metrics::LatencyWindow;
 use crate::model::ServingStatus;
 use crate::protocol::{PROTOCOL_VERSION, Request, RequestEnvelope, ResponseEnvelope};
-use crate::snapshot::{ActivatedSnapshot, materialize_latest, read_pointer};
+use crate::reader::ReaderIndex;
+use crate::snapshot::ActivatedSnapshot;
 
 const MAX_REQUEST_BYTES: usize = 1024 * 1024;
 const MAX_RESPONSE_BYTES: usize = 16 * 1024 * 1024;
@@ -113,7 +113,7 @@ pub fn serve_with_snapshots(
     let workspace_path = follower
         .as_ref()
         .map_or_else(|| index_dir.to_owned(), |value| value.active_path.clone());
-    let mut workspace = WorkspaceIndex::open(workspace_path)?;
+    let mut workspace = ReaderIndex::open(workspace_path)?;
     if let Err(error) = workspace.warm_retrieval() {
         eprintln!("AWI semantic sidecar unavailable; serving lexical search: {error:#}");
     }
@@ -149,7 +149,7 @@ struct ConnectionWork {
 
 fn serve_snapshot_readers(
     listener: UnixListener,
-    workspace: &mut WorkspaceIndex,
+    workspace: &mut ReaderIndex,
     follower: &mut SnapshotFollower,
 ) -> Result<()> {
     let worker_count = env_usize("AWI_DAEMON_QUERY_WORKERS", DEFAULT_QUERY_WORKERS)?;
@@ -242,7 +242,7 @@ fn serve_snapshot_readers(
 
 fn snapshot_accept_loop(
     listener: &UnixListener,
-    workspace: &mut WorkspaceIndex,
+    workspace: &mut ReaderIndex,
     follower: &mut SnapshotFollower,
     active_path: &RwLock<PathBuf>,
     sender: &SyncSender<ConnectionWork>,
@@ -305,7 +305,7 @@ fn write_failure(mut stream: UnixStream, code: &str, message: &str) {
 
 fn handle_connection_resilient(
     stream: UnixStream,
-    workspace: &mut WorkspaceIndex,
+    workspace: &mut ReaderIndex,
     snapshot_read_only: bool,
     metrics: &DaemonMetrics,
 ) -> bool {
@@ -374,7 +374,7 @@ pub fn try_request(socket_path: &Path, request: &Request) -> Result<Option<Value
 
 fn handle_connection(
     mut stream: UnixStream,
-    workspace: &mut WorkspaceIndex,
+    workspace: &mut ReaderIndex,
     snapshot_read_only: bool,
     metrics: &DaemonMetrics,
 ) -> Result<bool> {
@@ -420,7 +420,7 @@ fn handle_connection(
 }
 
 fn dispatch(
-    workspace: &mut WorkspaceIndex,
+    workspace: &mut ReaderIndex,
     request: Request,
     snapshot_read_only: bool,
     metrics: &DaemonMetrics,
@@ -490,6 +490,7 @@ struct SnapshotFollower {
     publish_dir: PathBuf,
     cache_dir: PathBuf,
     active_generation: i64,
+    active_identity: String,
     active_path: PathBuf,
     poll_interval: Duration,
     next_poll: Instant,
@@ -498,11 +499,13 @@ struct SnapshotFollower {
 
 impl SnapshotFollower {
     fn new(publish_dir: &Path, cache_dir: &Path, poll_interval: Duration) -> Result<Self> {
-        let activated = materialize_latest(publish_dir, cache_dir)?;
+        let activated = crate::collection::refresh(publish_dir, cache_dir, None)?
+            .context("snapshot bootstrap returned no activation")?;
         Ok(Self {
             publish_dir: publish_dir.to_owned(),
             cache_dir: cache_dir.to_owned(),
             active_generation: activated.generation,
+            active_identity: activated.identity,
             active_path: activated.path,
             poll_interval,
             next_poll: Instant::now() + poll_interval,
@@ -510,7 +513,7 @@ impl SnapshotFollower {
         })
     }
 
-    fn refresh(&mut self, workspace: &mut WorkspaceIndex) -> Result<()> {
+    fn refresh(&mut self, workspace: &mut ReaderIndex) -> Result<()> {
         if let Some(receiver) = self.pending.take() {
             match receiver.try_recv() {
                 Ok(Ok(Some(activated))) => {
@@ -524,6 +527,7 @@ impl SnapshotFollower {
                     }
                     *workspace = replacement;
                     self.active_generation = activated.generation;
+                    self.active_identity = activated.identity;
                     self.active_path = activated.path;
                     eprintln!(
                         "AWI daemon activated snapshot generation {}",
@@ -547,18 +551,16 @@ impl SnapshotFollower {
         self.next_poll = Instant::now() + self.poll_interval;
         let publish_dir = self.publish_dir.clone();
         let cache_dir = self.cache_dir.clone();
-        let active_generation = self.active_generation;
+        let previous = ActivatedSnapshot {
+            generation: self.active_generation,
+            path: self.active_path.clone(),
+            identity: self.active_identity.clone(),
+        };
         let (sender, receiver) = mpsc::channel();
         thread::Builder::new()
             .name("awi-snapshot-refresh".to_owned())
             .spawn(move || {
-                let result = (|| {
-                    let pointer = read_pointer(&publish_dir)?;
-                    if pointer.generation == active_generation {
-                        return Ok(None);
-                    }
-                    materialize_latest(&publish_dir, &cache_dir).map(Some)
-                })();
+                let result = crate::collection::refresh(&publish_dir, &cache_dir, Some(&previous));
                 let _ = sender.send(result);
             })
             .context("spawn AWI snapshot refresh worker")?;
@@ -612,7 +614,7 @@ mod tests {
     use tempfile::tempdir;
 
     use super::*;
-    use crate::IndexOptions;
+    use crate::{IndexOptions, WorkspaceIndex};
 
     #[test]
     fn snapshot_refresh_is_scheduled_without_blocking_the_request_path() {
@@ -630,7 +632,7 @@ mod tests {
         writer.publish_snapshot(&publish_dir).unwrap();
 
         let mut follower = SnapshotFollower::new(&publish_dir, &cache_dir, Duration::ZERO).unwrap();
-        let mut reader = WorkspaceIndex::open(&follower.active_path).unwrap();
+        let mut reader = ReaderIndex::open(&follower.active_path).unwrap();
         fs::write(&source, "fn version_two() {}\n").unwrap();
         writer.index_root(&root, &IndexOptions::default()).unwrap();
         writer.publish_snapshot(&publish_dir).unwrap();
@@ -646,6 +648,12 @@ mod tests {
             thread::sleep(Duration::from_millis(10));
         }
         assert_eq!(follower.active_generation, 2);
-        assert_eq!(reader.search("version_two", 5).unwrap().len(), 1);
+        assert_eq!(
+            reader
+                .search_filtered("version_two", 5, &[], &[], None, None)
+                .unwrap()
+                .len(),
+            1
+        );
     }
 }
