@@ -1,6 +1,6 @@
 use std::collections::{BTreeSet, HashMap, HashSet};
 use std::fs;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result};
 use rayon::prelude::*;
@@ -10,6 +10,7 @@ use tantivy::schema::{
     Field, INDEXED, IndexRecordOption, STORED, STRING, Schema, TantivyDocument, Value,
 };
 use tantivy::snippet::SnippetGenerator;
+use tantivy::tokenizer::TokenStream;
 use tantivy::{Index, Term, doc};
 
 use crate::model::{SearchCandidate, SearchDocument};
@@ -17,6 +18,7 @@ use crate::model::{SearchCandidate, SearchDocument};
 const WRITER_HEAP_BYTES: usize = 50_000_000;
 const RRF_K: f32 = 60.0;
 const PATH_COVERAGE_WEIGHT: f32 = 0.05;
+const EXACT_PATH_BOOST: f32 = 2.0;
 const AGENT_KINDS: &[&str] = &["agent_instructions", "agent_skill"];
 const MEMORY_KINDS: &[&str] = &["agent_memory"];
 
@@ -149,6 +151,7 @@ impl SearchIndex {
         lane_limit: usize,
         result_limit: usize,
         include_agent_lane: bool,
+        scopes: &[PathBuf],
     ) -> Result<Vec<SearchCandidate>> {
         let base_exclusions = Some(AGENT_KINDS);
         let mut lanes = vec![
@@ -226,7 +229,7 @@ impl SearchIndex {
             path_suffix: None,
         });
 
-        let lane_results = lanes
+        let mut lane_results = lanes
             .par_iter()
             .map(|lane| {
                 self.search_lane(
@@ -236,10 +239,56 @@ impl SearchIndex {
                     lane.exclude_kinds,
                     lane.path_suffix,
                     lane_limit,
+                    scopes,
                 )
                 .map(|hits| (lane.name, lane.weight, hits))
             })
             .collect::<Result<Vec<_>>>()?;
+
+        let anchors = filename_anchors(query);
+        if !anchors.is_empty() {
+            let queries = anchors
+                .iter()
+                .map(|anchor| {
+                    let mut terms: Vec<Box<dyn Query>> = Vec::new();
+                    let basename = anchor.rsplit('/').next().unwrap_or(anchor);
+                    let mut analyzer = self.index.tokenizer_for_field(self.fields.name)?;
+                    analyzer.token_stream(basename).process(&mut |token| {
+                        terms.push(Box::new(TermQuery::new(
+                            Term::from_field_text(self.fields.name, &token.text),
+                            IndexRecordOption::Basic,
+                        )));
+                    });
+                    if anchor.contains('/') {
+                        analyzer.token_stream(anchor).process(&mut |token| {
+                            terms.push(Box::new(TermQuery::new(
+                                Term::from_field_text(self.fields.path, &token.text),
+                                IndexRecordOption::Basic,
+                            )));
+                        });
+                    }
+                    Ok(Box::new(BooleanQuery::intersection(terms)) as Box<dyn Query>)
+                })
+                .collect::<Result<Vec<_>>>()?;
+            let mut hits = self.search_filtered_query(
+                Box::new(BooleanQuery::union(queries)),
+                None,
+                None,
+                None,
+                lane_limit.max(1_000),
+                scopes,
+            )?;
+            // Filename postings avoid traversing the entire path term dictionary.
+            hits.retain(|hit| {
+                anchors.iter().any(|anchor| {
+                    hit.path == *anchor
+                        || (!anchor.starts_with('/') && hit.path.ends_with(&format!("/{anchor}")))
+                })
+            });
+            hits.truncate(lane_limit);
+            // Preserve relative relevance among exact matches.
+            lane_results.push(("exact_path", 0.0, hits));
+        }
 
         let mut fused: HashMap<i64, SearchCandidate> = HashMap::new();
         for (lane, weight, hits) in lane_results {
@@ -268,6 +317,9 @@ impl SearchIndex {
         let mut candidates = fused.into_values().collect::<Vec<_>>();
         for candidate in &mut candidates {
             candidate.score += PATH_COVERAGE_WEIGHT * path_token_coverage(query, &candidate.path);
+            if candidate.lanes.iter().any(|lane| lane == "exact_path") {
+                candidate.score += EXACT_PATH_BOOST;
+            }
             candidate.lanes = candidate
                 .lanes
                 .iter()
@@ -343,6 +395,7 @@ impl SearchIndex {
         Ok(previews)
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn search_lane(
         &self,
         query: &str,
@@ -351,12 +404,56 @@ impl SearchIndex {
         exclude_kinds: Option<&[&str]>,
         path_suffix: Option<&str>,
         limit: usize,
+        scopes: &[PathBuf],
+    ) -> Result<Vec<LaneHit>> {
+        let parser = QueryParser::for_index(&self.index, fields.to_vec());
+        let (text_query, _errors) = parser.parse_query_lenient(query);
+        self.search_filtered_query(
+            text_query,
+            include_kinds,
+            exclude_kinds,
+            path_suffix,
+            limit,
+            scopes,
+        )
+    }
+
+    fn search_filtered_query(
+        &self,
+        text_query: Box<dyn Query>,
+        include_kinds: Option<&[&str]>,
+        exclude_kinds: Option<&[&str]>,
+        path_suffix: Option<&str>,
+        limit: usize,
+        scopes: &[PathBuf],
     ) -> Result<Vec<LaneHit>> {
         let reader = self.index.reader().context("open Tantivy reader")?;
         let searcher = reader.searcher();
-        let parser = QueryParser::for_index(&self.index, fields.to_vec());
-        let (text_query, _errors) = parser.parse_query_lenient(query);
         let mut clauses = vec![(tantivy::query::Occur::Must, text_query)];
+        if !scopes.is_empty() {
+            let mut scope_queries = scopes
+                .iter()
+                .map(|scope| {
+                    let prefix = regex::escape(scope.to_string_lossy().trim_end_matches('/'));
+                    Ok(Box::new(RegexQuery::from_pattern(
+                        &format!("{prefix}(/.*)?"),
+                        self.fields.path_exact,
+                    )?) as Box<dyn Query>)
+                })
+                .collect::<Result<Vec<_>>>()?;
+            // Scope-bound knowledge is checked against catalog provenance later.
+            // Ordinary files must be confined before the bounded TopDocs window.
+            for kind in ["agent_instructions", "agent_memory"] {
+                scope_queries.push(Box::new(TermQuery::new(
+                    Term::from_field_text(self.fields.kind, kind),
+                    IndexRecordOption::Basic,
+                )));
+            }
+            clauses.push((
+                tantivy::query::Occur::Must,
+                Box::new(BooleanQuery::union(scope_queries)),
+            ));
+        }
         if let Some(kinds) = include_kinds {
             let kind_queries = kinds
                 .iter()
@@ -447,6 +544,33 @@ impl SearchIndex {
         }
         Ok(hits)
     }
+}
+
+/// Literal filename/path intent only; avoid treating versions or URLs as files.
+/// Escaping happens at the query boundary, never through QueryParser syntax.
+pub(crate) fn filename_anchors(query: &str) -> Vec<String> {
+    query
+        .split_whitespace()
+        .filter_map(|token| {
+            let token =
+                token.trim_matches(|c: char| matches!(c, '`' | '"' | '\'' | '(' | ')' | ',' | ';'));
+            let token = token.strip_prefix("./").unwrap_or(token);
+            if token.contains(':') || token.contains("//") || token.len() > 512 {
+                return None;
+            }
+            let name = token.rsplit('/').next()?;
+            let (stem, extension) = name.rsplit_once('.')?;
+            if stem.is_empty()
+                || extension.is_empty()
+                || extension.len() > 12
+                || !extension.chars().all(|c| c.is_ascii_alphabetic())
+            {
+                return None;
+            }
+            Some(token.to_owned())
+        })
+        .take(4)
+        .collect()
 }
 
 fn build_schema() -> Schema {
@@ -593,6 +717,18 @@ fn centered_exact_excerpt(source: &str, query: &str, max_chars: usize) -> Option
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn filename_intent_ignores_versions_and_urls() {
+        assert_eq!(
+            filename_anchors("v1.5 https://example.org/x.py 0.95"),
+            Vec::<String>::new()
+        );
+        assert_eq!(
+            filename_anchors("`src/main.rs` config.yaml"),
+            vec!["src/main.rs", "config.yaml"]
+        );
+    }
 
     #[test]
     fn path_coverage_splits_separators_and_letter_digit_boundaries() {

@@ -29,7 +29,9 @@ const MAX_SEARCH_LIMIT: usize = 50;
 const MAX_RETURNED_SEARCH_HITS: usize = 20;
 const MAX_QUERY_CHARS: usize = 4_096;
 const MAX_PREVIEW_CHARS: usize = 1_000;
-const MAX_TEXT_FALLBACK_CHARS: usize = 2_000;
+// Some clients deliver only content[].text to the model. This is an evidence
+// channel, not a pointer to structuredContent. Keep its own explicit bound.
+const MAX_TEXT_FALLBACK_CHARS: usize = 96 * 1024;
 const DEFAULT_SYMBOL_LIMIT: usize = 200;
 const MAX_SYMBOL_LIMIT: usize = 1_000;
 const DEFAULT_INSPECT_LINES: usize = 80;
@@ -58,8 +60,8 @@ pub struct WorkspaceSearchRequest {
     #[serde(default)]
     #[schemars(schema_with = "optional_integer_schema", range(min = 1, max = 50))]
     pub limit: Option<usize>,
-    /// Optional search scopes. A registered root or an existing parent directory
-    /// containing one or more registered roots is accepted.
+    /// Optional search scopes. Accepts registered roots, their existing child
+    /// directories, or an existing parent containing registered roots.
     #[serde(default)]
     pub roots: Option<Vec<PathBuf>>,
     /// Optional file kinds. Use source for code; text for SQL/Markdown/logs;
@@ -302,6 +304,15 @@ impl AwiMcpServer {
         for hit in &mut hits {
             previews_truncated |= truncate_chars(&mut hit.preview, MAX_PREVIEW_CHARS);
         }
+        let unmatched_filenames = crate::search::filename_anchors(query)
+            .into_iter()
+            .filter(|anchor| {
+                !hits.iter().any(|hit| {
+                    hit.path == *anchor
+                        || (!anchor.starts_with('/') && hit.path.ends_with(&format!("/{anchor}")))
+                })
+            })
+            .collect::<Vec<_>>();
         let hits = hits.into_iter().map(compact_search_hit).collect::<Vec<_>>();
         let returned = hits.len();
 
@@ -311,6 +322,7 @@ impl AwiMcpServer {
                 "search_id": search_id,
                 "hits": hits,
                 "returned": returned,
+                "unmatched_filenames": unmatched_filenames,
                 "requested_limit": requested_limit,
                 "effective_limit": limit,
                 "limit_compacted": requested_limit > limit,
@@ -682,7 +694,7 @@ fn execute_request(index_dir: &Path, socket_path: &Path, request: Request) -> Re
 fn tool_error(code: &str, error: &anyhow::Error) -> CallToolResult {
     let recovery = match code {
         "search_failed" => Some(
-            "Omit roots or use a registered root/parent scope; use a short query and retry once.",
+            "Omit roots or use a registered root, child directory, or parent scope; retry once.",
         ),
         "inspect_failed" => Some(
             "Call workspace_search first and inspect only a returned path; otherwise use ordinary file tools.",
@@ -744,7 +756,7 @@ fn effective_search_limit(requested: usize) -> usize {
 
 fn bounded_result(value: Value) -> CallToolResult {
     match serde_json::to_vec(&value) {
-        Ok(encoded) if encoded.len() <= MAX_STRUCTURED_RESPONSE_BYTES => {
+        Ok(encoded) if encoded.len().saturating_add(256) <= MAX_STRUCTURED_RESPONSE_BYTES => {
             structured_result(value, false)
         }
         Ok(encoded) => structured_result(
@@ -763,8 +775,21 @@ fn bounded_result(value: Value) -> CallToolResult {
     }
 }
 
-fn structured_result(value: Value, is_error: bool) -> CallToolResult {
-    let content = vec![ContentBlock::text(text_fallback(&value))];
+fn structured_result(mut value: Value, is_error: bool) -> CallToolResult {
+    let mut text = text_fallback(&value);
+    let text_truncated = truncate_chars(&mut text, MAX_TEXT_FALLBACK_CHARS - 256);
+    if text_truncated {
+        text.push_str(
+            "\n[TEXT TRUNCATED: remaining evidence is omitted. Narrow the search, \
+             paginate inspect with start_line/max_lines, or reduce query rows/columns.]",
+        );
+    }
+    value["delivery"] = json!({
+        "text_truncated": text_truncated,
+        "text_chars": text.chars().count(),
+        "max_text_chars": MAX_TEXT_FALLBACK_CHARS
+    });
+    let content = vec![ContentBlock::text(text)];
     let mut result = if is_error {
         CallToolResult::error(content)
     } else {
@@ -775,7 +800,7 @@ fn structured_result(value: Value, is_error: bool) -> CallToolResult {
 }
 
 fn text_fallback(value: &Value) -> String {
-    let mut summary = if let Some(error) = value.get("error") {
+    if let Some(error) = value.get("error") {
         let code = error
             .get("code")
             .and_then(Value::as_str)
@@ -791,51 +816,77 @@ fn text_fallback(value: &Value) -> String {
             .unwrap_or_default();
         format!("AWI error [{code}]: {message}{recovery}")
     } else if let Some(hits) = value.get("hits").and_then(Value::as_array) {
-        let paths = hits
-            .iter()
-            .take(5)
-            .filter_map(|hit| hit.get("path").and_then(Value::as_str))
-            .collect::<Vec<_>>();
-        if paths.is_empty() {
-            "AWI search returned no hits.".to_owned()
-        } else {
-            format!(
-                "AWI search returned {} hit(s). Top paths:\n{}",
-                hits.len(),
-                paths.join("\n")
-            )
+        let mut text = format!(
+            "AWI search_id={} returned={} limit_compacted={} previews_truncated={}\n\
+             Previews are excerpts of indexed evidence; generation is per file/shard.\n",
+            value["search_id"],
+            hits.len(),
+            value["limit_compacted"],
+            value["previews_truncated"]
+        );
+        if let Some(unmatched) = value.get("unmatched_filenames").and_then(Value::as_array)
+            && !unmatched.is_empty()
+        {
+            text.push_str(&format!(
+                "No literal filename/path match in returned hits for {}. Related results follow; \
+                 check roots/ignore rules or use file tools before another synonym search.\n",
+                Value::Array(unmatched.clone())
+            ));
         }
+        if hits.is_empty() {
+            text.push_str("No hits. Refine once or use file tools for unindexed paths.\n");
+        }
+        for (rank, hit) in hits.iter().enumerate() {
+            text.push_str(&format!(
+                "\n{}. {} [{}; generation={}]\n",
+                rank + 1,
+                hit["path"].as_str().unwrap_or("unknown path"),
+                hit["kind"].as_str().unwrap_or("unknown"),
+                hit["generation"]
+            ));
+            for key in ["symbol", "agent", "memory"] {
+                if let Some(metadata) = hit.get(key).filter(|v| !v.is_null()) {
+                    text.push_str(&format!("{key}: {metadata}\n"));
+                }
+            }
+            text.push_str(hit["preview"].as_str().unwrap_or("(no indexed preview)"));
+            text.push('\n');
+        }
+        text
     } else if let Some(file) = value.get("file") {
         let path = file
             .get("absolute_path")
             .and_then(Value::as_str)
             .unwrap_or("unknown path");
-        let symbol_count = value
-            .get("symbols")
-            .and_then(Value::as_array)
-            .map_or(0, Vec::len);
-        let excerpt = value
-            .pointer("/content/text")
-            .and_then(Value::as_str)
-            .map(|text| format!("\nExcerpt:\n{text}"))
-            .unwrap_or_default();
-        format!("AWI inspect: {path} ({symbol_count} symbol(s)){excerpt}")
+        let mut text = format!(
+            "AWI inspect: {path}\nfile: {file}\ncoverage: {}\nparent_search_id: {}\n",
+            value["coverage"], value["parent_search_id"]
+        );
+        if let Some(content) = value.get("content").filter(|v| !v.is_null()) {
+            let mut bounds = content.clone();
+            if let Some(object) = bounds.as_object_mut() {
+                object.remove("text");
+            }
+            text.push_str(&format!(
+                "excerpt: {bounds}\n{}\n",
+                content["text"].as_str().unwrap_or("")
+            ));
+        }
+        for key in ["focused_symbol", "dataset", "symbols", "agent", "memory"] {
+            if let Some(metadata) = value.get(key).filter(|v| !v.is_null()) {
+                text.push_str(&format!("{key}: {metadata}\n"));
+            }
+        }
+        text
     } else if let Some(row_count) = value.get("row_count").and_then(Value::as_u64) {
         let columns = value.get("columns").cloned().unwrap_or(Value::Null);
-        let rows = value
-            .get("rows")
-            .and_then(Value::as_array)
-            .map(|rows| rows.iter().take(3).cloned().collect::<Vec<_>>())
-            .unwrap_or_default();
         format!(
-            "AWI query returned {row_count} row(s). Columns: {columns}. First rows: {}",
-            Value::Array(rows)
+            "AWI query returned {row_count} row(s); result_truncated={}.\nColumns: {columns}\nRows: {}",
+            value["truncated"], value["rows"]
         )
     } else {
         "AWI result is available in structuredContent.".to_owned()
-    };
-    truncate_chars(&mut summary, MAX_TEXT_FALLBACK_CHARS);
-    summary
+    }
 }
 
 fn truncate_chars(value: &mut String, max_chars: usize) -> bool {
@@ -884,6 +935,73 @@ mod tests {
                 .unwrap()
                 .len(),
             16_000
+        );
+    }
+
+    #[test]
+    fn text_only_clients_receive_all_search_hits_inspect_evidence_and_query_rows() {
+        let hits = (0..8)
+            .map(|i| {
+                json!({
+                    "path": format!("/project/file{i}.rs"),
+                    "kind": "source", "generation": 7,
+                    "preview": format!("evidence_for_{i}"),
+                    "symbol": {"name": format!("target_{i}"), "line_start": 9}
+                })
+            })
+            .collect::<Vec<_>>();
+        let search = bounded_result(json!({"search_id": "s-visible", "hits": hits}));
+        let text = &search.content[0].as_text().unwrap().text;
+        assert!(text.contains("s-visible"));
+        assert!(text.contains("evidence_for_7"));
+        assert!(text.contains("target_7"));
+        assert!(text.contains("generation=7"));
+
+        let excerpt = format!("{}END_OF_REQUESTED_EXCERPT", "公式\n".repeat(3000));
+        let inspect = bounded_result(json!({
+            "file": {"absolute_path": "/project/notes.md", "generation": 7},
+            "content": {"text": excerpt, "start_line": 1, "end_line": 3001, "truncated": false},
+            "dataset": {"columns": [{"name": "score", "data_type": "DOUBLE"}]}
+        }));
+        let text = &inspect.content[0].as_text().unwrap().text;
+        assert!(text.contains("END_OF_REQUESTED_EXCERPT"));
+        assert!(text.contains("DOUBLE"));
+        assert_eq!(
+            inspect.structured_content.unwrap()["delivery"]["text_truncated"],
+            false
+        );
+
+        let query = bounded_result(json!({
+            "row_count": 5, "columns": ["n"], "rows": [[1], [2], [3], [4], [5]], "truncated": true
+        }));
+        let text = &query.content[0].as_text().unwrap().text;
+        assert!(text.contains("[5]"));
+        assert!(text.contains("result_truncated=true"));
+    }
+
+    #[test]
+    fn missing_filename_hint_does_not_claim_the_whole_corpus_was_absent() {
+        let result = bounded_result(json!({
+            "hits": [], "unmatched_filenames": ["ignored.py"]
+        }));
+        let text = &result.content[0].as_text().unwrap().text;
+        assert!(text.contains("No literal filename/path match in returned hits"));
+        assert!(text.contains("roots/ignore rules"));
+        assert!(text.contains("ignored.py"));
+    }
+
+    #[test]
+    fn oversized_text_delivery_is_explicit_and_utf8_bounded() {
+        let result = bounded_result(json!({
+            "row_count": 1, "columns": ["text"],
+            "rows": [["公式".repeat(MAX_TEXT_FALLBACK_CHARS)]], "truncated": false
+        }));
+        let text = &result.content[0].as_text().unwrap().text;
+        assert!(text.chars().count() <= MAX_TEXT_FALLBACK_CHARS);
+        assert!(text.contains("[TEXT TRUNCATED:"));
+        assert_eq!(
+            result.structured_content.unwrap()["delivery"]["text_truncated"],
+            true
         );
     }
 

@@ -14,7 +14,7 @@ use rmcp::{ErrorData as McpError, model::CallToolResult};
 use serde::Serialize;
 use serde_json::{Map, Value, json};
 
-const AUDIT_SCHEMA_VERSION: u8 = 5;
+const AUDIT_SCHEMA_VERSION: u8 = 6;
 const DEFAULT_MAX_LOG_BYTES: u64 = 64 * 1024 * 1024;
 const MAX_RECORD_BYTES: usize = 16 * 1024;
 const MAX_STRING_CHARS: usize = 2_048;
@@ -219,6 +219,7 @@ impl McpAuditSpan {
             result_truncated: metrics.result_truncated,
             preview_truncated: metrics.preview_truncated,
             limit_compacted: metrics.limit_compacted,
+            text_truncated: metrics.text_truncated,
             search_id: metrics.search_id,
             parent_search_id,
             top_hits: metrics.top_hits,
@@ -270,6 +271,8 @@ struct AuditRecord<'a> {
     #[serde(skip_serializing_if = "Option::is_none")]
     limit_compacted: Option<bool>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    text_truncated: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     search_id: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     parent_search_id: Option<String>,
@@ -280,6 +283,10 @@ struct AuditRecord<'a> {
 #[derive(Serialize)]
 struct AuditTopHit {
     file_id: i64,
+    // Catalog IDs are shard-local. This stable join key avoids collisions and
+    // retains no additional path text in the bounded audit log.
+    path_blake3: String,
+    generation: Option<i64>,
     score: f64,
     matched_lanes: Vec<String>,
 }
@@ -296,6 +303,7 @@ struct ResponseMetrics {
     result_truncated: Option<bool>,
     preview_truncated: Option<bool>,
     limit_compacted: Option<bool>,
+    text_truncated: Option<bool>,
     search_id: Option<String>,
     top_hits: Option<Vec<AuditTopHit>>,
 }
@@ -320,6 +328,7 @@ fn response_metrics(
             result_truncated: None,
             preview_truncated: None,
             limit_compacted: None,
+            text_truncated: None,
             search_id: None,
             top_hits: None,
         },
@@ -382,6 +391,9 @@ fn response_metrics(
                     .map(|value| value.len()),
                 result_count,
                 result_count_kind,
+                text_truncated: content
+                    .and_then(|value| value.pointer("/delivery/text_truncated"))
+                    .and_then(Value::as_bool),
                 result_truncated: content.and_then(|value| truncation_flag(tool, value)),
                 preview_truncated: (tool == "workspace_search")
                     .then(|| {
@@ -422,6 +434,10 @@ fn audit_top_hits(content: &Value) -> Option<Vec<AuditTopHit>> {
             .filter_map(|hit| {
                 Some(AuditTopHit {
                     file_id: hit.get("file_id")?.as_i64()?,
+                    path_blake3: blake3::hash(hit.get("path")?.as_str()?.as_bytes())
+                        .to_hex()
+                        .to_string(),
+                    generation: hit.get("generation").and_then(Value::as_i64),
                     score: hit.get("score")?.as_f64()?,
                     matched_lanes: hit
                         .get("matched_lanes")?
@@ -749,7 +765,7 @@ mod tests {
         assert!(!text.contains("top-secret"));
         let record: Value = serde_json::from_str(text.trim()).unwrap();
         assert_eq!(record["tool"], "workspace_search");
-        assert_eq!(record["schema_version"], 5);
+        assert_eq!(record["schema_version"], 6);
         assert_eq!(record["client_name"], "codex");
         assert_eq!(record["synthetic"], false);
         assert_eq!(record["status"], "ok");
@@ -760,6 +776,10 @@ mod tests {
         assert_eq!(record["limit_compacted"], false);
         assert_eq!(record["search_id"], "s-test-1");
         assert_eq!(record["top_hits"][0]["file_id"], 42);
+        assert_eq!(
+            record["top_hits"][0]["path_blake3"],
+            blake3::hash(b"result.rs").to_hex().to_string()
+        );
         assert_eq!(record["top_hits"][0]["score"], 1.25);
         assert_eq!(
             record["top_hits"][0]["matched_lanes"],

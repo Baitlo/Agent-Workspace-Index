@@ -122,7 +122,8 @@ fn mcp_stdio_exposes_search_inspect_and_query() {
         .as_array()
         .unwrap();
     let search_text = searched["result"]["content"][0]["text"].as_str().unwrap();
-    assert!(search_text.contains("Top paths:"));
+    assert!(search_text.contains("pub fn mcp_search_target()"));
+    assert!(search_text.contains("generation="));
     assert!(search_text.contains("service.rs"));
     assert!(
         search_text.len()
@@ -138,6 +139,7 @@ fn mcp_stdio_exposes_search_inspect_and_query() {
         .as_str()
         .unwrap()
         .to_owned();
+    assert!(search_text.contains(&search_id));
     assert_eq!(
         searched["result"]["structuredContent"]["requested_limit"],
         5
@@ -231,6 +233,10 @@ fn mcp_stdio_exposes_search_inspect_and_query() {
             }
         }),
     );
+    let inspect_text = inspected["result"]["content"][0]["text"].as_str().unwrap();
+    assert!(inspect_text.contains("symbols:"));
+    assert!(inspect_text.contains("coverage:"));
+    assert!(inspect_text.contains("helper()"));
     let inspected = &inspected["result"]["structuredContent"];
     assert!(
         inspected["file"]["absolute_path"]
@@ -331,7 +337,7 @@ fn mcp_stdio_exposes_search_inspect_and_query() {
         .collect::<Vec<_>>();
     assert_eq!(records.len(), 7);
     assert_eq!(records[0]["tool"], "workspace_search");
-    assert_eq!(records[0]["schema_version"], 5);
+    assert_eq!(records[0]["schema_version"], 6);
     assert_eq!(records[0]["client_name"], "codex");
     assert_eq!(records[0]["session_id"], "test-session");
     assert_eq!(records[0]["synthetic"], true);
@@ -340,6 +346,11 @@ fn mcp_stdio_exposes_search_inspect_and_query() {
     assert_eq!(records[0]["result_count_kind"], "hits");
     assert_eq!(records[0]["result_count"], 1);
     assert_eq!(records[0]["top_hits"][0]["file_id"], source_hit["file_id"]);
+    assert_eq!(
+        records[0]["top_hits"][0]["generation"],
+        source_hit["generation"]
+    );
+    assert_eq!(records[0]["text_truncated"], false);
     assert!(records[0]["top_hits"][0]["score"].as_f64().is_some());
     assert!(
         records[0]["top_hits"][0]["matched_lanes"]

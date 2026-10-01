@@ -580,14 +580,16 @@ impl WorkspaceIndex {
             search_scopes.push(canonical.clone());
             let mut matched = false;
             for (_, registered) in &registered_roots {
-                if registered == &canonical || registered.starts_with(&canonical) {
+                if registered.starts_with(&canonical)
+                    || (registered.is_dir() && canonical.starts_with(registered))
+                {
                     root_filter.insert(registered.to_string_lossy().into_owned());
                     matched = true;
                 }
             }
             if !matched && !collection_validated {
                 anyhow::bail!(
-                    "search root {} does not contain an indexed workspace root",
+                    "search root {} is outside every indexed workspace root and parent scope",
                     canonical.display()
                 );
             }
@@ -595,6 +597,18 @@ impl WorkspaceIndex {
         if collection_validated && !roots.is_empty() && root_filter.is_empty() {
             root_filter.insert(String::new());
         }
+        // Only child scopes need additional lexical confinement. Whole-root and
+        // parent requests retain the existing root/catalog filter and avoid a
+        // redundant path-dictionary query in every lexical lane.
+        let lexical_scopes: &[PathBuf] = if search_scopes.iter().any(|scope| {
+            registered_roots
+                .iter()
+                .any(|(_, root)| root != scope && root.is_dir() && scope.starts_with(root))
+        }) {
+            &search_scopes
+        } else {
+            &[]
+        };
         let kind_filter = kinds
             .iter()
             .map(|kind| FileKind::try_from(kind.as_str()))
@@ -687,13 +701,21 @@ impl WorkspaceIndex {
                 });
             let lexical_started_at = Instant::now();
             let lexical = (|| {
-                let mut candidates =
-                    self.search
-                        .search(query, overfetch, overfetch, include_agent_lane)?;
+                let mut candidates = self.search.search(
+                    query,
+                    overfetch,
+                    overfetch,
+                    include_agent_lane,
+                    lexical_scopes,
+                )?;
                 if include_memory {
-                    let mut memory_candidates = self
-                        .memory_search
-                        .search(query, overfetch, overfetch, false)?;
+                    let mut memory_candidates = self.memory_search.search(
+                        query,
+                        overfetch,
+                        overfetch,
+                        false,
+                        lexical_scopes,
+                    )?;
                     if include_all_kinds {
                         for candidate in &mut memory_candidates {
                             candidate.score *= DEFAULT_MEMORY_SCORE_WEIGHT;
@@ -845,7 +867,10 @@ impl WorkspaceIndex {
             {
                 continue;
             }
-            if (!root_filter.is_empty() && !root_filter.contains(&file.root))
+            if (!search_scopes.is_empty()
+                && !search_scopes
+                    .iter()
+                    .any(|scope| Path::new(&file.absolute_path).starts_with(scope)))
                 && !applicable_instruction
                 && !applicable_memory
             {

@@ -156,9 +156,11 @@ impl ReaderIndex {
         let registered = self.roots()?;
         for root in roots {
             let canonical = fs::canonicalize(root)?;
-            if !registered.iter().any(|path| path.starts_with(&canonical)) {
+            if !registered.iter().any(|path| {
+                path.starts_with(&canonical) || (path.is_dir() && canonical.starts_with(path))
+            }) {
                 anyhow::bail!(
-                    "search root {} does not contain an indexed workspace root",
+                    "search root {} is outside every indexed workspace root and parent scope",
                     root.display()
                 );
             }
@@ -387,6 +389,11 @@ mod tests {
         fs::write(data.join("kept.rs"), "fn federationneedle() {}\n").unwrap();
         fs::write(data.join("rows.csv"), "value\n7\n").unwrap();
         fs::write(root.join("rows.csv"), "value\n5\n").unwrap();
+        let child = root.join("child");
+        fs::create_dir(&child).unwrap();
+        fs::write(child.join("chosen.txt"), "scopedneedle").unwrap();
+        fs::write(root.join("sibling.txt"), "scopedneedle").unwrap();
+        fs::write(data.join("other.txt"), "scopedneedle").unwrap();
         // These higher-ranked old copies must not exhaust the base shard's
         // bounded candidate window before ownership filtering.
         for number in 0..210 {
@@ -434,6 +441,26 @@ mod tests {
         let cache = fixture.path().join("cache");
         let initial = refresh(&source, &cache, None).unwrap().unwrap();
         let mut reader = ReaderIndex::open(&initial.path).unwrap();
+        let scoped = reader
+            .search_filtered(
+                "scopedneedle",
+                5,
+                std::slice::from_ref(&child),
+                &[],
+                None,
+                None,
+            )
+            .unwrap();
+        assert_eq!(scoped.len(), 1);
+        assert_eq!(scoped[0].path, child.join("chosen.txt").to_string_lossy());
+        // Literal-path retrieval must not revive a deleted, non-authoritative copy.
+        assert!(
+            reader
+                .search_filtered("old0.rs", 5, &[], &[], None, None,)
+                .unwrap()
+                .iter()
+                .all(|hit| !hit.path.ends_with("/old0.rs"))
+        );
         let hits = reader
             .search_filtered("federationneedle", 5, &[], &[], None, Some(&root))
             .unwrap();

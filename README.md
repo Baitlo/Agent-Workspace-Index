@@ -387,17 +387,28 @@ Default-excluded directories are `.git`, `.hg`, `.svn`, `.awi-index`,
 plus Agent-created `.codex-work` and `.worktrees`, alongside `.gitignore` and
 `.awiignore` rules. The `watch` producer applies the same exclusions to
 filesystem events, so churn in those directories never wakes a reconcile.
-Search root filters accept either an indexed root or an existing parent scope
-that contains indexed roots. Structured-query roots remain exact allowlist
-entries.
+Search root filters accept indexed roots, existing child directories, and parent
+scopes containing indexed roots. Child scopes filter candidates before Top-K;
+applicable instructions and project memory retain their provenance checks.
+Structured-query roots remain exact allowlist entries.
+
+MCP text responses carry search previews, per-file generations, symbols and
+search IDs, requested inspect excerpts and schemas, and returned query rows.
+Clients that hide `structuredContent` can still use the evidence. Text has a
+separate 96 Ki-character ceiling with an explicit truncation marker and
+`delivery.text_truncated`; normal search remains bounded to five hits by default.
+Literal filename/path queries prioritize exact matches. A missing literal match
+in the returned hits is surfaced explicitly, including guidance to check ignore
+rules and scope before repeating a search.
 
 MCP audit logging is optional. When enabled, AWI writes private (`0600`) JSONL
 records containing bounded and credential-redacted arguments, caller process,
 standardized client name, optional session ID, synthetic-call marker, duration,
 outcome, error detail, response bytes, text/structured payload bytes, hit/row
-counts, and separate preview-truncation and limit-compaction flags. Schema v5
-retains the v4 search/inspect linkage fields and adds `client_name`, `session_id`,
-and `synthetic`. Set explicit metadata with `AWI_MCP_CLIENT_NAME`,
+counts, and separate preview-truncation and limit-compaction flags. Schema v6
+adds text-delivery truncation and ordered hit path hashes plus generations to
+avoid shard-local file-ID collisions. It retains the v4 search/inspect linkage
+and v5 `client_name`, `session_id`, and `synthetic` fields. Set explicit metadata with `AWI_MCP_CLIENT_NAME`,
 `AWI_MCP_SESSION_ID`, and `AWI_MCP_SYNTHETIC`; MCP initialize `clientInfo.name`
 overrides process inference. The active log rotates at 64 MiB and retains one
 previous file. Project adoption reports use
@@ -406,7 +417,12 @@ sessions as the denominator.
 
 ## Evaluation
 
-The current development-only evaluation reports:
+The [2026-10-01 real-call replay](docs/agent-usefulness-20261001.md) evaluates
+text-only evidence delivery, literal filename intent and child search scopes
+against fixed production shards. It reports the response-size/latency tradeoff
+and does not equate delivered previews with Agent helpfulness.
+
+The 2026-09-20 development-only Agent A/B reported:
 
 - Recall@10: 1.0
 - Search P95: 6.83 ms
