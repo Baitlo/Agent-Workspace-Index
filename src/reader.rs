@@ -244,6 +244,22 @@ impl ReaderIndex {
         .collect())
     }
 
+    pub(crate) fn diagnose_search(
+        &self,
+        anchors: &[String],
+        roots: &[PathBuf],
+        context: Option<&Path>,
+    ) -> Result<serde_json::Value> {
+        crate::diagnostics::diagnose(anchors, roots, context, &self.roots()?, |path| {
+            for shard in &self.shards {
+                if let Some(file) = shard.workspace.diagnostic_file(path)? {
+                    return Ok(Some(file));
+                }
+            }
+            Ok(None)
+        })
+    }
+
     fn inspect_with(
         &self,
         path: &Path,

@@ -43,6 +43,11 @@ pub enum Request {
         #[serde(default)]
         context_path: Option<PathBuf>,
     },
+    DiagnoseSearch {
+        anchors: Vec<String>,
+        roots: Vec<PathBuf>,
+        context_path: Option<PathBuf>,
+    },
     Inspect {
         path: PathBuf,
         #[serde(default)]

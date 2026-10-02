@@ -553,6 +553,24 @@ impl WorkspaceIndex {
             .collect())
     }
 
+    pub(crate) fn diagnostic_file(&self, path: &Path) -> Result<Option<crate::FileRecord>> {
+        Ok(self
+            .catalog
+            .current_file_by_path(&path.to_string_lossy())?
+            .filter(|file| self.search.visibility.allows(path, file.kind.as_str())))
+    }
+
+    pub(crate) fn diagnose_search(
+        &self,
+        anchors: &[String],
+        roots: &[PathBuf],
+        context: Option<&Path>,
+    ) -> Result<serde_json::Value> {
+        crate::diagnostics::diagnose(anchors, roots, context, &self.registered_roots()?, |path| {
+            self.diagnostic_file(path)
+        })
+    }
+
     /// A collection validates scopes against the union before dispatching to
     /// individual catalogs; applicable memory/instructions may live elsewhere.
     #[allow(clippy::too_many_arguments)]
@@ -625,6 +643,9 @@ impl WorkspaceIndex {
                 context_path.display()
             );
         }
+        let source_scope = context_path
+            .as_deref()
+            .map(crate::source_context::scope_root);
         let filtered = !root_filter.is_empty()
             || !kind_filter.is_empty()
             || path_prefix.is_some()
@@ -916,6 +937,25 @@ impl WorkspaceIndex {
             if symbol.is_some() {
                 score += EXACT_SYMBOL_BOOST;
             }
+            let source_context = source_scope
+                .as_ref()
+                .filter(|_| file.kind == FileKind::Source)
+                .map(|scope| {
+                    let in_scope = Path::new(&file.absolute_path).starts_with(scope);
+                    // Bias identified implementations only; broad semantic queries retain
+                    // their existing relevance and explicit qualified paths still win.
+                    if in_scope
+                        && (symbol.is_some()
+                            || candidate.lanes.iter().any(|lane| lane == "exact_path"))
+                    {
+                        score += 0.15;
+                    }
+                    crate::model::SourceContext {
+                        scope_root: scope.to_string_lossy().into_owned(),
+                        in_scope,
+                        alternatives: Vec::new(),
+                    }
+                });
             let content_hash = file.content_hash.clone();
             ranked_hits.push((
                 SearchHit {
@@ -931,6 +971,8 @@ impl WorkspaceIndex {
                     matched_lanes: candidate.lanes,
                     evidence: candidate.evidence,
                     preview: String::new(),
+                    content_fingerprint: content_hash.clone(),
+                    source_context,
                     symbol,
                     agent,
                     memory,
@@ -2184,6 +2226,7 @@ fn rerank_with_directory_penalty(
     penalty: f32,
     progressive: bool,
 ) -> Vec<(SearchHit, Option<String>)> {
+    candidates = crate::source_context::collapse_copies(candidates);
     let mut selected = Vec::with_capacity(limit.min(candidates.len()));
     let mut selected_parents = HashMap::<PathBuf, usize>::new();
     let discount = |parents: &HashMap<PathBuf, usize>, hit: &SearchHit| {
@@ -2240,6 +2283,8 @@ mod tests {
                 matched_lanes: vec!["content".to_owned()],
                 evidence: Vec::new(),
                 preview: String::new(),
+                content_fingerprint: None,
+                source_context: None,
                 symbol: None,
                 agent: None,
                 memory: None,

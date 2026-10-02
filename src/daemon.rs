@@ -434,7 +434,10 @@ fn dispatch(
     let result: Result<ResponseEnvelope> = match request {
         Request::Ping => ResponseEnvelope::success(json!({
             "service": "awi",
-            "protocol_version": PROTOCOL_VERSION
+            "protocol_version": PROTOCOL_VERSION,
+            "version": env!("CARGO_PKG_VERSION"),
+            "build_id": env!("AWI_BUILD_ID"),
+            "capabilities": ["source_context", "miss_diagnostics", "compact_v4"]
         }))
         .map_err(anyhow::Error::from),
         Request::Index { root, options } => workspace
@@ -459,6 +462,13 @@ fn dispatch(
                 path_prefix.as_deref(),
                 context_path.as_deref(),
             )
+            .and_then(|value| ResponseEnvelope::success(value).map_err(Into::into)),
+        Request::DiagnoseSearch {
+            anchors,
+            roots,
+            context_path,
+        } => workspace
+            .diagnose_search(&anchors, &roots, context_path.as_deref())
             .and_then(|value| ResponseEnvelope::success(value).map_err(Into::into)),
         Request::Inspect {
             path,

@@ -154,8 +154,8 @@ data, Agent instructions, Skills, and project-scoped memory. Supplying
 `--kind` narrows the result set; for example, `--kind agent_memory` is
 memory-only retrieval. Memory uses a separate Tantivy index, so its vocabulary
 cannot change ordinary code/data IDF statistics. MCP search uses the compact
-`compact_v3` shape with a
-1,000-character preview, stable `file_id`, request-scoped `search_id`, and
+`compact_v4` shape with a
+3,000-character total preview budget (at most 1,000 per hit), stable `file_id`, request-scoped `search_id`, and
 definition metadata for exact symbol hits. It defaults to 5 hits and compacts
 requests above 20 to 20. Pass the returned `search_id` and optional exact
 `symbol` to `workspace_inspect` to link the inspection to its retrieval and
@@ -166,6 +166,12 @@ the host's file tools. Search snippets are generated from bounded stored source
 windows, and light directory-diversity reranking prevents one artifact folder
 from filling the result set. The stdio server supports standard legacy MCP
 `ping` and caps initialize-based negotiation at protocol `2025-11-25`.
+Set `preview_chars` (500–20,000) to expand or reduce search evidence; higher-ranked
+hits receive more of the budget and truncation keeps a query-bearing window.
+Inspect defaults to 24 definitions near its excerpt; use `max_symbols` to expand.
+For source filename/symbol lookups, `context_path` prefers the nearest checkout
+(including linked worktrees). `source_context` records scope and up to three
+same-name alternatives; only catalog-confirmed identical content is collapsed.
 
 ### Semantic Retrieval
 
@@ -399,13 +405,23 @@ separate 96 Ki-character ceiling with an explicit truncation marker and
 `delivery.text_truncated`; normal search remains bounded to five hits by default.
 Literal filename/path queries prioritize exact matches. A missing literal match
 in the returned hits is surfaced explicitly, including guidance to check ignore
-rules and scope before repeating a search.
+rules and scope before repeating a search. Bounded explicit-path checks distinguish
+missing scope, ignored paths (with the matching local rule), unindexed files,
+indexed-but-filtered files, exclusions, and symlinks. They never walk the workspace
+or establish exhaustive absence; global Git ignore rules and oversized/invalid
+ignore files may leave the reason unresolved.
 
 MCP audit logging is optional. When enabled, AWI writes private (`0600`) JSONL
 records containing bounded and credential-redacted arguments, caller process,
 standardized client name, optional session ID, synthetic-call marker, duration,
 outcome, error detail, response bytes, text/structured payload bytes, hit/row
-counts, and separate preview-truncation and limit-compaction flags. Schema v6
+counts, and separate preview-truncation and limit-compaction flags. Schema v7
+also records adapter build/PID, executable replacement, reader identity observed
+at initialize, and negotiated evidence channel. Reader identity is not refreshed
+per call, and `client_receipt=unverified` is deliberately not a client acknowledgment.
+Clients may explicitly negotiate `capabilities.experimental.awi.response_channel`
+as `structured` to avoid duplicating evidence in text. Without that capability,
+AWI retains both evidence channels. Schema v6
 adds text-delivery truncation and ordered hit path hashes plus generations to
 avoid shard-local file-ID collisions. It retains the v4 search/inspect linkage
 and v5 `client_name`, `session_id`, and `synthetic` fields. Set explicit metadata with `AWI_MCP_CLIENT_NAME`,
@@ -416,6 +432,20 @@ previous file. Project adoption reports use
 sessions as the denominator.
 
 ## Evaluation
+
+The [2026-10-02 upgrade report](docs/agent-usefulness-20261002.md) covers source-copy
+ranking, bounded miss diagnostics, evidence budgets, and delivery fingerprints.
+`scripts/probe-mcp-delivery.py --query <identifier> --output <private.json> -- <mcp-command>`
+checks initialize/ping/tools/search/inspect in both negotiated modes. This is a
+standalone protocol test; GUI receipt requires evidence from that GUI.
+
+`scripts/audit-call-outcomes.py` now produces private user-turn packets containing
+search IDs, all subsequent actions in the turn, final-path candidates, repeated
+search counts and observed turn time. Use `--review-template` to export annotations
+and repeated `--reviews` arguments to import independent `split=dev` judgments.
+Two distinct agreeing reviewers are required before adopted/correct evidence
+enters an aggregate; unknowns, disagreements and review coverage remain explicit.
+See [task outcome review](docs/task-outcome-review.md) for fields and commands.
 
 The [2026-10-01 real-call replay](docs/agent-usefulness-20261001.md) evaluates
 text-only evidence delivery, literal filename intent and child search scopes

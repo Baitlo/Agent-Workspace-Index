@@ -364,12 +364,30 @@ pub struct SearchHit {
     #[serde(skip)]
     pub(crate) evidence: Vec<LaneEvidence>,
     pub preview: String,
+    #[serde(skip)]
+    pub(crate) content_fingerprint: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub source_context: Option<SourceContext>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub symbol: Option<SymbolRecord>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub agent: Option<AgentDocumentMetadata>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub memory: Option<AgentMemoryMetadata>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SourceContext {
+    pub scope_root: String,
+    pub in_scope: bool,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub alternatives: Vec<SourceAlternative>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SourceAlternative {
+    pub path: String,
+    pub relationship: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

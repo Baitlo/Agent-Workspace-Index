@@ -4,6 +4,7 @@ mod change_ledger;
 pub mod collection;
 pub mod daemon;
 mod data;
+mod diagnostics;
 mod extract;
 pub mod integration;
 pub mod mcp;
@@ -18,6 +19,7 @@ mod reader;
 mod search;
 mod semantic;
 pub mod snapshot;
+mod source_context;
 mod workspace;
 
 pub use integration::{

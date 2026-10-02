@@ -14,7 +14,7 @@ use rmcp::{ErrorData as McpError, model::CallToolResult};
 use serde::Serialize;
 use serde_json::{Map, Value, json};
 
-const AUDIT_SCHEMA_VERSION: u8 = 6;
+const AUDIT_SCHEMA_VERSION: u8 = 7;
 const DEFAULT_MAX_LOG_BYTES: u64 = 64 * 1024 * 1024;
 const MAX_RECORD_BYTES: usize = 16 * 1024;
 const MAX_STRING_CHARS: usize = 2_048;
@@ -223,6 +223,7 @@ impl McpAuditSpan {
             search_id: metrics.search_id,
             parent_search_id,
             top_hits: metrics.top_hits,
+            delivery_runtime: metrics.delivery_runtime,
         };
         if let Err(error) = self.logger.write(&record) {
             eprintln!(
@@ -278,6 +279,7 @@ struct AuditRecord<'a> {
     parent_search_id: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     top_hits: Option<Vec<AuditTopHit>>,
+    delivery_runtime: Option<Value>,
 }
 
 #[derive(Serialize)]
@@ -306,6 +308,7 @@ struct ResponseMetrics {
     text_truncated: Option<bool>,
     search_id: Option<String>,
     top_hits: Option<Vec<AuditTopHit>>,
+    delivery_runtime: Option<Value>,
 }
 
 fn response_metrics(
@@ -331,6 +334,7 @@ fn response_metrics(
             text_truncated: None,
             search_id: None,
             top_hits: None,
+            delivery_runtime: None,
         },
         Ok(result) => {
             let content = result.structured_content.as_ref();
@@ -417,6 +421,9 @@ fn response_metrics(
                             .map(str::to_owned)
                     })
                     .flatten(),
+                delivery_runtime: content
+                    .and_then(|value| value.pointer("/delivery/runtime"))
+                    .cloned(),
                 top_hits: (tool == "workspace_search")
                     .then(|| content.and_then(audit_top_hits))
                     .flatten(),
@@ -765,7 +772,7 @@ mod tests {
         assert!(!text.contains("top-secret"));
         let record: Value = serde_json::from_str(text.trim()).unwrap();
         assert_eq!(record["tool"], "workspace_search");
-        assert_eq!(record["schema_version"], 6);
+        assert_eq!(record["schema_version"], 7);
         assert_eq!(record["client_name"], "codex");
         assert_eq!(record["synthetic"], false);
         assert_eq!(record["status"], "ok");

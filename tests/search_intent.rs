@@ -92,3 +92,60 @@ fn child_scope_filters_before_candidate_limit_and_keeps_query_roots_exact() {
             .is_err()
     );
 }
+
+#[test]
+fn context_prefers_worktree_and_collapses_only_identical_named_copies() {
+    let fixture = tempdir().unwrap();
+    let root = fixture.path().join("workspace");
+    for name in ["a_old", "b_copy", "z_current"] {
+        fs::create_dir_all(root.join(name).join("src")).unwrap();
+        // Both .git files and directories are valid checkout boundaries.
+        fs::write(root.join(name).join(".git"), "gitdir: /unused\n").unwrap();
+    }
+    let current = root.join("z_current/src/engine.py");
+    let old = root.join("a_old/src/engine.py");
+    let copy = root.join("b_copy/src/engine.py");
+    fs::write(&current, "def decode_formula():\n    return 'current'\n").unwrap();
+    fs::write(&copy, "def decode_formula():\n    return 'current'\n").unwrap();
+    fs::write(&old, "def decode_formula():\n    return 'old'\n").unwrap();
+    let mut index = WorkspaceIndex::open(fixture.path().join("index")).unwrap();
+    index.index_root(&root, &IndexOptions::default()).unwrap();
+    let context = root.join("z_current/src");
+    for query in ["engine.py", "decode_formula"] {
+        let hits = index
+            .search_filtered(query, 5, &[], &["source".into()], None, Some(&context))
+            .unwrap();
+        assert_eq!(hits.len(), 2);
+        assert_eq!(hits[0].path, current.to_string_lossy());
+        let provenance = hits[0].source_context.as_ref().unwrap();
+        assert!(provenance.in_scope);
+        assert_eq!(
+            provenance.scope_root,
+            root.join("z_current").to_string_lossy()
+        );
+        assert!(
+            provenance
+                .alternatives
+                .iter()
+                .any(|entry| entry.path == copy.to_string_lossy()
+                    && entry.relationship == "identical_content")
+        );
+        assert!(
+            provenance
+                .alternatives
+                .iter()
+                .any(|entry| entry.path == old.to_string_lossy()
+                    && entry.relationship == "different_content")
+        );
+        assert!(hits.iter().any(|hit| hit.path == old.to_string_lossy()));
+    }
+    let explicit = index
+        .search_filtered("a_old/src/engine.py", 1, &[], &[], None, Some(&context))
+        .unwrap();
+    assert_eq!(explicit[0].path, old.to_string_lossy());
+    let unscoped = index
+        .search_filtered("engine.py", 5, &[], &["source".into()], None, None)
+        .unwrap();
+    assert_eq!(unscoped.len(), 3);
+    assert!(unscoped.iter().all(|hit| hit.source_context.is_none()));
+}

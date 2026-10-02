@@ -1,7 +1,7 @@
 use std::borrow::Cow;
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::{Arc, RwLock};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use anyhow::{Context, Result};
@@ -32,7 +32,9 @@ const MAX_PREVIEW_CHARS: usize = 1_000;
 // Some clients deliver only content[].text to the model. This is an evidence
 // channel, not a pointer to structuredContent. Keep its own explicit bound.
 const MAX_TEXT_FALLBACK_CHARS: usize = 96 * 1024;
-const DEFAULT_SYMBOL_LIMIT: usize = 200;
+const DEFAULT_SYMBOL_LIMIT: usize = 24;
+const DEFAULT_PREVIEW_BUDGET: usize = 3_000;
+const MAX_PREVIEW_BUDGET: usize = 20_000;
 const MAX_SYMBOL_LIMIT: usize = 1_000;
 const DEFAULT_INSPECT_LINES: usize = 80;
 const MAX_INSPECT_LINES: usize = 500;
@@ -79,6 +81,14 @@ pub struct WorkspaceSearchRequest {
     /// and project-scoped Agent memory should be included and ranked.
     #[serde(default)]
     pub context_path: Option<PathBuf>,
+    /// Total preview character budget across all hits (500..20000; default 3000).
+    /// Higher-ranked hits receive more evidence; inspect for longer excerpts.
+    #[serde(default)]
+    #[schemars(
+        schema_with = "optional_integer_schema",
+        range(min = 500, max = 20_000)
+    )]
+    pub preview_chars: Option<usize>,
 }
 
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
@@ -92,7 +102,7 @@ pub struct WorkspaceInspectRequest {
     /// and inspection in the audit trail.
     #[serde(default)]
     pub search_id: Option<String>,
-    /// Maximum number of symbols to return. Defaults to 200 and cannot exceed 1000.
+    /// Maximum symbols in the outline. Defaults to 24 (definitions near the excerpt first); maximum 1000.
     #[serde(default)]
     #[schemars(schema_with = "optional_integer_schema", range(min = 1, max = 1_000))]
     pub max_symbols: Option<usize>,
@@ -151,6 +161,12 @@ fn optional_integer_schema(_: &mut schemars::SchemaGenerator) -> schemars::Schem
     })
 }
 
+#[derive(Debug, Default)]
+struct ClientDelivery {
+    structured_only: bool,
+    reader_at_initialize: Option<Value>,
+}
+
 #[derive(Debug, Clone)]
 pub struct AwiMcpServer {
     index_dir: PathBuf,
@@ -158,6 +174,7 @@ pub struct AwiMcpServer {
     audit_logger: Option<Arc<McpAuditLogger>>,
     search_sequence: Arc<AtomicU64>,
     tool_router: ToolRouter<Self>,
+    delivery: Arc<RwLock<ClientDelivery>>,
 }
 
 impl AwiMcpServer {
@@ -168,6 +185,7 @@ impl AwiMcpServer {
             audit_logger: None,
             search_sequence: Arc::new(AtomicU64::new(0)),
             tool_router: Self::tool_router(),
+            delivery: Arc::new(RwLock::new(ClientDelivery::default())),
         }
     }
 
@@ -183,6 +201,7 @@ impl AwiMcpServer {
             audit_logger,
             search_sequence: Arc::new(AtomicU64::new(0)),
             tool_router: Self::tool_router(),
+            delivery: Arc::new(RwLock::new(ClientDelivery::default())),
         })
     }
 
@@ -243,18 +262,21 @@ impl AwiMcpServer {
                 "kinds": &arguments.kinds,
                 "path_prefix": &arguments.path_prefix,
                 "context_path": &arguments.context_path,
-                "search_id": &search_id
+                "search_id": &search_id,
+                "preview_chars": arguments.preview_chars
             }),
         );
         let query = arguments.query.trim();
         if query.is_empty() {
             return audited(
+                self,
                 audit,
                 Err(McpError::invalid_params("query must not be empty", None)),
             );
         }
         if query.chars().count() > MAX_QUERY_CHARS {
             return audited(
+                self,
                 audit,
                 Err(McpError::invalid_params(
                     format!("query cannot exceed {MAX_QUERY_CHARS} characters"),
@@ -266,6 +288,7 @@ impl AwiMcpServer {
         let requested_limit = arguments.limit.unwrap_or(DEFAULT_SEARCH_LIMIT);
         if !(1..=MAX_SEARCH_LIMIT).contains(&requested_limit) {
             return audited(
+                self,
                 audit,
                 Err(McpError::invalid_params(
                     format!("limit must be between 1 and {MAX_SEARCH_LIMIT}"),
@@ -275,6 +298,22 @@ impl AwiMcpServer {
         }
         let limit = effective_search_limit(requested_limit);
 
+        let preview_budget = arguments.preview_chars.unwrap_or(DEFAULT_PREVIEW_BUDGET);
+        if !(500..=MAX_PREVIEW_BUDGET).contains(&preview_budget) {
+            return audited(
+                self,
+                audit,
+                Err(McpError::invalid_params(
+                    "preview_chars must be between 500 and 20000",
+                    None,
+                )),
+            );
+        }
+        let diagnostic_request = Request::DiagnoseSearch {
+            anchors: crate::search::filename_anchors(query),
+            roots: arguments.roots.clone().unwrap_or_default(),
+            context_path: arguments.context_path.clone(),
+        };
         let value = match self
             .execute(Request::Search {
                 query: query.to_owned(),
@@ -288,22 +327,26 @@ impl AwiMcpServer {
         {
             Ok(value) => value,
             Err(error) => {
-                return audited(audit, Ok(tool_error("search_failed", &error)));
+                let diagnostics = self.execute(diagnostic_request).await.ok();
+                let mut result = tool_error("search_failed", &error);
+                if let Some(mut value) = result.structured_content.take() {
+                    value["diagnostics"] = json!(diagnostics);
+                    result = structured_result(value, true);
+                }
+                return audited(self, audit, Ok(result));
             }
         };
         let mut hits: Vec<SearchHit> = match serde_json::from_value(value) {
             Ok(hits) => hits,
             Err(error) => {
                 return audited(
+                    self,
                     audit,
                     Ok(tool_error("invalid_search_response", &error.into())),
                 );
             }
         };
-        let mut previews_truncated = false;
-        for hit in &mut hits {
-            previews_truncated |= truncate_chars(&mut hit.preview, MAX_PREVIEW_CHARS);
-        }
+        let previews_truncated = budget_previews(&mut hits, query, preview_budget);
         let unmatched_filenames = crate::search::filename_anchors(query)
             .into_iter()
             .filter(|anchor| {
@@ -313,10 +356,21 @@ impl AwiMcpServer {
                 })
             })
             .collect::<Vec<_>>();
+        let diagnostics = if hits.is_empty() || !unmatched_filenames.is_empty() {
+            self.execute(diagnostic_request).await.unwrap_or_else(|_| json!({
+                "scope":"unavailable", "workspace_completeness":"unknown", "items":[{
+                    "reason":"diagnostics_unavailable", "next_action":"Check reader version and scope, or use file tools."
+                }]
+            }))
+        } else {
+            Value::Null
+        };
+        let preview_chars_used: usize = hits.iter().map(|hit| hit.preview.chars().count()).sum();
         let hits = hits.into_iter().map(compact_search_hit).collect::<Vec<_>>();
         let returned = hits.len();
 
         audited(
+            self,
             audit,
             Ok(bounded_result(json!({
                 "search_id": search_id,
@@ -327,7 +381,9 @@ impl AwiMcpServer {
                 "effective_limit": limit,
                 "limit_compacted": requested_limit > limit,
                 "previews_truncated": previews_truncated,
-                "format": "compact_v3"
+                "preview_budget": {"max_chars":preview_budget,"used_chars":preview_chars_used},
+                "diagnostics": diagnostics,
+                "format": "compact_v4"
             }))),
         )
     }
@@ -364,6 +420,7 @@ impl AwiMcpServer {
         let max_symbols = arguments.max_symbols.unwrap_or(DEFAULT_SYMBOL_LIMIT);
         if !(1..=MAX_SYMBOL_LIMIT).contains(&max_symbols) {
             return audited(
+                self,
                 audit,
                 Err(McpError::invalid_params(
                     format!("max_symbols must be between 1 and {MAX_SYMBOL_LIMIT}"),
@@ -374,6 +431,7 @@ impl AwiMcpServer {
         let start_line = arguments.start_line.unwrap_or(1);
         if start_line == 0 {
             return audited(
+                self,
                 audit,
                 Err(McpError::invalid_params(
                     "start_line must be positive",
@@ -384,6 +442,7 @@ impl AwiMcpServer {
         let max_lines = arguments.max_lines.unwrap_or(DEFAULT_INSPECT_LINES);
         if !(1..=MAX_INSPECT_LINES).contains(&max_lines) {
             return audited(
+                self,
                 audit,
                 Err(McpError::invalid_params(
                     format!("max_lines must be between 1 and {MAX_INSPECT_LINES}"),
@@ -394,6 +453,7 @@ impl AwiMcpServer {
         let max_chars = arguments.max_chars.unwrap_or(DEFAULT_INSPECT_CHARS);
         if !(1..=MAX_INSPECT_CHARS).contains(&max_chars) {
             return audited(
+                self,
                 audit,
                 Err(McpError::invalid_params(
                     format!("max_chars must be between 1 and {MAX_INSPECT_CHARS}"),
@@ -414,19 +474,33 @@ impl AwiMcpServer {
         {
             Ok(value) => value,
             Err(error) => {
-                return audited(audit, Ok(tool_error("inspect_failed", &error)));
+                return audited(self, audit, Ok(tool_error("inspect_failed", &error)));
             }
         };
         let mut result: InspectResult = match serde_json::from_value(value) {
             Ok(result) => result,
             Err(error) => {
                 return audited(
+                    self,
                     audit,
                     Ok(tool_error("invalid_inspect_response", &error.into())),
                 );
             }
         };
         let total_symbols = result.symbols.len();
+        if arguments.max_symbols.is_none() {
+            let line = result
+                .content
+                .as_ref()
+                .map_or(start_line, |content| content.start_line);
+            result.symbols.sort_by_key(|symbol| {
+                (
+                    matches!(symbol.kind.as_str(), "call" | "import"),
+                    symbol.line_start.abs_diff(line),
+                    symbol.line_start,
+                )
+            });
+        }
         result.symbols.truncate(max_symbols);
 
         let total_columns = result
@@ -457,6 +531,7 @@ impl AwiMcpServer {
         }
 
         audited(
+            self,
             audit,
             Ok(bounded_result(json!({
                 "file": result.file,
@@ -509,6 +584,7 @@ impl AwiMcpServer {
         let max_rows = arguments.max_rows.unwrap_or(DEFAULT_QUERY_ROWS);
         if !(1..=MAX_MCP_QUERY_ROWS).contains(&max_rows) {
             return audited(
+                self,
                 audit,
                 Err(McpError::invalid_params(
                     format!("max_rows must be between 1 and {MAX_MCP_QUERY_ROWS}"),
@@ -519,6 +595,7 @@ impl AwiMcpServer {
         let max_bytes = arguments.max_bytes.unwrap_or(DEFAULT_QUERY_BYTES);
         if !(1_024..=MAX_STRUCTURED_RESPONSE_BYTES).contains(&max_bytes) {
             return audited(
+                self,
                 audit,
                 Err(McpError::invalid_params(
                     format!("max_bytes must be between 1024 and {MAX_STRUCTURED_RESPONSE_BYTES}"),
@@ -529,6 +606,7 @@ impl AwiMcpServer {
         let timeout_ms = arguments.timeout_ms.unwrap_or(DEFAULT_QUERY_TIMEOUT_MS);
         if !(1..=MAX_QUERY_TIMEOUT_MS).contains(&timeout_ms) {
             return audited(
+                self,
                 audit,
                 Err(McpError::invalid_params(
                     format!("timeout_ms must be between 1 and {MAX_QUERY_TIMEOUT_MS}"),
@@ -555,19 +633,20 @@ impl AwiMcpServer {
         let value = match self.execute(Request::Query { request }).await {
             Ok(value) => value,
             Err(error) => {
-                return audited(audit, Ok(tool_error("query_failed", &error)));
+                return audited(self, audit, Ok(tool_error("query_failed", &error)));
             }
         };
         let result: QueryResult = match serde_json::from_value(value) {
             Ok(result) => result,
             Err(error) => {
                 return audited(
+                    self,
                     audit,
                     Ok(tool_error("invalid_query_response", &error.into())),
                 );
             }
         };
-        audited(audit, Ok(bounded_result(json!(result))))
+        audited(self, audit, Ok(bounded_result(json!(result))))
     }
 }
 
@@ -581,6 +660,19 @@ impl ServerHandler for AwiMcpServer {
         if let Some(logger) = &self.audit_logger {
             logger.observe_client_name(&request.client_info.name);
         }
+        let request_json = serde_json::to_value(&request).unwrap_or(Value::Null);
+        let structured_only = request_json
+            .pointer("/capabilities/experimental/awi/response_channel")
+            .and_then(Value::as_str)
+            == Some("structured");
+        let reader_at_initialize = self.execute(Request::Ping).await.ok();
+        *self
+            .delivery
+            .write()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = ClientDelivery {
+            structured_only,
+            reader_at_initialize,
+        };
         context.peer.set_peer_info(request.clone());
         self.negotiate_initialize(&request)
     }
@@ -640,13 +732,72 @@ pub fn serve_stdio(
 }
 
 fn audited(
+    server: &AwiMcpServer,
     audit: Option<McpAuditSpan>,
-    result: Result<CallToolResult, McpError>,
+    mut result: Result<CallToolResult, McpError>,
 ) -> Result<CallToolResult, McpError> {
+    if let Ok(response) = &mut result {
+        let delivery = server
+            .delivery
+            .read()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let runtime = json!({
+            "adapter_version":env!("CARGO_PKG_VERSION"), "adapter_build_id":env!("AWI_BUILD_ID"),
+            "adapter_pid":std::process::id(), "adapter_executable_replaced":executable_replaced(),
+            "reader_at_initialize":delivery.reader_at_initialize,
+            "channel":if delivery.structured_only { "structured" } else { "text_and_structured" },
+            "client_receipt":"unverified"
+        });
+        if let Some(value) = &mut response.structured_content {
+            value["delivery"]["runtime"] = runtime.clone();
+            if delivery.structured_only {
+                response.content = vec![ContentBlock::text(format!(
+                    "AWI result in negotiated structuredContent; build={}",
+                    env!("AWI_BUILD_ID")
+                ))];
+                value["delivery"]["text_chars"] =
+                    json!(response.content[0].as_text().unwrap().text.chars().count());
+                value["delivery"]["text_truncated"] = json!(false);
+            } else {
+                let reader_build = runtime
+                    .pointer("/reader_at_initialize/build_id")
+                    .and_then(Value::as_str)
+                    .unwrap_or("unknown");
+                let mut marker = format!(
+                    "AWI delivery: adapter={} reader_at_initialize={} channel=both client_receipt=unverified",
+                    env!("AWI_BUILD_ID"),
+                    reader_build
+                );
+                if runtime["adapter_executable_replaced"] == true {
+                    marker.push_str("; adapter replaced: reconnect this MCP client");
+                }
+                response.content.push(ContentBlock::text(marker));
+                value["delivery"]["text_chars"] = json!(
+                    response
+                        .content
+                        .iter()
+                        .filter_map(|block| block.as_text())
+                        .map(|block| block.text.chars().count())
+                        .sum::<usize>()
+                );
+            }
+        }
+    }
     if let Some(audit) = audit {
         audit.finish(&result);
     }
     result
+}
+
+fn executable_replaced() -> Option<bool> {
+    use std::os::unix::fs::MetadataExt;
+    let running = std::fs::metadata("/proc/self/exe").ok()?;
+    let path = std::fs::read_link("/proc/self/exe").ok()?;
+    let text = path.to_string_lossy();
+    let installed = Path::new(text.strip_suffix(" (deleted)").unwrap_or(&text));
+    Some(std::fs::metadata(installed).map_or(true, |meta| {
+        meta.ino() != running.ino() || meta.dev() != running.dev()
+    }))
 }
 
 fn execute_request(index_dir: &Path, socket_path: &Path, request: Request) -> Result<Value> {
@@ -654,6 +805,12 @@ fn execute_request(index_dir: &Path, socket_path: &Path, request: Request) -> Re
         return Ok(value);
     }
 
+    if matches!(request, Request::Ping) {
+        return Ok(
+            json!({"service":"awi","mode":"direct_index","version":env!("CARGO_PKG_VERSION"),
+            "protocol_version":crate::protocol::PROTOCOL_VERSION,"build_id":env!("AWI_BUILD_ID")}),
+        );
+    }
     let workspace = WorkspaceIndex::open(index_dir)
         .with_context(|| format!("open AWI index {}", index_dir.display()))?;
     match request {
@@ -673,6 +830,11 @@ fn execute_request(index_dir: &Path, socket_path: &Path, request: Request) -> Re
             context_path.as_deref(),
         )?)
         .map_err(Into::into),
+        Request::DiagnoseSearch {
+            anchors,
+            roots,
+            context_path,
+        } => workspace.diagnose_search(&anchors, &roots, context_path.as_deref()),
         Request::Inspect {
             path,
             symbol,
@@ -693,8 +855,11 @@ fn execute_request(index_dir: &Path, socket_path: &Path, request: Request) -> Re
 
 fn tool_error(code: &str, error: &anyhow::Error) -> CallToolResult {
     let recovery = match code {
+        "search_failed" if format!("{error:#}").contains("context path") => Some(
+            "Pass an existing indexed task directory as context_path, or omit it. Check diagnostics before retrying.",
+        ),
         "search_failed" => Some(
-            "Omit roots or use a registered root, child directory, or parent scope; retry once.",
+            "Check diagnostic reasons and query filters; use file tools when the target is outside indexed coverage.",
         ),
         "inspect_failed" => Some(
             "Call workspace_search first and inspect only a returned path; otherwise use ordinary file tools.",
@@ -727,6 +892,9 @@ fn compact_search_hit(hit: SearchHit) -> Value {
         "generation": hit.generation
     });
     let object = value.as_object_mut().expect("search hit is an object");
+    if let Some(context) = hit.source_context {
+        object.insert("source_context".to_owned(), json!(context));
+    }
     if let Some(experiment) = hit.experiment {
         object.insert("experiment".to_owned(), Value::String(experiment));
     }
@@ -750,13 +918,40 @@ fn compact_search_hit(hit: SearchHit) -> Value {
     value
 }
 
+fn budget_previews(hits: &mut [SearchHit], query: &str, budget: usize) -> bool {
+    let count = hits.len();
+    let floor = 128.min(budget / count.max(1));
+    let mut remaining = budget;
+    let mut truncated = false;
+    for (rank, hit) in hits.iter_mut().enumerate() {
+        let allowance = remaining
+            .saturating_sub((count - rank - 1) * floor)
+            .min(MAX_PREVIEW_CHARS);
+        if hit.preview.chars().count() > allowance {
+            // Preserve a query-bearing window instead of blindly taking the head.
+            let match_byte = query
+                .split(|ch: char| !ch.is_alphanumeric() && ch != '_')
+                .filter(|term| term.len() > 2)
+                .filter_map(|term| hit.preview.find(term))
+                .min()
+                .unwrap_or(0);
+            let match_char = hit.preview[..match_byte].chars().count();
+            let offset = match_char.saturating_sub(allowance / 3);
+            hit.preview = hit.preview.chars().skip(offset).take(allowance).collect();
+            truncated = true;
+        }
+        remaining = remaining.saturating_sub(hit.preview.chars().count());
+    }
+    truncated
+}
+
 fn effective_search_limit(requested: usize) -> usize {
     requested.min(MAX_RETURNED_SEARCH_HITS)
 }
 
 fn bounded_result(value: Value) -> CallToolResult {
     match serde_json::to_vec(&value) {
-        Ok(encoded) if encoded.len().saturating_add(256) <= MAX_STRUCTURED_RESPONSE_BYTES => {
+        Ok(encoded) if encoded.len().saturating_add(1_024) <= MAX_STRUCTURED_RESPONSE_BYTES => {
             structured_result(value, false)
         }
         Ok(encoded) => structured_result(
@@ -777,7 +972,10 @@ fn bounded_result(value: Value) -> CallToolResult {
 
 fn structured_result(mut value: Value, is_error: bool) -> CallToolResult {
     let mut text = text_fallback(&value);
-    let text_truncated = truncate_chars(&mut text, MAX_TEXT_FALLBACK_CHARS - 256);
+    if let Some(diagnostics) = value.get("diagnostics").filter(|value| !value.is_null()) {
+        text.push_str(&format!("\nDiagnostics: {diagnostics}\n"));
+    }
+    let text_truncated = truncate_chars(&mut text, MAX_TEXT_FALLBACK_CHARS - 512);
     if text_truncated {
         text.push_str(
             "\n[TEXT TRUNCATED: remaining evidence is omitted. Narrow the search, \
@@ -844,7 +1042,7 @@ fn text_fallback(value: &Value) -> String {
                 hit["kind"].as_str().unwrap_or("unknown"),
                 hit["generation"]
             ));
-            for key in ["symbol", "agent", "memory"] {
+            for key in ["symbol", "agent", "memory", "source_context"] {
                 if let Some(metadata) = hit.get(key).filter(|v| !v.is_null()) {
                     text.push_str(&format!("{key}: {metadata}\n"));
                 }
@@ -996,7 +1194,17 @@ mod tests {
             "row_count": 1, "columns": ["text"],
             "rows": [["公式".repeat(MAX_TEXT_FALLBACK_CHARS)]], "truncated": false
         }));
-        let text = &result.content[0].as_text().unwrap().text;
+        let server = AwiMcpServer::new(PathBuf::from("unused"), PathBuf::from("unused.sock"));
+        server.delivery.write().unwrap().reader_at_initialize = Some(json!({
+            "build_id": "0123456789abcdef"
+        }));
+        let result = audited(&server, None, Ok(result)).unwrap();
+        let text = result
+            .content
+            .iter()
+            .filter_map(|block| block.as_text())
+            .map(|block| block.text.as_str())
+            .collect::<String>();
         assert!(text.chars().count() <= MAX_TEXT_FALLBACK_CHARS);
         assert!(text.contains("[TEXT TRUNCATED:"));
         assert_eq!(

@@ -12,6 +12,8 @@ import os
 import re
 from pathlib import Path
 
+from task_outcomes import LABELS, apply_reviews, collect_tasks, summarize_tasks
+
 AWI_TOOLS = {"workspace_search", "workspace_inspect", "workspace_query"}
 DISCOVERY = re.compile(r"(?:^|[\s;|])(?:rg|fd|find|grep|rga)(?:\s|$)")
 READ_ERRORS = collections.Counter()
@@ -173,12 +175,12 @@ def decode_output(output):
     return {}, ""
 
 
-def session_observations(path, project_root):
+def session_observations(path, project_root, rows=None):
     session = None
     pending = {}
     calls = []
     actions = []
-    for line_number, row in enumerate(records(path), 1):
+    for line_number, row in enumerate(records(path) if rows is None else rows, 1):
         payload = row.get("payload", {})
         if row.get("type") == "session_meta":
             cwd = Path(payload.get("cwd", "/"))
@@ -286,6 +288,8 @@ def main():
     parser.add_argument("--project-root", type=Path, required=True)
     parser.add_argument("--since", default="1970-01-01")
     parser.add_argument("--output", type=Path, required=True)
+    parser.add_argument("--reviews", type=Path, action="append", default=[])
+    parser.add_argument("--review-template", type=Path)
     args = parser.parse_args()
     since = dt.datetime.fromisoformat(args.since).replace(tzinfo=dt.timezone.utc)
     rows = [
@@ -295,21 +299,75 @@ def main():
         if row["timestamp_unix_ms"] >= since.timestamp() * 1000
     ]
     observations = []
+    tasks = []
+    visited = set()
     for directory in args.codex_sessions:
         for path in sorted(directory.rglob("*.jsonl")):
-            observations.extend(session_observations(path, args.project_root))
+            if path.resolve() in visited:
+                continue
+            visited.add(path.resolve())
+            session_rows = list(records(path))
+            observations.extend(
+                session_observations(path, args.project_root, session_rows)
+            )
+            tasks.extend(
+                collect_tasks(session_rows, path, args.project_root, decode_output)
+            )
     observations = [
         item
         for item in observations
         if (item.get("timestamp") or "")[:10] >= args.since
     ]
+    tasks = [
+        task for task in tasks if (task.get("start_timestamp") or "")[:10] >= args.since
+    ]
+    apply_reviews(tasks, [json.loads(path.read_text()) for path in args.reviews])
+    by_call = {
+        (task["session_id"], search["call_id"]): (task, search)
+        for task in tasks
+        for search in task["searches"]
+    }
+    for observation in observations:
+        linked = by_call.get((observation["session_id"], observation["call_id"]))
+        if linked:
+            task, search = linked
+            observation.update(
+                task_id=task["task_id"],
+                search_id=search["search_id"],
+                search_key=search["key"],
+            )
+    if args.review_template:
+        write_private(
+            args.review_template,
+            {
+                "split": "dev",
+                "reviews": [
+                    {
+                        "task_id": task["task_id"],
+                        "reviewer_id": "",
+                        "independent": False,
+                        **dict.fromkeys(LABELS),
+                        "adopted_search_keys": [],
+                        "supporting_evidence": "",
+                    }
+                    for task in tasks
+                ],
+            },
+        )
     report = {
-        "schema_version": 1,
+        "schema_version": 2,
+        "split": "dev",
         "review_status": "candidate_pending_dual_review",
         "malformed_records_by_source": dict(READ_ERRORS),
         "audit": audit_summary(rows),
         "trace_diagnostics": {
             "searches": len(observations),
+            "task_linked_searches": sum(
+                bool(item.get("task_id")) for item in observations
+            ),
+            "task_unlinked_searches": sum(
+                not item.get("task_id") for item in observations
+            ),
             "sessions": len({item["session_id"] for item in observations}),
             **{
                 key: sum(bool(item[key]) for item in observations)
@@ -324,12 +382,18 @@ def main():
             "evidence_adopted": "unknown; follow-up flags require relevance review",
             "sampling": "first three tool calls after result, stopping before next AWI search",
         },
+        "task_diagnostics": summarize_tasks(tasks),
+        "tasks": tasks,
         "observations": observations,
     }
     write_private(args.output, report)
     print(
         json.dumps(
-            {key: value for key, value in report.items() if key != "observations"},
+            {
+                key: value
+                for key, value in report.items()
+                if key not in {"observations", "tasks"}
+            },
             ensure_ascii=False,
             indent=2,
         )

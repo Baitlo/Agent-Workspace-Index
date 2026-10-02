@@ -133,7 +133,7 @@ fn mcp_stdio_exposes_search_inspect_and_query() {
     );
     assert_eq!(
         searched["result"]["structuredContent"]["format"],
-        "compact_v3"
+        "compact_v4"
     );
     let search_id = searched["result"]["structuredContent"]["search_id"]
         .as_str()
@@ -337,7 +337,7 @@ fn mcp_stdio_exposes_search_inspect_and_query() {
         .collect::<Vec<_>>();
     assert_eq!(records.len(), 7);
     assert_eq!(records[0]["tool"], "workspace_search");
-    assert_eq!(records[0]["schema_version"], 6);
+    assert_eq!(records[0]["schema_version"], 7);
     assert_eq!(records[0]["client_name"], "codex");
     assert_eq!(records[0]["session_id"], "test-session");
     assert_eq!(records[0]["synthetic"], true);
@@ -510,4 +510,137 @@ impl Drop for McpProcess {
 
 fn path(value: &Path) -> &str {
     value.to_str().unwrap()
+}
+
+#[test]
+fn mcp_diagnoses_misses_budgets_outlines_and_negotiates_delivery() {
+    let fixture = tempdir().unwrap();
+    let root = fixture.path().join("workspace");
+    fs::create_dir_all(root.join(".git")).unwrap();
+    fs::write(root.join(".gitignore"), "ignored.py\n").unwrap();
+    fs::write(root.join("ignored.py"), "pass\n").unwrap();
+    let source = root.join("engine.rs");
+    let text = (0..60)
+        .map(|i| format!("pub fn symbol_{i}() -> usize {{ {i} }}\n"))
+        .collect::<String>();
+    fs::write(&source, &text).unwrap();
+    let index_dir = fixture.path().join("index");
+    let mut workspace = WorkspaceIndex::open(&index_dir).unwrap();
+    workspace
+        .index_root(&root, &IndexOptions::default())
+        .unwrap();
+    drop(workspace);
+    fs::write(root.join("new.py"), "pass\n").unwrap();
+    let mut mcp = McpProcess::spawn(
+        &index_dir,
+        &fixture.path().join("missing.sock"),
+        &fixture.path().join("audit.jsonl"),
+    );
+    mcp.request(1, "initialize", json!({"protocolVersion":"2025-11-25","capabilities":{},"clientInfo":{"name":"text-only-test","version":"1"}}));
+    mcp.notify("notifications/initialized", json!({}));
+    for (id, query, reason) in [
+        (2, "ignored.py", "ignored"),
+        (3, "new.py", "present_not_indexed"),
+        (4, "absent.py", "not_returned"),
+    ] {
+        let result = mcp.request(id, "tools/call", json!({"name":"workspace_search","arguments":{"query":query,"context_path":root,"roots":[root]}}));
+        let value = &result["result"]["structuredContent"];
+        assert!(
+            value["diagnostics"]["items"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|item| item["reason"] == reason),
+            "{value}"
+        );
+        assert!(
+            result["result"]["content"][0]["text"]
+                .as_str()
+                .unwrap()
+                .contains(reason)
+        );
+        assert_eq!(value["delivery"]["runtime"]["client_receipt"], "unverified");
+    }
+    let invalid = mcp.request(5, "tools/call", json!({"name":"workspace_search","arguments":{"query":"engine.rs","context_path":root.join("deleted")}}));
+    assert_eq!(invalid["result"]["isError"], true);
+    assert!(
+        invalid["result"]["structuredContent"]["error"]["recovery"]
+            .as_str()
+            .unwrap()
+            .contains("context_path")
+    );
+    let inspect = mcp.request(
+        6,
+        "tools/call",
+        json!({"name":"workspace_inspect","arguments":{"path":source,"symbol":"symbol_58"}}),
+    );
+    let value = &inspect["result"]["structuredContent"];
+    assert_eq!(value["symbols"].as_array().unwrap().len(), 24);
+    assert_eq!(value["coverage"]["symbols_truncated"], true);
+    assert_eq!(value["focused_symbol"]["name"], "symbol_58");
+    assert!(
+        value["symbols"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|symbol| symbol["name"] == "symbol_58")
+    );
+    let expanded = mcp.request(
+        7,
+        "tools/call",
+        json!({"name":"workspace_inspect","arguments":{"path":source,"max_symbols":100}}),
+    );
+    assert_eq!(
+        expanded["result"]["structuredContent"]["coverage"]["symbols_truncated"],
+        false
+    );
+    let search = mcp.request(
+        8,
+        "tools/call",
+        json!({"name":"workspace_search","arguments":{"query":"engine.rs","preview_chars":500}}),
+    );
+    assert!(
+        search["result"]["structuredContent"]["preview_budget"]["used_chars"]
+            .as_u64()
+            .unwrap()
+            <= 500
+    );
+    assert!(
+        search["result"]["content"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|block| block["text"].as_str().unwrap_or("").contains("adapter="))
+    );
+    mcp.close();
+
+    let mut structured = McpProcess::spawn(
+        &index_dir,
+        &fixture.path().join("missing2.sock"),
+        &fixture.path().join("audit2.jsonl"),
+    );
+    structured.request(1, "initialize", json!({"protocolVersion":"2025-11-25","capabilities":{"experimental":{"awi":{"response_channel":"structured"}}},"clientInfo":{"name":"structured-test","version":"1"}}));
+    structured.notify("notifications/initialized", json!({}));
+    let result = structured.request(
+        2,
+        "tools/call",
+        json!({"name":"workspace_search","arguments":{"query":"engine.rs"}}),
+    );
+    assert_eq!(
+        result["result"]["structuredContent"]["delivery"]["runtime"]["channel"],
+        "structured"
+    );
+    assert!(
+        result["result"]["structuredContent"]["hits"][0]["preview"]
+            .as_str()
+            .unwrap()
+            .contains("symbol_")
+    );
+    assert!(
+        !result["result"]["content"][0]["text"]
+            .as_str()
+            .unwrap()
+            .contains("symbol_")
+    );
+    structured.close();
 }
