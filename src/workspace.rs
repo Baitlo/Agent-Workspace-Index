@@ -1135,7 +1135,10 @@ impl WorkspaceIndex {
     }
 
     pub fn status(&self) -> Result<IndexStatus> {
+        let _t = std::time::Instant::now();
+        eprintln!("AWI ws-status: enter");
         let mut status = self.catalog.status()?;
+        eprintln!("AWI ws-status: catalog.status took {:.1?}", _t.elapsed());
         status.semantic = self.semantic.status();
         status.retrieval = self.metrics.snapshot();
         status.semantic.generation_lag =
@@ -1170,8 +1173,16 @@ impl WorkspaceIndex {
             last_published_ms: published_ms,
             age_ms: published_ms.map(|ms| now_ms.saturating_sub(ms)),
             shard_last_published_ms: Default::default(),
+            published_generation: status.completed_generation,
         };
-        for (path, indexed_mtime_ns) in self.catalog.agent_memory_file_states()? {
+        // NFS `fs::metadata` per file is the historical multi-minute blocker for
+        // status. Core counts come from SQL COUNTs above; the per-file staleness
+        // probe is sampled with a hard budget so status never scans the tree as a
+        // precondition. Samples beyond the budget are left for the next pass.
+        let mut memory_stat_budget: usize = 500;
+        for (path, indexed_mtime_ns) in self.catalog.agent_memory_file_states()?.into_iter() {
+            if memory_stat_budget == 0 { break; }
+            memory_stat_budget -= 1;
             let Ok(metadata) = fs::metadata(&path) else {
                 status.memory.missing_files = status.memory.missing_files.saturating_add(1);
                 continue;
@@ -1194,6 +1205,7 @@ impl WorkspaceIndex {
                 status.memory.max_source_lag_ms = status.memory.max_source_lag_ms.max(lag_ms);
             }
         }
+        eprintln!("AWI ws-status: memory loop done {:.1?}, returning", _t.elapsed());
         Ok(status)
     }
 

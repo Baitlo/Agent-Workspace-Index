@@ -618,6 +618,10 @@ pub struct FreshnessStatus {
     /// auditable rather than a single opaque number.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub shard_last_published_ms: std::collections::BTreeMap<String, u64>,
+    /// Authoritative publication generation being served (from the catalog
+    /// completion pointer), kept distinct from source-file mtime.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub published_generation: Option<i64>,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
