@@ -219,6 +219,8 @@ impl McpAuditSpan {
             result_truncated: metrics.result_truncated,
             preview_truncated: metrics.preview_truncated,
             limit_compacted: metrics.limit_compacted,
+            literal_match_any: metrics.literal_match_any,
+            scope_coverage_scope: metrics.scope_coverage_scope,
             text_truncated: metrics.text_truncated,
             search_id: metrics.search_id,
             parent_search_id,
@@ -272,6 +274,10 @@ struct AuditRecord<'a> {
     #[serde(skip_serializing_if = "Option::is_none")]
     limit_compacted: Option<bool>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    literal_match_any: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    scope_coverage_scope: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     text_truncated: Option<bool>,
     #[serde(skip_serializing_if = "Option::is_none")]
     search_id: Option<String>,
@@ -305,6 +311,8 @@ struct ResponseMetrics {
     result_truncated: Option<bool>,
     preview_truncated: Option<bool>,
     limit_compacted: Option<bool>,
+    literal_match_any: Option<bool>,
+    scope_coverage_scope: Option<String>,
     text_truncated: Option<bool>,
     search_id: Option<String>,
     top_hits: Option<Vec<AuditTopHit>>,
@@ -331,6 +339,8 @@ fn response_metrics(
             result_truncated: None,
             preview_truncated: None,
             limit_compacted: None,
+            literal_match_any: None,
+            scope_coverage_scope: None,
             text_truncated: None,
             search_id: None,
             top_hits: None,
@@ -411,6 +421,23 @@ fn response_metrics(
                         content
                             .and_then(|value| value.get("limit_compacted"))
                             .and_then(Value::as_bool)
+                    })
+                    .flatten(),
+                literal_match_any: (tool == "workspace_search")
+                    .then(|| {
+                        content
+                            .and_then(|value| value.get("literal_match"))
+                            .and_then(|value| value.get("any_literal_hit"))
+                            .and_then(Value::as_bool)
+                    })
+                    .flatten(),
+                scope_coverage_scope: (tool == "workspace_search")
+                    .then(|| {
+                        content
+                            .and_then(|value| value.get("scope_coverage"))
+                            .and_then(|value| value.get("scope"))
+                            .and_then(Value::as_str)
+                            .map(|v| v.to_owned())
                     })
                     .flatten(),
                 search_id: (tool == "workspace_search")

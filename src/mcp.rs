@@ -386,11 +386,29 @@ impl AwiMcpServer {
         let hits = hits.into_iter().map(compact_search_hit).collect::<Vec<_>>();
         let returned = hits.len();
 
+        let anchor_total = crate::search::filename_anchors(query).len();
+        let literal_matched = anchor_total.saturating_sub(unmatched_filenames.len());
+        let literal_match = json!({
+            "anchors_total": anchor_total,
+            "anchors_matched": literal_matched,
+            "anchors_unmatched": unmatched_filenames.len(),
+            "any_literal_hit": anchor_total > 0 && unmatched_filenames.is_empty(),
+        });
+        let scope_coverage = match diagnostics {
+            Value::Null => json!({"scope": "unknown", "covered": null}),
+            ref d => json!({
+                "scope": d.get("scope").cloned().unwrap_or(Value::Null),
+                "workspace_completeness": d.get("workspace_completeness").cloned().unwrap_or(Value::Null),
+            }),
+        };
+
         let result = bounded_result(json!({
             "search_id": search_id,
             "hits": hits,
             "returned": returned,
             "unmatched_filenames": unmatched_filenames,
+            "literal_match": literal_match,
+            "scope_coverage": scope_coverage,
             "requested_limit": requested_limit,
             "effective_limit": limit,
             "limit_compacted": requested_limit > limit,
