@@ -221,6 +221,8 @@ impl McpAuditSpan {
             limit_compacted: metrics.limit_compacted,
             literal_match_any: metrics.literal_match_any,
             scope_coverage_scope: metrics.scope_coverage_scope,
+            literal_match: metrics.literal_match,
+            scope_coverage: metrics.scope_coverage,
             text_truncated: metrics.text_truncated,
             search_id: metrics.search_id,
             parent_search_id,
@@ -278,6 +280,10 @@ struct AuditRecord<'a> {
     #[serde(skip_serializing_if = "Option::is_none")]
     scope_coverage_scope: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    literal_match: Option<Value>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    scope_coverage: Option<Value>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     text_truncated: Option<bool>,
     #[serde(skip_serializing_if = "Option::is_none")]
     search_id: Option<String>,
@@ -313,6 +319,8 @@ struct ResponseMetrics {
     limit_compacted: Option<bool>,
     literal_match_any: Option<bool>,
     scope_coverage_scope: Option<String>,
+    literal_match: Option<Value>,
+    scope_coverage: Option<Value>,
     text_truncated: Option<bool>,
     search_id: Option<String>,
     top_hits: Option<Vec<AuditTopHit>>,
@@ -341,6 +349,8 @@ fn response_metrics(
             limit_compacted: None,
             literal_match_any: None,
             scope_coverage_scope: None,
+            literal_match: None,
+            scope_coverage: None,
             text_truncated: None,
             search_id: None,
             top_hits: None,
@@ -439,6 +449,12 @@ fn response_metrics(
                             .and_then(Value::as_str)
                             .map(|v| v.to_owned())
                     })
+                    .flatten(),
+                literal_match: (tool == "workspace_search")
+                    .then(|| content.and_then(|value| value.get("literal_match")).cloned())
+                    .flatten(),
+                scope_coverage: (tool == "workspace_search")
+                    .then(|| content.and_then(|value| value.get("scope_coverage")).cloned())
                     .flatten(),
                 search_id: (tool == "workspace_search")
                     .then(|| {
