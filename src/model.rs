@@ -490,6 +490,11 @@ pub struct NotifyReport {
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct IndexStatus {
+    /// "initial" | "loading" | "populated" | "error". Exposes whether the rich
+    /// fields below come from a real scan or are still a cold/failed default,
+    /// so an all-zero response never masquerades as a healthy index.
+    #[serde(default)]
+    pub status_state: String,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub shards: Vec<ShardStatus>,
     pub completed_generation: Option<i64>,

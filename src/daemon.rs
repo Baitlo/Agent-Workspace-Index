@@ -3,7 +3,7 @@ use std::io::{BufRead, BufReader, BufWriter, Write};
 use std::os::unix::fs::{FileTypeExt, PermissionsExt};
 use std::os::unix::net::{UnixListener, UnixStream};
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicU64, AtomicU8, Ordering};
 use std::sync::mpsc::{self, Receiver, SyncSender, TryRecvError, TrySendError};
 use std::sync::{Arc, Mutex, RwLock};
 use std::thread;
@@ -26,7 +26,8 @@ const DEFAULT_QUERY_WORKERS: usize = 4;
 const DEFAULT_QUERY_QUEUE_CAPACITY: usize = 64;
 const ACCEPT_POLL_INTERVAL: Duration = Duration::from_millis(2);
 /// How often the background thread recomputes the heavy full-catalog status.
-const STATUS_REFRESH_INTERVAL: Duration = Duration::from_secs(5);
+const STATUS_REFRESH_INTERVAL_SECS: u64 = 5;
+const STATUS_REFRESH_INTERVAL: Duration = Duration::from_secs(STATUS_REFRESH_INTERVAL_SECS);
 
 /// Shared, asynchronously-refreshed status snapshot. The full-catalog scan can
 /// take tens of seconds over NFS; serving it synchronously on the request path
@@ -175,7 +176,9 @@ fn serve_snapshot_readers(
     let active_path = Arc::new(RwLock::new(workspace.index_dir().to_owned()));
     let metrics = Arc::new(DaemonMetrics::new(worker_count, queue_capacity));
     let status_cache: SharedStatusCache = Arc::new(RwLock::new(None));
-    spawn_status_refresher(Arc::clone(&active_path), Arc::clone(&status_cache));
+    // 0=initial, 1=loading, 2=populated, 3=error. Exposed so a cold/failed
+    // status never masquerades as a healthy all-zero index.
+    let status_state = Arc::new(AtomicU8::new(0));
     let (sender, receiver) = mpsc::sync_channel::<ConnectionWork>(queue_capacity);
     let receiver = Arc::new(Mutex::new(receiver));
     let (shutdown_sender, shutdown_receiver) = mpsc::channel();
@@ -253,6 +256,8 @@ fn serve_snapshot_readers(
         &sender,
         &shutdown_receiver,
         &metrics,
+        &status_cache,
+        &status_state,
     );
     drop(sender);
     for worker in workers {
@@ -271,7 +276,12 @@ fn snapshot_accept_loop(
     sender: &SyncSender<ConnectionWork>,
     shutdown: &Receiver<()>,
     metrics: &DaemonMetrics,
+    status_cache: &SharedStatusCache,
+    status_state: &AtomicU8,
 ) -> Result<()> {
+    let mut last_status_refresh = Instant::now()
+        .checked_sub(STATUS_REFRESH_INTERVAL)
+        .unwrap_or_else(Instant::now);
     loop {
         if shutdown.try_recv().is_ok() {
             return Ok(());
@@ -288,6 +298,26 @@ fn snapshot_accept_loop(
             *active_path
                 .write()
                 .expect("AWI active snapshot lock poisoned") = workspace.index_dir().to_owned();
+        }
+        // Refresh the shared status cache from the already-warm, served reader.
+        // No second ReaderIndex is opened here; this is the same object the
+        // query workers search against. State transitions are explicit.
+        if last_status_refresh.elapsed() >= Duration::from_secs(STATUS_REFRESH_INTERVAL_SECS) {
+            last_status_refresh = Instant::now();
+            status_state.store(1, Ordering::Relaxed);
+            match workspace.status() {
+                Ok(mut status) => {
+                    status.status_state = "populated".to_owned();
+                    if let Ok(mut guard) = status_cache.write() {
+                        *guard = Some(status);
+                    }
+                    status_state.store(2, Ordering::Relaxed);
+                }
+                Err(error) => {
+                    status_state.store(3, Ordering::Relaxed);
+                    eprintln!("AWI status refresh (warm workspace) failed: {error:#}");
+                }
+            }
         }
         match listener.accept() {
             Ok((stream, _)) => {
@@ -519,7 +549,7 @@ fn dispatch(
                 .read()
                 .expect("AWI status cache lock poisoned")
                 .clone();
-            let mut value = cached.unwrap_or_else(IndexStatus::default);
+            let mut value = cached.unwrap_or_default();
             value.serving = metrics.snapshot();
             ResponseEnvelope::success(value).map_err(Into::into)
         }
@@ -529,47 +559,6 @@ fn dispatch(
     };
 
     result.unwrap_or_else(|error| ResponseEnvelope::failure("request_failed", format!("{error:#}")))
-}
-
-fn spawn_status_refresher(
-    active_path: Arc<RwLock<PathBuf>>,
-    status_cache: SharedStatusCache,
-) {
-    thread::Builder::new()
-        .name("awi-status-refresh".to_owned())
-        .spawn(move || {
-            let mut reader: Option<ReaderIndex> = None;
-            loop {
-                let path = active_path
-                    .read()
-                    .expect("AWI active snapshot lock poisoned")
-                    .clone();
-                let reopen = match &reader {
-                    None => true,
-                    Some(current) => current.index_dir() != path.as_path(),
-                };
-                if reopen {
-                    match ReaderIndex::open(&path) {
-                        Ok(opened) => reader = Some(opened),
-                        Err(error) => {
-                            eprintln!(
-                                "AWI status refresher could not open {}: {error:#}",
-                                path.display()
-                            );
-                        }
-                    }
-                }
-                if let Some(current) = &reader
-                    && let Ok(status) = current.status()
-                {
-                    if let Ok(mut guard) = status_cache.write() {
-                        *guard = Some(status);
-                    }
-                }
-                thread::sleep(STATUS_REFRESH_INTERVAL);
-            }
-        })
-        .ok();
 }
 
 struct SnapshotFollower {
