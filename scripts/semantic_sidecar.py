@@ -964,19 +964,30 @@ class Sidecar:
                 for prefix in path_prefixes
             ]
             predicates.append("(" + " OR ".join(prefix_filters) + ")")
+        snapshot_started_at = time.perf_counter()
+        table = self.open_table(database)
+        diagnostics["snapshot_open_ms"] = (
+            time.perf_counter() - snapshot_started_at
+        ) * 1_000
         search = (
-            self.open_table(database)
-            .search(vector, vector_column_name="vector")
+            table.search(vector, vector_column_name="vector")
             .metric("cosine")
             .where(" AND ".join(predicates), prefilter=True)
         )
+        # Legacy nprobes only applies to an actual IVF index. Applying it to a
+        # FLAT / empty-partition index emits noisy lancedb warnings and changes
+        # no result, so gate it on the sealed index type rather than partition
+        # count alone. This keeps the legacy API call compatible (IVF still
+        # uses it) while suppressing empty-partition / wrong-index warnings.
         partitions = int(metadata.get("vector_index_partitions", 0))
-        if partitions:
+        index_type = metadata.get("vector_index_type")
+        if partitions and index_type == "IVF_FLAT":
             search = search.nprobes(partitions)
         vector_started_at = time.perf_counter()
         chunks_per_file = max(self.max_chunks_per_file, self.max_sql_chunks_per_file)
         rows = search.limit(max(limit * chunks_per_file, limit)).to_list()
         diagnostics["vector_ms"] = (time.perf_counter() - vector_started_at) * 1_000
+        serialization_started_at = time.perf_counter()
         candidates: list[dict[str, Any]] = []
         seen: set[int] = set()
         for row in rows:
@@ -994,6 +1005,9 @@ class Sidecar:
             )
             if len(candidates) >= limit:
                 break
+        diagnostics["serialization_ms"] = (
+            time.perf_counter() - serialization_started_at
+        ) * 1_000
         return candidates, diagnostics
 
 

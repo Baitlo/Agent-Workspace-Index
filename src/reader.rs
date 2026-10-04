@@ -25,7 +25,14 @@ pub(crate) struct ReaderIndex {
     shards: Vec<Shard>,
     collection: bool,
     _lease: File,
+    /// Bounded cache for the heavy full-catalog status scan. Without this, every
+    /// `status` request re-scans every shard's catalog; under concurrent load the
+    /// scan exceeds the daemon IO budget and clients see `os error 11`. We serve
+    /// a recently-computed status instead and refresh at most once per TTL.
+    status_cache: std::sync::Mutex<Option<(std::time::Instant, IndexStatus)>>,
 }
+
+const STATUS_CACHE_TTL: std::time::Duration = std::time::Duration::from_secs(2);
 
 impl ReaderIndex {
     pub(crate) fn open(path: impl AsRef<Path>) -> Result<Self> {
@@ -83,6 +90,7 @@ impl ReaderIndex {
             shards,
             collection,
             _lease: lease,
+            status_cache: std::sync::Mutex::new(None),
         })
     }
 
@@ -337,6 +345,20 @@ impl ReaderIndex {
     }
 
     pub(crate) fn status(&self) -> Result<IndexStatus> {
+        if let Ok(guard) = self.status_cache.lock()
+            && let Some((at, cached)) = guard.as_ref()
+            && at.elapsed() < STATUS_CACHE_TTL
+        {
+            return Ok(cached.clone());
+        }
+        let computed = self.compute_status()?;
+        if let Ok(mut guard) = self.status_cache.lock() {
+            *guard = Some((std::time::Instant::now(), computed.clone()));
+        }
+        Ok(computed)
+    }
+
+    fn compute_status(&self) -> Result<IndexStatus> {
         if !self.collection {
             return self.shards[0].workspace.status();
         }
@@ -381,6 +403,28 @@ impl ReaderIndex {
         }
         // Generations and latency distributions are shard-local; never invent
         // a comparable global generation or merge percentiles arithmetically.
+        // Freshness aggregates the stalest shard (max age) as the system-level
+        // number, while every shard's own publish timestamp is preserved in
+        // `shard_last_published_ms` for auditability.
+        let mut shard_last = std::collections::BTreeMap::new();
+        let mut oldest_age: Option<u64> = None;
+        for entry in &result.shards {
+            if let Some(ms) = entry.status.freshness.last_published_ms {
+                shard_last.insert(entry.name.clone(), ms);
+            }
+            if let Some(age) = entry.status.freshness.age_ms {
+                oldest_age = Some(oldest_age.map_or(age, |acc| acc.max(age)));
+            }
+        }
+        result.freshness.shard_last_published_ms = shard_last;
+        result.freshness.age_ms = oldest_age;
+        result.freshness.now_ms = result
+            .shards
+            .first()
+            .map(|s| s.status.freshness.now_ms)
+            .unwrap_or_default();
+        result.freshness.last_published_ms = oldest_age
+            .map(|oldest_age| result.freshness.now_ms.saturating_sub(oldest_age));
         Ok(result)
     }
 }

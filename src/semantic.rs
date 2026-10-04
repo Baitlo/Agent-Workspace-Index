@@ -473,6 +473,8 @@ struct SemanticMetricsState {
     queue_wait: LatencyWindow,
     sidecar_startup: LatencyWindow,
     embedding: LatencyWindow,
+    snapshot_open: LatencyWindow,
+    serialization: LatencyWindow,
     vector_search: LatencyWindow,
     total: LatencyWindow,
 }
@@ -496,6 +498,10 @@ impl SemanticMetricsState {
             .record_ms(diagnostics["queue_wait_ms"].as_f64().unwrap_or_default());
         self.embedding
             .record_ms(diagnostics["embedding_ms"].as_f64().unwrap_or_default());
+        self.snapshot_open
+            .record_ms(diagnostics["snapshot_open_ms"].as_f64().unwrap_or_default());
+        self.serialization
+            .record_ms(diagnostics["serialization_ms"].as_f64().unwrap_or_default());
         self.vector_search
             .record_ms(diagnostics["vector_ms"].as_f64().unwrap_or_default());
         self.total.record_ms(
@@ -525,6 +531,8 @@ impl SemanticMetricsState {
             queue_wait: self.queue_wait.snapshot(),
             sidecar_startup: self.sidecar_startup.snapshot(),
             embedding: self.embedding.snapshot(),
+            snapshot_open: self.snapshot_open.snapshot(),
+            serialization: self.serialization.snapshot(),
             vector_search: self.vector_search.snapshot(),
             total: self.total.snapshot(),
         }

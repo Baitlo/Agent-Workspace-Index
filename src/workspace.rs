@@ -201,6 +201,25 @@ impl WorkspaceIndex {
         &self.index_dir
     }
 
+    /// Most recent publish/materialization time for this shard, in unix ms.
+    /// Prefers the semantic manifest mtime; falls back to the index directory
+    /// mtime (which the writer bumps on every completed generation).
+    fn published_mtime_ms(&self, now_ms: u64) -> Option<u64> {
+        let candidates = [
+            self.index_dir.join("semantic-manifest.json"),
+            self.index_dir.clone(),
+        ];
+        for path in candidates {
+            if let Ok(metadata) = fs::metadata(&path)
+                && let Ok(modified) = metadata.modified()
+                && let Ok(elapsed) = modified.elapsed()
+            {
+                return Some(now_ms.saturating_sub(elapsed.as_millis() as u64));
+            }
+        }
+        None
+    }
+
     pub fn index_root(
         &mut self,
         root: impl AsRef<Path>,
@@ -1142,6 +1161,16 @@ impl WorkspaceIndex {
             .as_millis()
             .try_into()
             .unwrap_or(u64::MAX);
+        // Freshness: how long ago did the currently-served snapshot materialize.
+        // The semantic manifest mtime is the most precise per-index publish
+        // timestamp we have; collection readers aggregate the stalest shard.
+        let published_ms = self.published_mtime_ms(now_ms);
+        status.freshness = crate::model::FreshnessStatus {
+            now_ms,
+            last_published_ms: published_ms,
+            age_ms: published_ms.map(|ms| now_ms.saturating_sub(ms)),
+            shard_last_published_ms: Default::default(),
+        };
         for (path, indexed_mtime_ns) in self.catalog.agent_memory_file_states()? {
             let Ok(metadata) = fs::metadata(&path) else {
                 status.memory.missing_files = status.memory.missing_files.saturating_add(1);

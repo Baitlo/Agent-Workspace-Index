@@ -1,3 +1,4 @@
+use std::collections::BTreeMap;
 use std::path::PathBuf;
 
 use serde::{Deserialize, Serialize};
@@ -511,6 +512,8 @@ pub struct IndexStatus {
     pub retrieval: RetrievalStatus,
     #[serde(default)]
     pub serving: ServingStatus,
+    #[serde(default)]
+    pub freshness: FreshnessStatus,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -583,8 +586,33 @@ pub struct SemanticMetrics {
     #[serde(default)]
     pub sidecar_startup: LatencySummary,
     pub embedding: LatencySummary,
+    #[serde(default)]
+    pub snapshot_open: LatencySummary,
+    #[serde(default)]
+    pub serialization: LatencySummary,
     pub vector_search: LatencySummary,
     pub total: LatencySummary,
+}
+
+/// Structured index freshness.
+///
+/// `last_published_ms` is the mtime of the newest published materialization
+/// (the semantic manifest / catalog snapshot) the reader currently serves.
+/// For a collection (fast + nfs shards) the aggregate takes the *stalest*
+/// shard's age as the system freshness, so a single slow shard cannot be
+/// masked by a fast one; per-shard ages are reported inside `shards`.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct FreshnessStatus {
+    #[serde(default)]
+    pub now_ms: u64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub last_published_ms: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub age_ms: Option<u64>,
+    /// Per-shard last-published timestamps, so the fast/nfs aggregation is
+    /// auditable rather than a single opaque number.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub shard_last_published_ms: std::collections::BTreeMap<String, u64>,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]

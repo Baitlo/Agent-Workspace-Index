@@ -1115,6 +1115,7 @@ impl Catalog {
             semantic: Default::default(),
             retrieval: Default::default(),
             serving: Default::default(),
+            freshness: Default::default(),
         })
     }
 
