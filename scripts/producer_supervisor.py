@@ -71,27 +71,95 @@ def stop_group(child):
         child.wait(timeout=10)
 
 
+def _recover_logger():
+    import sys
+    logger = logging.getLogger("awi-failover")
+    if not logger.handlers:
+        handler = logging.StreamHandler(sys.stderr)
+        handler.setFormatter(logging.Formatter("%(asctime)s %(message)s"))
+        logger.addHandler(handler)
+        logger.setLevel(logging.INFO)
+    return logger
+
+
 def monitor(config, stopping):
+    """Aggregate producer heartbeats with an optional failover closed loop.
+
+    When auto_recover is enabled the master is the failover owner: if a worker
+    and its on-worker supervisor are both unreachable beyond the grace period,
+    the master launches that shard producer locally (shared roots are mounted
+    here). Once the real worker heartbeat returns, the local fallback is
+    stopped so there is never a double publisher. Failover transitions are
+    logged (FAILOVER_ALERT / FAILOVER_RECOVER / FAILOVER_RECOVERED).
+    """
+    log = _recover_logger()
+    timeout_ms = config.get("timeout_seconds", 120) * 1000
+    poll = config.get("poll_seconds", 10)
+    auto_recover = config.get("auto_recover", False)
+    grace_ms = config.get("auto_recover_grace_seconds", 240) * 1000
+    runner = config.get("runner", "bash")
+    unreachable_since = {}
+    local_proc = {}
     while not stopping.is_set():
         now_ms = int(time.time() * 1000)
         workers = []
         for entry in config["producers"]:
+            name = entry["name"]
             state = read_json(entry["status"])
             age = now_ms - state.get("observed_ms", 0)
+            unreachable = age > timeout_ms
+            eff_state = (
+                "worker_or_supervisor_unreachable"
+                if unreachable
+                else state.get("state", "unknown")
+            )
+            if unreachable:
+                since = unreachable_since.get(name)
+                if since is None:
+                    unreachable_since[name] = now_ms
+                    since = now_ms
+                    log.warning(
+                        "FAILOVER_ALERT producer=%s worker/supervisor unreachable",
+                        name,
+                    )
+                proc = local_proc.get(name)
+                past_grace = (now_ms - since) > grace_ms
+                alive = proc is not None and proc.poll() is None
+                cfg = entry.get("config")
+                if auto_recover and past_grace and not alive and cfg:
+                    log.warning(
+                        "FAILOVER_RECOVER launching LOCAL producer for %s config=%s",
+                        name,
+                        cfg,
+                    )
+                    proc = subprocess.Popen(
+                        [runner, cfg],
+                        stdin=subprocess.DEVNULL,
+                        stdout=subprocess.DEVNULL,
+                        stderr=subprocess.DEVNULL,
+                        start_new_session=True,
+                    )
+                    local_proc[name] = proc
+                    eff_state = "auto_recovering_local"
+            else:
+                unreachable_since.pop(name, None)
+                proc = local_proc.get(name)
+                if proc is not None and proc.poll() is None:
+                    log.warning(
+                        "FAILOVER_RECOVERED worker %s heartbeat fresh; stop local fallback pid=%d",
+                        name,
+                        proc.pid,
+                    )
+                    try:
+                        os.killpg(proc.pid, signal.SIGTERM)
+                    except (ProcessLookupError, PermissionError):
+                        proc.terminate()
+                local_proc.pop(name, None)
             workers.append(
-                {
-                    "name": entry["name"],
-                    "age_ms": age,
-                    "state": (
-                        "worker_or_supervisor_unreachable"
-                        if age > config.get("timeout_seconds", 120) * 1000
-                        else state.get("state", "unknown")
-                    ),
-                    "detail": state,
-                }
+                {"name": name, "age_ms": age, "state": eff_state, "detail": state}
             )
         atomic_json(config["status"], {"observed_ms": now_ms, "producers": workers})
-        stopping.wait(config.get("poll_seconds", 10))
+        stopping.wait(poll)
 
 
 def supervise(config, stopping):

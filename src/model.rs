@@ -539,6 +539,14 @@ pub struct MemoryStatus {
 pub struct SemanticStatus {
     pub enabled: bool,
     pub available: bool,
+    #[serde(default)]
+    pub runtime_ready: bool,
+    #[serde(default)]
+    pub startup_failures: u64,
+    #[serde(default)]
+    pub effective_mode: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub fallback_reason: Option<String>,
     pub generation: Option<i64>,
     pub files: u64,
     pub chunks: u64,
@@ -569,7 +577,11 @@ pub struct SemanticMetrics {
     pub failures: u64,
     pub sidecar_starts: u64,
     pub sidecar_restarts: u64,
+    #[serde(default)]
+    pub startup_failures: u64,
     pub queue_wait: LatencySummary,
+    #[serde(default)]
+    pub sidecar_startup: LatencySummary,
     pub embedding: LatencySummary,
     pub vector_search: LatencySummary,
     pub total: LatencySummary,

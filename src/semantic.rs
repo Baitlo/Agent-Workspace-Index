@@ -107,6 +107,7 @@ pub(crate) struct SemanticIndex {
     index_dir: PathBuf,
     config: Option<SemanticConfig>,
     runtime: Arc<Mutex<Option<Arc<SemanticRuntime>>>>,
+    startup: Arc<StartupGuard>,
     metrics: Arc<SemanticMetricsState>,
 }
 
@@ -116,6 +117,7 @@ impl SemanticIndex {
             index_dir: index_dir.to_owned(),
             config: SemanticConfig::from_env()?,
             runtime: Arc::new(Mutex::new(None)),
+            startup: Arc::new(StartupGuard::default()),
             metrics: Arc::new(SemanticMetricsState::default()),
         })
     }
@@ -126,6 +128,7 @@ impl SemanticIndex {
             index_dir: index_dir.to_owned(),
             config: None,
             runtime: Arc::new(Mutex::new(None)),
+            startup: Arc::new(StartupGuard::default()),
             metrics: Arc::new(SemanticMetricsState::default()),
         }
     }
@@ -135,6 +138,7 @@ impl SemanticIndex {
             index_dir: index_dir.to_owned(),
             config: self.config.clone(),
             runtime: Arc::clone(&self.runtime),
+            startup: Arc::clone(&self.startup),
             metrics: Arc::clone(&self.metrics),
         }
     }
@@ -322,6 +326,7 @@ impl SemanticIndex {
         if !self.manifest().is_file() || !self.database().is_dir() {
             return SemanticStatus {
                 enabled,
+                effective_mode: "lexical_only".to_owned(),
                 ..SemanticStatus::default()
             };
         }
@@ -333,6 +338,32 @@ impl SemanticIndex {
             Ok(manifest) => SemanticStatus {
                 enabled,
                 available: true,
+                runtime_ready: self
+                    .runtime
+                    .lock()
+                    .expect("semantic runtime poisoned")
+                    .is_some(),
+                startup_failures: self.startup.failures() as u64,
+                effective_mode: if self
+                    .runtime
+                    .lock()
+                    .expect("semantic runtime poisoned")
+                    .is_some()
+                {
+                    "semantic".to_owned()
+                } else {
+                    "lexical_only".to_owned()
+                },
+                fallback_reason: if self
+                    .runtime
+                    .lock()
+                    .expect("semantic runtime poisoned")
+                    .is_some()
+                {
+                    None
+                } else {
+                    self.startup.fallback_reason()
+                },
                 generation: manifest["generation"].as_i64(),
                 files: manifest["files"].as_u64().unwrap_or_default(),
                 chunks: manifest["rows"].as_u64().unwrap_or_default(),
@@ -365,12 +396,39 @@ impl SemanticIndex {
                 .lock()
                 .expect("semantic runtime mutex poisoned");
             if guard.is_none() {
-                *guard = Some(Arc::new(SemanticRuntime::start(
+                // Circuit breaker: a deterministic startup failure does not heal
+                // itself, so do not burn a 60s spawn budget on every query.
+                if let Some(until) = self.startup.open_until()
+                    && Instant::now() < until
+                {
+                    let reason = self
+                        .startup
+                        .fallback_reason()
+                        .unwrap_or_else(|| "semantic sidecar in backoff".to_owned());
+                    anyhow::bail!("semantic circuit open ({})", reason);
+                }
+                let started = Instant::now();
+                match SemanticRuntime::start(
                     self.config
                         .as_ref()
                         .context("semantic runtime is not configured")?,
-                )?));
-                self.metrics.sidecar_starts.fetch_add(1, Ordering::Relaxed);
+                ) {
+                    Ok(runtime) => {
+                        self.startup.reset();
+                        self.metrics
+                            .sidecar_startup
+                            .record_ms(started.elapsed().as_secs_f64() * 1000.0);
+                        self.metrics.sidecar_starts.fetch_add(1, Ordering::Relaxed);
+                        *guard = Some(Arc::new(runtime));
+                    }
+                    Err(error) => {
+                        self.startup.open_cooldown(&error);
+                        self.metrics
+                            .startup_failures
+                            .fetch_add(1, Ordering::Relaxed);
+                        return Err(error);
+                    }
+                }
             }
             Arc::clone(guard.as_ref().expect("semantic runtime initialized"))
         };
@@ -411,7 +469,9 @@ struct SemanticMetricsState {
     coalesced_queries: AtomicU64,
     failures: AtomicU64,
     sidecar_starts: AtomicU64,
+    startup_failures: AtomicU64,
     queue_wait: LatencyWindow,
+    sidecar_startup: LatencyWindow,
     embedding: LatencyWindow,
     vector_search: LatencyWindow,
     total: LatencyWindow,
@@ -461,11 +521,57 @@ impl SemanticMetricsState {
             failures: self.failures.load(Ordering::Relaxed),
             sidecar_starts: starts,
             sidecar_restarts: starts.saturating_sub(1),
+            startup_failures: self.startup_failures.load(Ordering::Relaxed),
             queue_wait: self.queue_wait.snapshot(),
+            sidecar_startup: self.sidecar_startup.snapshot(),
             embedding: self.embedding.snapshot(),
             vector_search: self.vector_search.snapshot(),
             total: self.total.snapshot(),
         }
+    }
+}
+
+/// Exponential-backoff circuit breaker for sidecar startup.
+///
+/// A deterministic import/config failure makes every respawn fail the same way;
+/// without state the reader would retry the (60s-budget) spawn on every single
+/// query. This guard opens for a backoff window and returns an immediate lexical
+/// fallback instead.
+#[derive(Default)]
+pub(crate) struct StartupGuard {
+    cooldown_until: Mutex<Option<Instant>>,
+    failures: Mutex<u32>,
+    last_error: Mutex<Option<String>>,
+    last_ready: Mutex<Option<Instant>>,
+}
+
+impl StartupGuard {
+    fn open_cooldown(&self, error: &anyhow::Error) {
+        let mut failures = self.failures.lock().expect("startup failures poisoned");
+        *failures = failures.saturating_add(1);
+        let exp = (*failures).min(8);
+        let backoff = Duration::from_secs(2u64.saturating_mul(1u64 << exp));
+        *self.cooldown_until.lock().expect("cooldown poisoned") =
+            Some(Instant::now() + backoff.min(Duration::from_secs(120)));
+        *self.last_error.lock().expect("last error poisoned") = Some(format!("{error:#}"));
+    }
+
+    fn reset(&self) {
+        *self.failures.lock().expect("failures poisoned") = 0;
+        *self.cooldown_until.lock().expect("cooldown poisoned") = None;
+        *self.last_ready.lock().expect("last ready poisoned") = Some(Instant::now());
+    }
+
+    fn open_until(&self) -> Option<Instant> {
+        *self.cooldown_until.lock().expect("cooldown poisoned")
+    }
+
+    fn failures(&self) -> u32 {
+        *self.failures.lock().expect("failures poisoned")
+    }
+
+    fn fallback_reason(&self) -> Option<String> {
+        self.last_error.lock().expect("last error poisoned").clone()
     }
 }
 
