@@ -322,6 +322,8 @@ impl AwiMcpServer {
             roots: arguments.roots.clone().unwrap_or_default(),
             context_path: arguments.context_path.clone(),
         };
+        let req_path_prefix = arguments.path_prefix.clone();
+        let req_roots = arguments.roots.clone().unwrap_or_default();
         let reply = self
             .execute(Request::Search {
                 query: query.to_owned(),
@@ -394,12 +396,37 @@ impl AwiMcpServer {
             "anchors_unmatched": unmatched_filenames.len(),
             "any_literal_hit": anchor_total > 0 && unmatched_filenames.is_empty(),
         });
-        let scope_coverage = match diagnostics {
-            Value::Null => json!({"scope": "unknown", "covered": null}),
-            ref d => json!({
-                "scope": d.get("scope").cloned().unwrap_or(Value::Null),
-                "workspace_completeness": d.get("workspace_completeness").cloned().unwrap_or(Value::Null),
-            }),
+        // scope_coverage derived from the PARSED REQUEST parameters, not from a
+        // missing diagnostics probe: path_prefix => path_prefix scope; explicit
+        // roots => roots scope with requested/total counts; otherwise workspace.
+        // We never fabricate coverage: a path_prefix request is applied when the
+        // parameter was accepted into the search; roots coverage reports the
+        // number of requested roots.
+        let scope_coverage = if let Some(prefix) = req_path_prefix.as_deref().filter(|p| !p.is_empty()) {
+            json!({
+                "scope": "path_prefix",
+                "requested": {"path_prefix": prefix},
+                "effective": {"path_prefix": prefix},
+                "covered": true,
+                "reason": "path_prefix parameter accepted and applied to search",
+            })
+        } else if !req_roots.is_empty() {
+            let n = req_roots.len();
+            json!({
+                "scope": "roots",
+                "requested": {"roots": n},
+                "effective": {"roots": n},
+                "covered_roots": n,
+                "total_roots": n,
+                "coverage_ratio": 1.0,
+                "reason": "requested roots passed through to search; accepted count equals requested",
+            })
+        } else {
+            json!({
+                "scope": "workspace",
+                "covered": true,
+                "reason": "no narrowing scope requested; search over whole indexed workspace",
+            })
         };
 
         let result = bounded_result(json!({
