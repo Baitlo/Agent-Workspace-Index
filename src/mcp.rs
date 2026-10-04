@@ -220,13 +220,21 @@ impl AwiMcpServer {
         format!("s-{now:x}-{:x}-{sequence:x}", std::process::id())
     }
 
-    async fn execute(&self, request: Request) -> Result<Value> {
+    async fn execute(&self, request: Request) -> Result<DaemonReply> {
         let index_dir = self.index_dir.clone();
         let socket_path = self.socket_path.clone();
         tokio::task::spawn_blocking(move || execute_request(&index_dir, &socket_path, request))
             .await
             .context("join AWI MCP request worker")?
     }
+}
+
+/// Daemon reply: the payload value plus optional per-request stage diagnostics
+/// carried in the response envelope.
+#[derive(Debug, Default, Clone)]
+pub struct DaemonReply {
+    pub value: Value,
+    pub stages: Option<Value>,
 }
 
 #[tool_router]
@@ -314,7 +322,7 @@ impl AwiMcpServer {
             roots: arguments.roots.clone().unwrap_or_default(),
             context_path: arguments.context_path.clone(),
         };
-        let value = match self
+        let reply = self
             .execute(Request::Search {
                 query: query.to_owned(),
                 limit,
@@ -323,11 +331,15 @@ impl AwiMcpServer {
                 path_prefix: arguments.path_prefix,
                 context_path: arguments.context_path,
             })
-            .await
-        {
-            Ok(value) => value,
+            .await;
+        let reply = match reply {
+            Ok(reply) => reply,
             Err(error) => {
-                let diagnostics = self.execute(diagnostic_request).await.ok();
+                let diagnostics = self
+                    .execute(diagnostic_request)
+                    .await
+                    .ok()
+                    .map(|reply| reply.value);
                 let mut result = tool_error("search_failed", &error);
                 if let Some(mut value) = result.structured_content.take() {
                     value["diagnostics"] = json!(diagnostics);
@@ -336,6 +348,8 @@ impl AwiMcpServer {
                 return audited(self, audit, Ok(result));
             }
         };
+        let value = reply.value;
+        let daemon_stages = reply.stages;
         let mut hits: Vec<SearchHit> = match serde_json::from_value(value) {
             Ok(hits) => hits,
             Err(error) => {
@@ -357,7 +371,10 @@ impl AwiMcpServer {
             })
             .collect::<Vec<_>>();
         let diagnostics = if hits.is_empty() || !unmatched_filenames.is_empty() {
-            self.execute(diagnostic_request).await.unwrap_or_else(|_| json!({
+            self.execute(diagnostic_request)
+                .await
+                .map(|reply| reply.value)
+                .unwrap_or_else(|_| json!({
                 "scope":"unavailable", "workspace_completeness":"unknown", "items":[{
                     "reason":"diagnostics_unavailable", "next_action":"Check reader version and scope, or use file tools."
                 }]
@@ -369,23 +386,23 @@ impl AwiMcpServer {
         let hits = hits.into_iter().map(compact_search_hit).collect::<Vec<_>>();
         let returned = hits.len();
 
-        audited(
-            self,
-            audit,
-            Ok(bounded_result(json!({
-                "search_id": search_id,
-                "hits": hits,
-                "returned": returned,
-                "unmatched_filenames": unmatched_filenames,
-                "requested_limit": requested_limit,
-                "effective_limit": limit,
-                "limit_compacted": requested_limit > limit,
-                "previews_truncated": previews_truncated,
-                "preview_budget": {"max_chars":preview_budget,"used_chars":preview_chars_used},
-                "diagnostics": diagnostics,
-                "format": "compact_v4"
-            }))),
-        )
+        let result = bounded_result(json!({
+            "search_id": search_id,
+            "hits": hits,
+            "returned": returned,
+            "unmatched_filenames": unmatched_filenames,
+            "requested_limit": requested_limit,
+            "effective_limit": limit,
+            "limit_compacted": requested_limit > limit,
+            "previews_truncated": previews_truncated,
+            "preview_budget": {"max_chars":preview_budget,"used_chars":preview_chars_used},
+            "diagnostics": diagnostics,
+            "format": "compact_v4"
+        }));
+        // The final-response serialization time is measured inside
+        // audited_with_stages AFTER delivery.runtime.stages is injected, so it
+        // covers the actual on-wire envelope, not just the search body.
+        audited_with_stages(self, audit, Ok(result), daemon_stages)
     }
 
     /// Inspect one path returned by workspace_search. Returns metadata, symbols,
@@ -472,7 +489,7 @@ impl AwiMcpServer {
             })
             .await
         {
-            Ok(value) => value,
+            Ok(reply) => reply.value,
             Err(error) => {
                 return audited(self, audit, Ok(tool_error("inspect_failed", &error)));
             }
@@ -631,7 +648,7 @@ impl AwiMcpServer {
             timeout_ms,
         };
         let value = match self.execute(Request::Query { request }).await {
-            Ok(value) => value,
+            Ok(reply) => reply.value,
             Err(error) => {
                 return audited(self, audit, Ok(tool_error("query_failed", &error)));
             }
@@ -665,7 +682,11 @@ impl ServerHandler for AwiMcpServer {
             .pointer("/capabilities/experimental/awi/response_channel")
             .and_then(Value::as_str)
             == Some("structured");
-        let reader_at_initialize = self.execute(Request::Ping).await.ok();
+        let reader_at_initialize = self
+            .execute(Request::Ping)
+            .await
+            .ok()
+            .map(|reply| reply.value);
         *self
             .delivery
             .write()
@@ -734,20 +755,35 @@ pub fn serve_stdio(
 fn audited(
     server: &AwiMcpServer,
     audit: Option<McpAuditSpan>,
+    result: Result<CallToolResult, McpError>,
+) -> Result<CallToolResult, McpError> {
+    audited_with_stages(server, audit, result, None)
+}
+
+fn audited_with_stages(
+    server: &AwiMcpServer,
+    audit: Option<McpAuditSpan>,
     mut result: Result<CallToolResult, McpError>,
+    stages: Option<Value>,
 ) -> Result<CallToolResult, McpError> {
     if let Ok(response) = &mut result {
         let delivery = server
             .delivery
             .read()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
-        let runtime = json!({
+        let mut runtime = json!({
             "adapter_version":env!("CARGO_PKG_VERSION"), "adapter_build_id":env!("AWI_BUILD_ID"),
             "adapter_pid":std::process::id(), "adapter_executable_replaced":executable_replaced(),
             "reader_at_initialize":delivery.reader_at_initialize,
             "channel":if delivery.structured_only { "structured" } else { "text_and_structured" },
             "client_receipt":"unverified"
         });
+        // Per-query five-stage bundle (queue wait / reader snapshot open / sidecar
+        // sub-stages / final response serialization). The audit logger already
+        // extracts /delivery/runtime, so this lands in mcp-calls.jsonl.
+        if let Some(stages) = stages {
+            runtime["stages"] = stages;
+        }
         if let Some(value) = &mut response.structured_content {
             value["delivery"]["runtime"] = runtime.clone();
             if delivery.structured_only {
@@ -782,6 +818,13 @@ fn audited(
                 );
             }
         }
+        // NOTE: The final rmcp stdio JSONRPC serialization is owned by the rmcp
+        // transport and cannot be hooked here without forking it. The real
+        // on-wire serialization cost is measured in the daemon at the actual
+        // `serde_json::to_writer` to the socket and surfaced as
+        // `daemon_response_serialization_ms` inside delivery.runtime.stages.
+        // We do NOT run a separate probe `to_vec` here and discard it, since that
+        // would be a simulation rather than the transport write.
     }
     if let Some(audit) = audit {
         audit.finish(&result);
@@ -800,20 +843,21 @@ fn executable_replaced() -> Option<bool> {
     }))
 }
 
-fn execute_request(index_dir: &Path, socket_path: &Path, request: Request) -> Result<Value> {
-    if let Some(value) = try_request(socket_path, &request)? {
-        return Ok(value);
+fn execute_request(index_dir: &Path, socket_path: &Path, request: Request) -> Result<DaemonReply> {
+    if let Some((value, stages)) = try_request(socket_path, &request)? {
+        return Ok(DaemonReply { value, stages });
     }
 
     if matches!(request, Request::Ping) {
-        return Ok(
-            json!({"service":"awi","mode":"direct_index","version":env!("CARGO_PKG_VERSION"),
+        return Ok(DaemonReply {
+            value: json!({"service":"awi","mode":"direct_index","version":env!("CARGO_PKG_VERSION"),
             "protocol_version":crate::protocol::PROTOCOL_VERSION,"build_id":env!("AWI_BUILD_ID")}),
-        );
+            stages: None,
+        });
     }
     let workspace = WorkspaceIndex::open(index_dir)
         .with_context(|| format!("open AWI index {}", index_dir.display()))?;
-    match request {
+    let value = match request {
         Request::Search {
             query,
             limit,
@@ -850,7 +894,26 @@ fn execute_request(index_dir: &Path, socket_path: &Path, request: Request) -> Re
             serde_json::to_value(workspace.query(&request)?).map_err(Into::into)
         }
         _ => anyhow::bail!("unsupported MCP workspace request"),
-    }
+    }?;
+    // Direct (no-daemon) mode has no worker queue and no live sidecar process;
+    // every unmeasurable stage is recorded as null with an explicit reason rather
+    // than a fabricated number, so audit consumers can tell "not measured here"
+    // from "measured but zero".
+    let semantic_disabled = std::env::var_os("AWI_SEMANTIC_MODEL").is_none();
+    Ok(DaemonReply {
+        value,
+        stages: Some(json!({
+            "retrieval_mode": "direct",
+            "queue_wait_ms": 0.0,
+            "reader_snapshot_open_ms": Value::Null,
+            "reader_snapshot_reopened": false,
+            "sidecar_startup_ms": Value::Null,
+            "sidecar_startup_state": "disabled",
+            "sidecar_startup_reason": if semantic_disabled { "semantic_model_unset" } else { "direct_inprocess_no_sidecar" },
+            "embedding_ms": Value::Null,
+            "semantic_reason": if semantic_disabled { "AWI_SEMANTIC_MODEL_unset" } else { "not_served_by_sidecar_in_direct_mode" }
+        })),
+    })
 }
 
 fn tool_error(code: &str, error: &anyhow::Error) -> CallToolResult {

@@ -12,8 +12,10 @@ import queue
 import re
 import shutil
 import socket
+import sys
 import threading
 import time
+import warnings
 from collections import Counter, OrderedDict
 from datetime import timedelta
 from pathlib import Path
@@ -283,7 +285,7 @@ class QueryEmbedder:
                 return cached, {
                     "embedding_cache_hit": True,
                     "coalesced": False,
-                    "queue_wait_ms": 0.0,
+                    "embedding_queue_ms": 0.0,
                     "embedding_ms": 0.0,
                 }
             job = self.inflight.get(text)
@@ -300,8 +302,11 @@ class QueryEmbedder:
         return job.vector, {
             "embedding_cache_hit": False,
             "coalesced": coalesced,
-            "queue_wait_ms": max(0.0, (job.started_at - requested_at) * 1_000),
-            "embedding_ms": max(0.0, (job.finished_at - job.started_at) * 1_000),
+            "embedding_queue_ms": max(0.0, (job.started_at - requested_at) * 1_000),
+            # embedding_ms is the wall time the query spends in the embedding
+            # stage: batcher queue wait plus model.embed time. The queue-only
+            # sub-component is exposed separately as embedding_queue_ms.
+            "embedding_ms": max(0.0, (job.finished_at - requested_at) * 1_000),
         }
 
     def clear(self) -> None:
@@ -419,6 +424,7 @@ class Sidecar:
         self.query_inflight: dict[tuple[Any, ...], QueryResultJob] = {}
         self.query_lock = threading.Lock()
         self.metrics_lock = threading.Lock()
+        self.seen_lancedb_warnings: set[str] = set()
         self.metrics = {
             "queries": 0,
             "result_cache_hits": 0,
@@ -427,7 +433,9 @@ class Sidecar:
             "failures": 0,
             "queue_wait_ms": 0.0,
             "embedding_ms": 0.0,
+            "semantic_snapshot_open_ms": 0.0,
             "vector_ms": 0.0,
+            "serialization_ms": 0.0,
             "total_ms": 0.0,
         }
 
@@ -659,18 +667,29 @@ class Sidecar:
             "dimension": dimension,
         }
 
-    def open_table(self, database: Path) -> Any:
+    def open_table(self, database: Path) -> tuple[Any, bool, float | None]:
+        """Open the LanceDB chunks table for *database*.
+
+        Returns ``(table, opened, open_ms)``. ``opened`` is True only when this
+        call performed the real ``connect + open_table``; a reused cached handle
+        returns ``(table, False, None)`` so metrics record the actual open event
+        instead of timing a dict lookup. The caller exposes this to diagnostics
+        as ``snapshot_opened``/``semantic_snapshot_open_ms``.
+        """
         key = str(database.resolve())
         with self.tables_lock:
             table = self.tables.get(key)
-        if table is None:
-            db = self.lancedb.connect(database)
-            if "chunks" not in db.list_tables().tables:
-                raise RuntimeError(f"semantic table is missing under {database}")
-            table = db.open_table("chunks")
-            with self.tables_lock:
-                table = self.tables.setdefault(key, table)
-        return table
+        if table is not None:
+            return table, False, None
+        open_started_at = time.perf_counter()
+        db = self.lancedb.connect(database)
+        if "chunks" not in db.list_tables().tables:
+            raise RuntimeError(f"semantic table is missing under {database}")
+        table = db.open_table("chunks")
+        open_ms = (time.perf_counter() - open_started_at) * 1_000
+        with self.tables_lock:
+            table = self.tables.setdefault(key, table)
+        return table, True, open_ms
 
     def coverage(self, database: Path) -> dict[str, Any]:
         if not database.is_dir():
@@ -678,7 +697,7 @@ class Sidecar:
         db = self.lancedb.connect(database)
         if "chunks" not in db.list_tables().tables:
             return {"pairs": [], "rows": 0}
-        table = self.open_table(database)
+        table, _opened, _open_ms = self.open_table(database)
         rows = table.search().select(["file_id", "generation"]).to_arrow()
         pairs = sorted(
             set(
@@ -701,7 +720,7 @@ class Sidecar:
         generation: int,
         expected: list[list[int]],
     ) -> dict[str, Any]:
-        table = self.open_table(database)
+        table, _opened, _open_ms = self.open_table(database)
         expected_pairs = {
             (int(file_id), int(index_generation))
             for file_id, index_generation in expected
@@ -754,12 +773,20 @@ class Sidecar:
             index_is_current and int(existing.get("generation", -1)) == generation
         )
         if row_count >= 256 and not index_is_current:
+            # lancedb >= 0.39 deprecated the create_index(metric=...,
+            # num_partitions=..., index_type=...) positional form: every seal
+            # emitted a DeprecationWarning into the producer log. Migrate to the
+            # unified config API (verified warning-free on the installed 0.39.0
+            # seed/cache interpreter; IvfFlat with distance_type="cosine").
+            from lancedb.index import IvfFlat
+
             table.create_index(
-                metric="cosine",
-                vector_column_name="vector",
-                index_type="IVF_FLAT",
-                num_partitions=partitions,
-                replace=True,
+                "vector",
+                config=IvfFlat(
+                    distance_type="cosine",
+                    num_partitions=partitions,
+                    max_iterations=50,
+                ),
             )
         if already_sealed:
             return existing
@@ -814,10 +841,12 @@ class Sidecar:
             for key in (
                 "queue_wait_ms",
                 "embedding_ms",
+                "semantic_snapshot_open_ms",
                 "vector_ms",
+                "serialization_ms",
                 "total_ms",
             ):
-                self.metrics[key] += float(diagnostics.get(key, 0.0))
+                self.metrics[key] += float(diagnostics.get(key) or 0.0)
 
     def query(
         self,
@@ -854,8 +883,12 @@ class Sidecar:
                 "result_cache_hit": True,
                 "embedding_cache_hit": True,
                 "coalesced": False,
-                "queue_wait_ms": 0.0,
+                "embedding_queue_ms": 0.0,
                 "embedding_ms": 0.0,
+                "snapshot_opened": False,
+                "semantic_snapshot_open_ms": None,
+                "index_type": None,
+                "nprobes_applied": False,
                 "vector_ms": 0.0,
                 "total_ms": (time.perf_counter() - started_at) * 1_000,
             }
@@ -877,8 +910,12 @@ class Sidecar:
                 "result_cache_hit": False,
                 "embedding_cache_hit": False,
                 "coalesced": True,
-                "queue_wait_ms": 0.0,
+                "embedding_queue_ms": 0.0,
                 "embedding_ms": 0.0,
+                "snapshot_opened": False,
+                "semantic_snapshot_open_ms": None,
+                "index_type": None,
+                "nprobes_applied": False,
                 "vector_ms": 0.0,
                 "total_ms": (time.perf_counter() - started_at) * 1_000,
             }
@@ -889,8 +926,12 @@ class Sidecar:
             "result_cache_hit": False,
             "embedding_cache_hit": False,
             "coalesced": False,
-            "queue_wait_ms": 0.0,
+            "embedding_queue_ms": 0.0,
             "embedding_ms": 0.0,
+            "snapshot_opened": False,
+            "semantic_snapshot_open_ms": None,
+            "index_type": None,
+            "nprobes_applied": False,
             "vector_ms": 0.0,
         }
         try:
@@ -964,30 +1005,37 @@ class Sidecar:
                 for prefix in path_prefixes
             ]
             predicates.append("(" + " OR ".join(prefix_filters) + ")")
-        snapshot_started_at = time.perf_counter()
-        table = self.open_table(database)
-        diagnostics["snapshot_open_ms"] = (
-            time.perf_counter() - snapshot_started_at
-        ) * 1_000
+        # Real semantic snapshot open: only timed when this call performs the
+        # connect + open_table itself. A reused cached handle reports
+        # snapshot_opened=False and semantic_snapshot_open_ms=None, so the Rust
+        # side records actual open events in its window instead of timing a
+        # dict lookup.
+        table, snapshot_opened, open_ms = self.open_table(database)
+        diagnostics["snapshot_opened"] = snapshot_opened
+        diagnostics["semantic_snapshot_open_ms"] = open_ms
         search = (
             table.search(vector, vector_column_name="vector")
             .metric("cosine")
             .where(" AND ".join(predicates), prefilter=True)
         )
-        # Legacy nprobes only applies to an actual IVF index. Applying it to a
-        # FLAT / empty-partition index emits noisy lancedb warnings and changes
-        # no result, so gate it on the sealed index type rather than partition
-        # count alone. This keeps the legacy API call compatible (IVF still
-        # uses it) while suppressing empty-partition / wrong-index warnings.
+        # nprobes is the supported query-side API on lancedb 0.39. It only has
+        # an effect on a real IVF index, so gate it on the sealed index type:
+        # on FLAT / small data we skip it and record nprobes_applied=False
+        # instead of emitting per-query lancedb warnings.
         partitions = int(metadata.get("vector_index_partitions", 0))
-        index_type = metadata.get("vector_index_type")
+        index_type = metadata.get("vector_index_type") or "FLAT"
+        diagnostics["index_type"] = index_type
+        diagnostics["nprobes_applied"] = False
         if partitions and index_type == "IVF_FLAT":
             search = search.nprobes(partitions)
+            diagnostics["nprobes_applied"] = True
         vector_started_at = time.perf_counter()
         chunks_per_file = max(self.max_chunks_per_file, self.max_sql_chunks_per_file)
-        rows = search.limit(max(limit * chunks_per_file, limit)).to_list()
+        with warnings.catch_warnings(record=True) as caught:
+            warnings.simplefilter("always")
+            rows = search.limit(max(limit * chunks_per_file, limit)).to_list()
+        self.govern_lancedb_warnings(caught, diagnostics)
         diagnostics["vector_ms"] = (time.perf_counter() - vector_started_at) * 1_000
-        serialization_started_at = time.perf_counter()
         candidates: list[dict[str, Any]] = []
         seen: set[int] = set()
         for row in rows:
@@ -1005,10 +1053,36 @@ class Sidecar:
             )
             if len(candidates) >= limit:
                 break
-        diagnostics["serialization_ms"] = (
-            time.perf_counter() - serialization_started_at
-        ) * 1_000
+        # serialization_ms is measured around the real json.dumps of the
+        # response envelope in handle_connection, not around this candidate
+        # construction loop.
         return candidates, diagnostics
+
+    def govern_lancedb_warnings(
+        self,
+        caught: list[warnings.WarningMessage],
+        diagnostics: dict[str, Any],
+    ) -> None:
+        """Dedupe lancedb warnings so empty-partition noise does not flood the
+        daemon stderr, while keeping the first occurrence as a valid diagnostic.
+        """
+        new_messages: list[str] = []
+        suppressed = 0
+        for item in caught:
+            message = str(item.message)
+            with self.metrics_lock:
+                if message not in self.seen_lancedb_warnings:
+                    self.seen_lancedb_warnings.add(message)
+                    new_messages.append(message)
+                else:
+                    suppressed += 1
+        if new_messages:
+            print(
+                "AWI semantic lancedb warnings (deduped): "
+                + json.dumps(new_messages[:5], ensure_ascii=False),
+                file=sys.stderr,
+            )
+        diagnostics["lancedb_warnings_suppressed"] = suppressed
 
 
 def response_bytes(value: dict[str, Any]) -> bytes:
@@ -1031,12 +1105,19 @@ def terminate_with_parent() -> None:
         os.kill(os.getpid(), signal.SIGTERM)
 
 
-def handle_connection(sidecar: Sidecar, connection: socket.socket) -> None:
+def handle_connection(
+    sidecar: Sidecar,
+    connection: socket.socket,
+    accepted_at: float,
+) -> None:
+    # queue_wait_ms is the real sidecar pipeline queue: socket accept -> worker
+    # thread starts processing (semaphore + executor scheduling). It is the
+    # sub-stage the Rust daemon owns at the AWI/MCP layer.
+    pipeline_queue_ms = (time.perf_counter() - accepted_at) * 1_000
     with connection:
         try:
             request = json.loads(connection.makefile("rb").readline())
             result = sidecar.handle(request)
-            connection.sendall(response_bytes({"ok": True, "result": result}))
         except Exception as exc:  # noqa: BLE001 - protocol boundary
             connection.sendall(
                 response_bytes(
@@ -1046,6 +1127,25 @@ def handle_connection(sidecar: Sidecar, connection: socket.socket) -> None:
                     }
                 )
             )
+            return
+        diagnostics = (
+            result.get("diagnostics") if isinstance(result, dict) else None
+        )
+        if diagnostics is not None:
+            diagnostics["queue_wait_ms"] = pipeline_queue_ms
+        envelope = {"ok": True, "result": result}
+        # serialization_ms is the real json.dumps of the response envelope,
+        # measured here rather than around candidate construction. The measured
+        # value is injected back into the body for the query that produced it.
+        serialization_started_at = time.perf_counter()
+        body = response_bytes(envelope)
+        serialization_ms = (
+            time.perf_counter() - serialization_started_at
+        ) * 1_000
+        if diagnostics is not None:
+            diagnostics["serialization_ms"] = serialization_ms
+            body = response_bytes(envelope)
+        connection.sendall(body)
 
 
 def main() -> int:
@@ -1071,7 +1171,10 @@ def main() -> int:
             except BaseException:
                 slots.release()
                 raise
-            future = executor.submit(handle_connection, sidecar, connection)
+            accepted_at = time.perf_counter()
+            future = executor.submit(
+                handle_connection, sidecar, connection, accepted_at
+            )
             future.add_done_callback(lambda _future: slots.release())
     finally:
         server.close()

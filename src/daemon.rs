@@ -3,7 +3,7 @@ use std::io::{BufRead, BufReader, BufWriter, Write};
 use std::os::unix::fs::{FileTypeExt, PermissionsExt};
 use std::os::unix::net::{UnixListener, UnixStream};
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicU64, AtomicU8, Ordering};
+use std::sync::atomic::{AtomicU8, AtomicU64, Ordering};
 use std::sync::mpsc::{self, Receiver, SyncSender, TryRecvError, TrySendError};
 use std::sync::{Arc, Mutex, RwLock};
 use std::thread;
@@ -44,6 +44,14 @@ struct DaemonMetrics {
     active: AtomicU64,
     queued: AtomicU64,
     queue_wait: LatencyWindow,
+    reader_snapshot_open: LatencyWindow,
+    /// Real on-wire response serialization cost (the single `serde_json::to_vec`
+    /// whose bytes are written to the socket). Recorded post-write to the shared
+    /// metrics window; exposure to ServingStatus is the status agent's boundary.
+    response_serialization: LatencyWindow,
+    /// Monotonic per-request sequence, stamped into the response stages and the
+    /// post-serialization audit event so concurrent requests correlate exactly.
+    request_seq: AtomicU64,
 }
 
 impl DaemonMetrics {
@@ -57,7 +65,22 @@ impl DaemonMetrics {
             active: AtomicU64::new(0),
             queued: AtomicU64::new(0),
             queue_wait: LatencyWindow::default(),
+            reader_snapshot_open: LatencyWindow::default(),
+            response_serialization: LatencyWindow::default(),
+            request_seq: AtomicU64::new(0),
         }
+    }
+
+    fn next_request_seq(&self) -> u64 {
+        self.request_seq.fetch_add(1, Ordering::Relaxed)
+    }
+
+    fn record_reader_snapshot_open(&self, duration: Duration) {
+        self.reader_snapshot_open.record(duration);
+    }
+
+    fn record_response_serialization(&self, duration: Duration) {
+        self.response_serialization.record(duration);
     }
 
     fn snapshot(&self) -> ServingStatus {
@@ -70,6 +93,8 @@ impl DaemonMetrics {
             active: self.active.load(Ordering::Relaxed),
             queued: self.queued.load(Ordering::Relaxed),
             queue_wait: self.queue_wait.snapshot(),
+            reader_snapshot_open: self.reader_snapshot_open.snapshot(),
+            response_serialization: self.response_serialization.snapshot(),
         }
     }
 }
@@ -122,7 +147,10 @@ pub fn serve_with_snapshots(
     let workspace_path = follower
         .as_ref()
         .map_or_else(|| index_dir.to_owned(), |value| value.active_path.clone());
-    let mut workspace = ReaderIndex::open(workspace_path)?;
+    // The daemon bootstrap open IS a genuine reader snapshot open; record it in
+    // the shared metrics once the non-snapshot loop creates its metrics below.
+    let open_started = Instant::now();
+    let mut workspace = ReaderIndex::open(workspace_path.clone())?;
     if let Err(error) = workspace.warm_retrieval() {
         eprintln!("AWI semantic sidecar unavailable; serving lexical search: {error:#}");
     }
@@ -132,19 +160,38 @@ pub fn serve_with_snapshots(
         return serve_snapshot_readers(listener, &mut workspace, follower);
     }
     let metrics = DaemonMetrics::new(1, 0);
+    metrics.record_reader_snapshot_open(open_started.elapsed());
+    // Plain (non-snapshot) serve: a fixed index dir, no follower. Still populate the
+    // shared status cache from a bounded background refresher so `status` returns a
+    // real populated body (not an all-zero skeleton) without running the catalog scan
+    // on the request path.
+    let status_cache: SharedStatusCache = Arc::new(RwLock::new(None));
+    let status_state = Arc::new(AtomicU8::new(0));
+    let active_path = Arc::new(RwLock::new(workspace_path.clone()));
+    // Chain off the already-warm served reader so the refresher shares the SAME
+    // warm semantic sidecar Arc (and its readiness/metrics) instead of opening a
+    // cold ReaderIndex that would report runtime_ready=false forever.
+    let warm_reader = workspace.open_reader_at(workspace.index_dir())?;
+    spawn_status_refresher(
+        warm_reader,
+        Arc::clone(&active_path),
+        Arc::clone(&status_cache),
+        Arc::clone(&status_state),
+    );
     for stream in listener.incoming() {
         match stream {
             Ok(stream) => {
                 metrics.accepted.fetch_add(1, Ordering::Relaxed);
                 metrics.active.fetch_add(1, Ordering::Relaxed);
                 let active = ActiveRequest { metrics: &metrics };
-                let status_cache: SharedStatusCache = Arc::new(RwLock::new(None));
+                let status_cache = Arc::clone(&status_cache);
                 let shutdown = handle_connection_resilient(
                     stream,
                     &mut workspace,
                     false,
                     &metrics,
                     &status_cache,
+                    RequestStages::default(),
                 );
                 drop(active);
                 if shutdown {
@@ -179,8 +226,12 @@ fn serve_snapshot_readers(
     // 0=initial, 1=loading, 2=populated, 3=error. Exposed so a cold/failed
     // status never masquerades as a healthy all-zero index.
     let status_state = Arc::new(AtomicU8::new(0));
+    // Chain off the warm served reader so the refresher shares the live semantic
+    // sidecar Arc (readiness + metrics), not a cold duplicate that misreports
+    // semantic as down.
+    let warm_reader = workspace.open_reader_at(workspace.index_dir())?;
     spawn_status_refresher(
-        follower.active_path.clone(),
+        warm_reader,
         Arc::clone(&active_path),
         Arc::clone(&status_cache),
         Arc::clone(&status_state),
@@ -190,7 +241,11 @@ fn serve_snapshot_readers(
     let (shutdown_sender, shutdown_receiver) = mpsc::channel();
     let mut workers = Vec::with_capacity(worker_count);
     for worker_id in 0..worker_count {
+        // Worker startup IS a real reader snapshot open; record it in the shared
+        // window. Warm reused readers contribute no further samples.
+        let open_started = Instant::now();
         let mut reader = workspace.open_reader_at(workspace.index_dir())?;
+        metrics.record_reader_snapshot_open(open_started.elapsed());
         let receiver = Arc::clone(&receiver);
         let active_path = Arc::clone(&active_path);
         let metrics = Arc::clone(&metrics);
@@ -210,18 +265,27 @@ fn serve_snapshot_readers(
                             break;
                         };
                         metrics.queued.fetch_sub(1, Ordering::Relaxed);
-                        metrics.queue_wait.record(work.enqueued_at.elapsed());
+                        let queue_wait = work.enqueued_at.elapsed();
+                        metrics.queue_wait.record(queue_wait);
                         metrics.active.fetch_add(1, Ordering::Relaxed);
                         let active = ActiveRequest { metrics: &metrics };
                         let requested_path = active_path
                             .read()
                             .expect("AWI active snapshot lock poisoned")
                             .clone();
+                        // Only a genuine rotation open measures reader_snapshot_open_ms.
+                        // A warm reused reader reports null + reopened=false; we never
+                        // replay the previous open duration onto this query.
+                        let mut request_reader_open_ms: Option<f64> = None;
                         if requested_path != reader_path {
+                            let open_started = Instant::now();
                             match reader.open_reader_at(&requested_path) {
                                 Ok(replacement) => {
                                     reader = replacement;
                                     reader_path = requested_path;
+                                    let elapsed = open_started.elapsed();
+                                    metrics.record_reader_snapshot_open(elapsed);
+                                    request_reader_open_ms = Some(elapsed.as_secs_f64() * 1_000.0);
                                 }
                                 Err(error) => {
                                     eprintln!(
@@ -233,12 +297,18 @@ fn serve_snapshot_readers(
                                 }
                             }
                         }
+                        let stages = RequestStages {
+                            queue_wait_ms: queue_wait.as_secs_f64() * 1_000.0,
+                            reader_snapshot_open_ms: request_reader_open_ms,
+                            reader_reopened: request_reader_open_ms.is_some(),
+                        };
                         let shutdown = handle_connection_resilient(
                             work.stream,
                             &mut reader,
                             true,
                             &metrics,
                             &status_cache,
+                            stages,
                         );
                         drop(active);
                         if shutdown {
@@ -337,14 +407,31 @@ fn write_failure(mut stream: UnixStream, code: &str, message: &str) {
     let _ = stream.flush();
 }
 
+/// Per-request stage context measured by the query worker, layered on top of the
+/// sidecar diagnostics the workspace returns with each search.
+#[derive(Debug, Clone, Copy, Default)]
+struct RequestStages {
+    queue_wait_ms: f64,
+    reader_snapshot_open_ms: Option<f64>,
+    reader_reopened: bool,
+}
+
 fn handle_connection_resilient(
     stream: UnixStream,
     workspace: &mut ReaderIndex,
     snapshot_read_only: bool,
     metrics: &DaemonMetrics,
     status_cache: &SharedStatusCache,
+    stages: RequestStages,
 ) -> bool {
-    match handle_connection(stream, workspace, snapshot_read_only, metrics, status_cache) {
+    match handle_connection(
+        stream,
+        workspace,
+        snapshot_read_only,
+        metrics,
+        status_cache,
+        stages,
+    ) {
         Ok(shutdown) => shutdown,
         Err(error) => {
             eprintln!("AWI daemon connection failed; continuing: {error:#}");
@@ -367,7 +454,10 @@ fn env_usize(name: &str, default: usize) -> Result<usize> {
     Ok(parsed)
 }
 
-pub fn try_request(socket_path: &Path, request: &Request) -> Result<Option<Value>> {
+pub fn try_request(
+    socket_path: &Path,
+    request: &Request,
+) -> Result<Option<(Value, Option<Value>)>> {
     let mut stream = match UnixStream::connect(socket_path) {
         Ok(stream) => stream,
         Err(error)
@@ -404,7 +494,7 @@ pub fn try_request(socket_path: &Path, request: &Request) -> Result<Option<Value
     }
     let response: ResponseEnvelope =
         serde_json::from_str(&line).context("decode AWI daemon response")?;
-    response.into_result().map(Some)
+    response.into_parts().map(Some)
 }
 
 fn handle_connection(
@@ -413,6 +503,7 @@ fn handle_connection(
     snapshot_read_only: bool,
     metrics: &DaemonMetrics,
     status_cache: &SharedStatusCache,
+    stages: RequestStages,
 ) -> Result<bool> {
     stream.set_read_timeout(Some(IO_TIMEOUT))?;
     stream.set_write_timeout(Some(IO_TIMEOUT))?;
@@ -420,16 +511,21 @@ fn handle_connection(
     let mut reader = BufReader::new(stream.try_clone()?);
     let mut line = String::new();
     reader.read_line(&mut line)?;
-    let response = if line.len() > MAX_REQUEST_BYTES {
+    let mut response = if line.len() > MAX_REQUEST_BYTES {
         ResponseEnvelope::failure(
             "request_too_large",
             format!("request exceeded {MAX_REQUEST_BYTES} bytes"),
         )
     } else {
         match serde_json::from_str::<RequestEnvelope>(&line) {
-            Ok(envelope) if envelope.protocol_version == PROTOCOL_VERSION => {
-                dispatch(workspace, envelope.request, snapshot_read_only, metrics, status_cache)
-            }
+            Ok(envelope) if envelope.protocol_version == PROTOCOL_VERSION => dispatch(
+                workspace,
+                envelope.request,
+                snapshot_read_only,
+                metrics,
+                status_cache,
+                stages,
+            ),
             Ok(envelope) => ResponseEnvelope::failure(
                 "protocol_mismatch",
                 format!(
@@ -448,8 +544,41 @@ fn handle_connection(
         })
     );
 
+    // Stamp a per-request sequence into the response stages BEFORE serialization
+    // so it lands on the wire; the same sequence tags the audit event below.
+    // This lets concurrent requests correlate exactly (method+bytes alone is not
+    // enough). The seq is a known value, not self-referential timing.
+    let request_seq = metrics.next_request_seq();
+    if let Some(stages) = response.stages.as_mut() {
+        stages["daemon_request_seq"] = serde_json::json!(request_seq);
+    }
+
+    // Serialize the response payload ONCE to its real on-wire bytes, time that
+    // single serialization, then write those exact bytes. The measured cost is
+    // recorded to the shared DaemonMetrics window (not self-referenced into the
+    // same bytes we are about to write). No probe, no second full re-serialization.
+    // Ser-stage口径: this is the daemon JSON response actual serialization;
+    // the MCP JSONRPC stdio framing is owned by the rmcp transport and NOT timed here.
+    let serialize_start = std::time::Instant::now();
+    let body = serde_json::to_vec(&response)?;
+    let serialization_ms = serialize_start.elapsed().as_secs_f64() * 1_000.0;
+    metrics.record_response_serialization(Duration::from_secs_f64(serialization_ms / 1_000.0));
+    // Post-serialization audit event: a small independent JSON line carrying the
+    // request seq, real ser value, byte size and the per-query stages. It does
+    // NOT re-serialize the response; it logs the already-built stages Value.
+    eprintln!(
+        "awi-audit-response-serialization {}",
+        serde_json::json!({
+            "event": "daemon_response_serialization",
+            "request_seq": request_seq,
+            "serialization_ms": serialization_ms,
+            "bytes": body.len(),
+            "stages": response.stages,
+        })
+    );
+
     let mut writer = BufWriter::new(&mut stream);
-    serde_json::to_writer(&mut writer, &response)?;
+    writer.write_all(&body)?;
     writer.write_all(b"\n")?;
     writer.flush()?;
     Ok(shutdown && response.ok)
@@ -461,6 +590,7 @@ fn dispatch(
     snapshot_read_only: bool,
     metrics: &DaemonMetrics,
     status_cache: &SharedStatusCache,
+    stages: RequestStages,
 ) -> ResponseEnvelope {
     if snapshot_read_only && matches!(request, Request::Index { .. } | Request::Notify { .. }) {
         return ResponseEnvelope::failure(
@@ -491,7 +621,7 @@ fn dispatch(
             path_prefix,
             context_path,
         } => workspace
-            .search_filtered(
+            .search_filtered_stages(
                 &query,
                 limit,
                 &roots,
@@ -499,7 +629,27 @@ fn dispatch(
                 path_prefix.as_deref(),
                 context_path.as_deref(),
             )
-            .and_then(|value| ResponseEnvelope::success(value).map_err(Into::into)),
+            .and_then(|(hits, mut sidecar)| {
+                // Layer the worker-measured queue wait and reader snapshot open on
+                // top of the sidecar sub-stages. reader_snapshot_open_ms stays null
+                // when the warm reader was reused for this request.
+                if let Some(obj) = sidecar.as_object_mut() {
+                    obj.insert("queue_wait_ms".to_owned(), json!(stages.queue_wait_ms));
+                    obj.insert(
+                        "reader_snapshot_open_ms".to_owned(),
+                        json!(stages.reader_snapshot_open_ms),
+                    );
+                    obj.insert(
+                        "reader_snapshot_reopened".to_owned(),
+                        json!(stages.reader_reopened),
+                    );
+                    // sidecar startup never happens per query; report warm state
+                    // rather than fabricating a startup duration.
+                    obj.insert("sidecar_startup_ms".to_owned(), Value::Null);
+                    obj.insert("sidecar_startup_state".to_owned(), json!("warm"));
+                }
+                ResponseEnvelope::success_with_stages(hits, sidecar).map_err(anyhow::Error::from)
+            }),
         Request::DiagnoseSearch {
             anchors,
             roots,
@@ -522,15 +672,37 @@ fn dispatch(
             .query(&request)
             .and_then(|value| ResponseEnvelope::success(value).map_err(Into::into)),
         Request::Status => {
-            // Serve the shared cache instantly. The full NFS catalog scan behind
-            // status() is multi-minute and must never run on the request path.
-            // The background refresher populates this cache; on a cold process we
-            // return a minimal status rather than pinning a worker.
-            let cached = status_cache
-                .read()
-                .expect("AWI status cache lock poisoned")
-                .clone();
-            let mut value = cached.unwrap_or_else(IndexStatus::default);
+            // Plain (read-write, local) serve has no multi-minute NFS scan, so a
+            // status request computes the real body synchronously on the warm,
+            // served workspace — this always reflects the latest index. In snapshot
+            // mode the catalog may live on NFS, so we NEVER compute on the request
+            // path; the background refresher owns the scan and we serve its cache.
+            let mut value = if snapshot_read_only {
+                let cached = status_cache
+                    .read()
+                    .expect("AWI status cache lock poisoned")
+                    .clone();
+                cached.unwrap_or_else(IndexStatus::default)
+            } else {
+                match workspace.status() {
+                    Ok(mut status) => {
+                        if status.status_state.is_empty() || status.status_state == "initial" {
+                            status.status_state = "populated".to_owned();
+                        }
+                        status.status_sampled_ms = std::time::SystemTime::now()
+                            .duration_since(std::time::UNIX_EPOCH)
+                            .map(|d| d.as_millis() as u64)
+                            .unwrap_or_default();
+                        status
+                    }
+                    Err(error) => {
+                        let mut fallback = IndexStatus::default();
+                        fallback.status_state = "error".to_owned();
+                        fallback.status_error = Some(format!("{error:#}"));
+                        fallback
+                    }
+                }
+            };
             value.serving = metrics.snapshot();
             ResponseEnvelope::success(value).map_err(Into::into)
         }
@@ -550,7 +722,7 @@ fn dispatch(
 /// that would miss `collection.local.json` and fall back to an empty scratch
 /// reader.
 fn spawn_status_refresher(
-    base_path: PathBuf,
+    initial_reader: ReaderIndex,
     active_path: Arc<RwLock<PathBuf>>,
     status_cache: SharedStatusCache,
     status_state: Arc<AtomicU8>,
@@ -558,18 +730,18 @@ fn spawn_status_refresher(
     thread::Builder::new()
         .name("awi-status-refresh".to_owned())
         .spawn(move || {
-            let base = match ReaderIndex::open(&base_path) {
-                Ok(base) => base,
-                Err(error) => {
-                    status_state.store(3, Ordering::Relaxed);
-                    eprintln!(
-                        "AWI status refresher base open {} failed: {error:#}",
-                        base_path.display()
-                    );
-                    return;
-                }
+            // Seed the cache with an explicit "loading" body so a cold readback
+            // sees loading (not an empty status_state string) while the first scan
+            // runs. It shares the warm semantic sidecar Arc with the serving path.
+            let mut reader: Option<ReaderIndex> = Some(initial_reader);
+            let seed = || {
+                let mut seed = IndexStatus::default();
+                seed.status_state = "loading".to_owned();
+                seed
             };
-            let mut reader: Option<ReaderIndex> = None;
+            if let Ok(mut guard) = status_cache.write() {
+                *guard = Some(seed());
+            }
             loop {
                 let path = active_path
                     .read()
@@ -581,8 +753,14 @@ fn spawn_status_refresher(
                 };
                 if reopen {
                     status_state.store(1, Ordering::Relaxed);
-                    match base.open_reader_at(&path) {
-                        Ok(next) => reader = Some(next),
+                    // Re-chain from the current warm reader: open_reader_at reuses
+                    // already-warm shard readers and the shared semantic Arc.
+                    let next = match reader.take() {
+                        Some(current) => current.open_reader_at(&path),
+                        None => ReaderIndex::open(&path),
+                    };
+                    match next {
+                        Ok(built) => reader = Some(built),
                         Err(error) => {
                             status_state.store(3, Ordering::Relaxed);
                             eprintln!(
@@ -593,9 +771,15 @@ fn spawn_status_refresher(
                     }
                 }
                 if let Some(current) = &reader {
+                    let sampled_ms = std::time::SystemTime::now()
+                        .duration_since(std::time::UNIX_EPOCH)
+                        .map(|d| d.as_millis() as u64)
+                        .unwrap_or_default();
                     match current.status() {
                         Ok(mut status) => {
                             status.status_state = "populated".to_owned();
+                            status.status_sampled_ms = sampled_ms;
+                            status.status_error = None;
                             if let Ok(mut guard) = status_cache.write() {
                                 *guard = Some(status);
                             }
@@ -603,13 +787,27 @@ fn spawn_status_refresher(
                         }
                         Err(error) => {
                             status_state.store(3, Ordering::Relaxed);
-                            eprintln!(
-                                "AWI status refresher status compute failed: {error:#}"
-                            );
+                            eprintln!("AWI status refresher status compute failed: {error:#}");
+                            if let Ok(mut guard) = status_cache.write() {
+                                let mut fallback = IndexStatus::default();
+                                fallback.status_state = "error".to_owned();
+                                fallback.status_error = Some(format!("{error:#}"));
+                                fallback.status_sampled_ms = sampled_ms;
+                                *guard = Some(fallback);
+                            }
                         }
                     }
                 }
-                thread::sleep(STATUS_REFRESH_INTERVAL);
+                // Once populated, poll on the slow steady-state interval. While still
+                // cold (or after an error), retry quickly so a freshly-started daemon
+                // converges to populated in well under a second without ever running
+                // the scan on the request path.
+                let settled = status_state.load(Ordering::Relaxed) == 2;
+                thread::sleep(if settled {
+                    STATUS_REFRESH_INTERVAL
+                } else {
+                    Duration::from_millis(200)
+                });
             }
         })
         .ok();
@@ -783,6 +981,51 @@ mod tests {
                 .unwrap()
                 .len(),
             1
+        );
+    }
+
+    #[test]
+    fn response_is_serialized_once_and_written_bytes_match_timed_buffer() {
+        use std::io::Write;
+        // Mirror handle_connection: to_vec once (timed), then write those exact
+        // bytes. Assert the writer receives exactly the bytes we serialized — no
+        // second full re-serialization, no discarded probe buffer.
+        let envelope = ResponseEnvelope::success_with_stages::<Vec<serde_json::Value>>(
+            Vec::new(),
+            serde_json::json!({"queue_wait_ms": 0.0, "semantic_available": false}),
+        )
+        .expect("envelope");
+        let body = serde_json::to_vec(&envelope).expect("serialize once");
+        let mut cursor = Vec::new();
+        cursor.write_all(&body).expect("write exact bytes");
+        cursor.write_all(b"\n").unwrap();
+        // The written payload must equal the single serialized buffer.
+        assert!(cursor.starts_with(&body));
+        // And it must be valid JSON (one envelope, not two concatenated).
+        let parsed: serde_json::Value = serde_json::from_slice(&body).expect("valid envelope");
+        assert_eq!(parsed["ok"], serde_json::Value::Bool(true));
+        // DaemonMetrics accepts a response-serialization record without panic.
+        let metrics = DaemonMetrics::new(1, 1);
+        metrics.record_response_serialization(Duration::from_micros(66));
+    }
+
+    #[test]
+    fn request_seq_is_unique_across_concurrent_requests() {
+        use std::sync::Arc;
+        use std::thread;
+        let metrics = Arc::new(DaemonMetrics::new(4, 16));
+        let mut handles = Vec::new();
+        for _ in 0..8 {
+            let m = Arc::clone(&metrics);
+            handles.push(thread::spawn(move || m.next_request_seq()));
+        }
+        let mut seqs: Vec<u64> = handles.into_iter().map(|h| h.join().unwrap()).collect();
+        seqs.sort_unstable();
+        seqs.dedup();
+        assert_eq!(
+            seqs.len(),
+            8,
+            "request_seq must be unique per concurrent request"
         );
     }
 }

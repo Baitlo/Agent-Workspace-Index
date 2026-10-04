@@ -6,6 +6,7 @@ pub mod daemon;
 mod data;
 mod diagnostics;
 mod extract;
+pub mod fence;
 pub mod integration;
 pub mod mcp;
 mod mcp_audit;

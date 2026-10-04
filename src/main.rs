@@ -843,7 +843,7 @@ fn main() -> Result<()> {
             Duration::from_millis(snapshot_poll_ms),
         )?,
         Command::Ping { json } => {
-            let response = try_request(&socket, &Request::Ping)?
+            let (response, _stages) = try_request(&socket, &Request::Ping)?
                 .with_context(|| format!("AWI daemon is not running at {}", socket.display()))?;
             if json {
                 print_json(&response)?;
@@ -852,7 +852,7 @@ fn main() -> Result<()> {
             }
         }
         Command::Stop { json } => {
-            let response = try_request(&socket, &Request::Shutdown)?
+            let (response, _stages) = try_request(&socket, &Request::Shutdown)?
                 .with_context(|| format!("AWI daemon is not running at {}", socket.display()))?;
             if json {
                 print_json(&response)?;
@@ -911,7 +911,7 @@ fn execute<T>(
 where
     T: Serialize + DeserializeOwned,
 {
-    if let Some(value) = try_request(socket, request)? {
+    if let Some((value, _stages)) = try_request(socket, request)? {
         return serde_json::from_value(value).context("decode AWI daemon result");
     }
     let mut workspace = WorkspaceIndex::open(index_dir)

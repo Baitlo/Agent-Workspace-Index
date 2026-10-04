@@ -335,6 +335,7 @@ dependencies = [
  "fs4",
  "ignore",
  "json5",
+ "libc",
  "notify",
  "pulldown-cmark",
  "rayon",

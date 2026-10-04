@@ -1085,7 +1085,9 @@ impl Catalog {
             |row| row.get::<_, Option<i64>>(0),
         )?;
         Ok(IndexStatus {
-        status_state: "initial".to_owned(),
+            status_state: "initial".to_owned(),
+            status_error: None,
+            status_sampled_ms: 0,
             shards: Vec::new(),
             completed_generation: self.latest_completed_generation()?,
             running_generations: self.count("generations", "status = 'running'")?,

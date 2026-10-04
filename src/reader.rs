@@ -151,8 +151,23 @@ impl ReaderIndex {
         path_prefix: Option<&str>,
         context_path: Option<&Path>,
     ) -> Result<Vec<SearchHit>> {
+        Ok(self
+            .search_filtered_stages(query, limit, roots, kinds, path_prefix, context_path)?
+            .0)
+    }
+
+    /// Search plus the per-query stage bundle for the audit layer.
+    pub(crate) fn search_filtered_stages(
+        &mut self,
+        query: &str,
+        limit: usize,
+        roots: &[PathBuf],
+        kinds: &[String],
+        path_prefix: Option<&str>,
+        context_path: Option<&Path>,
+    ) -> Result<(Vec<SearchHit>, serde_json::Value)> {
         if !self.collection {
-            return self.shards[0].workspace.search_filtered(
+            return self.shards[0].workspace.search_filtered_stages(
                 query,
                 limit,
                 roots,
@@ -191,7 +206,7 @@ impl ReaderIndex {
                 .iter_mut()
                 .map(|shard| {
                     scope.spawn(move || {
-                        shard.workspace.search_in_scope(
+                        shard.workspace.search_in_scope_stages(
                             query,
                             // Keep the global evidence window independent of requested K.
                             200,
@@ -212,7 +227,17 @@ impl ReaderIndex {
                 })
                 .collect::<Result<Vec<_>>>()
         })?;
-        let mut hits: Vec<_> = batches.into_iter().flatten().collect();
+        // Per-query stages: shard searches run in parallel; the sidecar
+        // diagnostics are per-process and identical across shards, so carry the
+        // first non-trivial bundle.
+        let stages = batches
+            .iter()
+            .find(|(_, stages)| {
+                stages.get("embedding_ms").is_some() || stages.get("retrieval_cache_hit").is_some()
+            })
+            .map(|(_, stages)| stages.clone())
+            .unwrap_or_else(|| serde_json::json!({"semantic_available": false}));
+        let mut hits: Vec<_> = batches.into_iter().flat_map(|(hits, _)| hits).collect();
         hits.sort_by(|a, b| {
             b.score
                 .total_cmp(&a.score)
@@ -243,13 +268,14 @@ impl ReaderIndex {
                 hits[index].score += weight / (61.0 + rank as f32);
             }
         }
-        Ok(crate::workspace::rerank_collection_diversity(
+        let ranked = crate::workspace::rerank_collection_diversity(
             hits.into_iter().map(|hit| (hit, None)).collect(),
             limit,
         )
         .into_iter()
         .map(|(hit, _)| hit)
-        .collect())
+        .collect();
+        Ok((ranked, stages))
     }
 
     pub(crate) fn diagnose_search(
@@ -404,27 +430,115 @@ impl ReaderIndex {
         // Generations and latency distributions are shard-local; never invent
         // a comparable global generation or merge percentiles arithmetically.
         // Freshness aggregates the stalest shard (max age) as the system-level
-        // number, while every shard's own publish timestamp is preserved in
-        // `shard_last_published_ms` for auditability.
+        // number, while every shard's own publish timestamp/generation is preserved
+        // in the per-shard maps. Generation counters across shards are NOT comparable
+        // numbers, so the system generation is the generation OF the stalest shard
+        // (the one whose publication time is oldest), and we name that shard — never
+        // a min/max over the counters.
         let mut shard_last = std::collections::BTreeMap::new();
+        let mut shard_generation = std::collections::BTreeMap::new();
         let mut oldest_age: Option<u64> = None;
+        let mut oldest_shard: Option<String> = None;
+        let mut scan_completed: Option<u64> = None;
         for entry in &result.shards {
             if let Some(ms) = entry.status.freshness.last_published_ms {
                 shard_last.insert(entry.name.clone(), ms);
             }
+            if let Some(published_gen) = entry.status.freshness.published_generation {
+                shard_generation.insert(entry.name.clone(), published_gen);
+            }
+            if let Some(ms) = entry.status.freshness.scan_completed_ms {
+                scan_completed = Some(scan_completed.map_or(ms, |acc| acc.max(ms)));
+            }
             if let Some(age) = entry.status.freshness.age_ms {
-                oldest_age = Some(oldest_age.map_or(age, |acc| acc.max(age)));
+                if oldest_age.map_or(true, |acc| age > acc) {
+                    oldest_age = Some(age);
+                    oldest_shard = Some(entry.name.clone());
+                }
             }
         }
         result.freshness.shard_last_published_ms = shard_last;
+        result.freshness.shard_published_generation = shard_generation.clone();
         result.freshness.age_ms = oldest_age;
         result.freshness.now_ms = result
             .shards
             .first()
             .map(|s| s.status.freshness.now_ms)
             .unwrap_or_default();
-        result.freshness.last_published_ms = oldest_age
-            .map(|oldest_age| result.freshness.now_ms.saturating_sub(oldest_age));
+        result.freshness.last_published_ms =
+            oldest_age.map(|oldest_age| result.freshness.now_ms.saturating_sub(oldest_age));
+        // System generation = the generation of the stalest shard; name the shard so
+        // it is auditable. Fall back to None when no shard published metadata.
+        result.freshness.published_generation = oldest_shard
+            .as_ref()
+            .and_then(|name| shard_generation.get(name).copied());
+        result.freshness.published_generation_shard = oldest_shard;
+        result.freshness.scan_completed_ms = scan_completed;
+        result.freshness.heartbeat_ms = None;
+        // Aggregate the top-level semantic view across shards. The refresher reader
+        // shares the warm serving sidecar Arc, so `runtime_ready` reflects the real
+        // query lane. Counters are summed; latency WINDOWS are NOT merged (percentiles
+        // cannot be added) — per-shard windows live in shards[].status.semantic.metrics,
+        // and the top-level windows stay empty rather than picking one shard as truth.
+        {
+            let mut agg = crate::model::SemanticStatus::default();
+            let mut queries = 0u64;
+            let mut result_cache_hits = 0u64;
+            let mut embedding_cache_hits = 0u64;
+            let mut coalesced = 0u64;
+            let mut failures = 0u64;
+            let mut starts = 0u64;
+            let mut restarts = 0u64;
+            let mut startup_failures = 0u64;
+            let mut snapshot_opened = 0u64;
+            for entry in &result.shards {
+                let s = &entry.status.semantic;
+                agg.enabled |= s.enabled;
+                agg.available |= s.available;
+                if s.runtime_ready && !agg.runtime_ready {
+                    agg.runtime_ready = true;
+                    agg.generation = s.generation;
+                    agg.files = s.files;
+                    agg.chunks = s.chunks;
+                    agg.chunking_version = s.chunking_version;
+                }
+                startup_failures = startup_failures.saturating_add(s.startup_failures);
+                queries = queries.saturating_add(s.metrics.queries);
+                result_cache_hits = result_cache_hits.saturating_add(s.metrics.result_cache_hits);
+                embedding_cache_hits =
+                    embedding_cache_hits.saturating_add(s.metrics.embedding_cache_hits);
+                coalesced = coalesced.saturating_add(s.metrics.coalesced_queries);
+                failures = failures.saturating_add(s.metrics.failures);
+                starts = starts.saturating_add(s.metrics.sidecar_starts);
+                restarts = restarts.saturating_add(s.metrics.sidecar_restarts);
+                startup_failures = startup_failures.saturating_add(s.metrics.startup_failures);
+                snapshot_opened = snapshot_opened.saturating_add(s.metrics.snapshot_opened);
+            }
+            agg.effective_mode = if agg.runtime_ready {
+                "semantic".to_owned()
+            } else {
+                "lexical_only".to_owned()
+            };
+            agg.fallback_reason = if agg.runtime_ready {
+                None
+            } else {
+                result
+                    .shards
+                    .iter()
+                    .find_map(|e| e.status.semantic.fallback_reason.clone())
+            };
+            agg.startup_failures = startup_failures;
+            agg.metrics.queries = queries;
+            agg.metrics.result_cache_hits = result_cache_hits;
+            agg.metrics.embedding_cache_hits = embedding_cache_hits;
+            agg.metrics.coalesced_queries = coalesced;
+            agg.metrics.failures = failures;
+            agg.metrics.sidecar_starts = starts;
+            agg.metrics.sidecar_restarts = restarts;
+            agg.metrics.startup_failures = startup_failures;
+            agg.metrics.snapshot_opened = snapshot_opened;
+            result.semantic = agg;
+        }
         Ok(result)
     }
 }

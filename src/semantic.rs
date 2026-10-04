@@ -5,7 +5,7 @@ use std::io::{BufRead, BufReader, Write};
 use std::os::unix::net::UnixStream;
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::{Duration, Instant};
@@ -103,10 +103,36 @@ impl SemanticConfig {
     }
 }
 
+/// Normalize a sidecar stderr line for dedupe: collapse digit runs to `#` so
+/// lines like `partition 3 is empty, skipping` and `partition 7 is empty,
+/// skipping` share one dedupe key while distinct messages stay distinct.
+fn normalize_sidecar_line(line: &str) -> String {
+    let mut out = String::with_capacity(line.len());
+    let mut last_was_digit = false;
+    for ch in line.chars() {
+        if ch.is_ascii_digit() {
+            if !last_was_digit {
+                out.push('#');
+            }
+            last_was_digit = true;
+        } else {
+            out.push(ch);
+            last_was_digit = false;
+        }
+    }
+    out
+}
+
 pub(crate) struct SemanticIndex {
     index_dir: PathBuf,
     config: Option<SemanticConfig>,
     runtime: Arc<Mutex<Option<Arc<SemanticRuntime>>>>,
+    /// Lock-free mirror of whether `runtime` currently holds a live sidecar.
+    /// `status()` reads this instead of taking `runtime`'s mutex, which query
+    /// workers hold for the whole (up to 60s) sidecar start; taking that mutex on
+    /// the status path is what wedged the daemon. Updated by `request()` as the
+    /// runtime starts/stops.
+    runtime_ready: Arc<AtomicBool>,
     startup: Arc<StartupGuard>,
     metrics: Arc<SemanticMetricsState>,
 }
@@ -117,6 +143,7 @@ impl SemanticIndex {
             index_dir: index_dir.to_owned(),
             config: SemanticConfig::from_env()?,
             runtime: Arc::new(Mutex::new(None)),
+            runtime_ready: Arc::new(AtomicBool::new(false)),
             startup: Arc::new(StartupGuard::default()),
             metrics: Arc::new(SemanticMetricsState::default()),
         })
@@ -128,6 +155,7 @@ impl SemanticIndex {
             index_dir: index_dir.to_owned(),
             config: None,
             runtime: Arc::new(Mutex::new(None)),
+            runtime_ready: Arc::new(AtomicBool::new(false)),
             startup: Arc::new(StartupGuard::default()),
             metrics: Arc::new(SemanticMetricsState::default()),
         }
@@ -138,6 +166,7 @@ impl SemanticIndex {
             index_dir: index_dir.to_owned(),
             config: self.config.clone(),
             runtime: Arc::clone(&self.runtime),
+            runtime_ready: Arc::clone(&self.runtime_ready),
             startup: Arc::clone(&self.startup),
             metrics: Arc::clone(&self.metrics),
         }
@@ -162,7 +191,8 @@ impl SemanticIndex {
         let generation = manifest["generation"]
             .as_i64()
             .context("semantic manifest has no generation")?;
-        self.search("warm semantic retrieval", generation, &[], &[], &[])?;
+        self.search("warm semantic retrieval", generation, &[], &[], &[])
+            .map(|_candidates| ())?;
         Ok(())
     }
 
@@ -282,12 +312,12 @@ impl SemanticIndex {
         roots: &[PathBuf],
         kinds: &[String],
         path_prefixes: &[String],
-    ) -> Result<Vec<SemanticCandidate>> {
+    ) -> Result<(Vec<SemanticCandidate>, Value)> {
         let Some(config) = &self.config else {
-            return Ok(Vec::new());
+            return Ok((Vec::new(), Value::Null));
         };
         if !self.manifest().is_file() || !self.database().is_dir() {
-            return Ok(Vec::new());
+            return Ok((Vec::new(), Value::Null));
         }
         let started_at = Instant::now();
         let result = self.request(json!({
@@ -303,10 +333,16 @@ impl SemanticIndex {
         }));
         match result {
             Ok(result) => {
-                self.metrics
-                    .record(&result["diagnostics"], started_at.elapsed());
-                serde_json::from_value(result["candidates"].clone())
-                    .context("decode semantic candidates")
+                // The diagnostics dict is the per-query stage contract handed to
+                // the MCP/audit layer: the caller (workspace search_filtered)
+                // owns whether/how it reaches the audit record; this crate only
+                // guarantees a real, non-empty diagnostics Value per query.
+                let diagnostics = result["diagnostics"].clone();
+                self.metrics.record(&diagnostics, started_at.elapsed());
+                let candidates: Vec<SemanticCandidate> =
+                    serde_json::from_value(result["candidates"].clone())
+                        .context("decode semantic candidates")?;
+                Ok((candidates, diagnostics))
             }
             Err(error) => {
                 self.metrics.record_failure(started_at.elapsed());
@@ -330,6 +366,12 @@ impl SemanticIndex {
                 ..SemanticStatus::default()
             };
         }
+        // Lock-free observation of sidecar readiness. We deliberately do NOT take
+        // `self.runtime` here: query workers hold that mutex for the entire (up to
+        // 60s) sidecar start, and a blocked status call is what wedged the accept
+        // loop. `runtime_ready` is maintained by `request()`. Only bounded manifest
+        // reads happen here; no sidecar start, no synchronous query.
+        let ready = self.runtime_ready.load(Ordering::Relaxed);
         match fs::read(self.manifest())
             .context("read semantic manifest")
             .and_then(|bytes| {
@@ -338,28 +380,14 @@ impl SemanticIndex {
             Ok(manifest) => SemanticStatus {
                 enabled,
                 available: true,
-                runtime_ready: self
-                    .runtime
-                    .lock()
-                    .expect("semantic runtime poisoned")
-                    .is_some(),
+                runtime_ready: ready,
                 startup_failures: self.startup.failures() as u64,
-                effective_mode: if self
-                    .runtime
-                    .lock()
-                    .expect("semantic runtime poisoned")
-                    .is_some()
-                {
+                effective_mode: if ready {
                     "semantic".to_owned()
                 } else {
                     "lexical_only".to_owned()
                 },
-                fallback_reason: if self
-                    .runtime
-                    .lock()
-                    .expect("semantic runtime poisoned")
-                    .is_some()
-                {
+                fallback_reason: if ready {
                     None
                 } else {
                     self.startup.fallback_reason()
@@ -420,6 +448,7 @@ impl SemanticIndex {
                             .record_ms(started.elapsed().as_secs_f64() * 1000.0);
                         self.metrics.sidecar_starts.fetch_add(1, Ordering::Relaxed);
                         *guard = Some(Arc::new(runtime));
+                        self.runtime_ready.store(true, Ordering::Relaxed);
                     }
                     Err(error) => {
                         self.startup.open_cooldown(&error);
@@ -454,6 +483,7 @@ impl SemanticIndex {
                 .is_some_and(|current| Arc::ptr_eq(current, &runtime))
             {
                 guard.take();
+                self.runtime_ready.store(false, Ordering::Relaxed);
                 runtime.stop();
             }
         }
@@ -477,6 +507,10 @@ struct SemanticMetricsState {
     serialization: LatencyWindow,
     vector_search: LatencyWindow,
     total: LatencyWindow,
+    /// Number of queries that actually performed a LanceDB connect + open_table
+    /// (as opposed to reusing a cached handle). The snapshot_open window only
+    /// contains these real open events.
+    snapshot_opened: AtomicU64,
 }
 
 impl SemanticMetricsState {
@@ -494,12 +528,23 @@ impl SemanticMetricsState {
         if diagnostics["coalesced"].as_bool().unwrap_or(false) {
             self.coalesced_queries.fetch_add(1, Ordering::Relaxed);
         }
+        // Sidecar pipeline queue wait: socket accept -> worker start.
         self.queue_wait
             .record_ms(diagnostics["queue_wait_ms"].as_f64().unwrap_or_default());
         self.embedding
             .record_ms(diagnostics["embedding_ms"].as_f64().unwrap_or_default());
-        self.snapshot_open
-            .record_ms(diagnostics["snapshot_open_ms"].as_f64().unwrap_or_default());
+        // The semantic snapshot-open window records ONLY real
+        // connect + open_table events. A cached-handle query carries
+        // snapshot_opened=false and a null semantic_snapshot_open_ms; it must
+        // not push a zero sample or re-report the previous open cost.
+        if diagnostics["snapshot_opened"].as_bool().unwrap_or(false) {
+            self.snapshot_open.record_ms(
+                diagnostics["semantic_snapshot_open_ms"]
+                    .as_f64()
+                    .unwrap_or_default(),
+            );
+            self.snapshot_opened.fetch_add(1, Ordering::Relaxed);
+        }
         self.serialization
             .record_ms(diagnostics["serialization_ms"].as_f64().unwrap_or_default());
         self.vector_search
@@ -535,6 +580,7 @@ impl SemanticMetricsState {
             serialization: self.serialization.snapshot(),
             vector_search: self.vector_search.snapshot(),
             total: self.total.snapshot(),
+            snapshot_opened: self.snapshot_opened.load(Ordering::Relaxed),
         }
     }
 }
@@ -590,6 +636,7 @@ struct SemanticRuntime {
 
 impl SemanticRuntime {
     fn start(config: &SemanticConfig) -> Result<Self> {
+        let started = Instant::now();
         let script = materialize_sidecar()?;
         let socket = env::temp_dir().join(format!(
             "awi-semantic-{}-{}.sock",
@@ -628,16 +675,46 @@ impl SemanticRuntime {
             .arg(&socket)
             .stdin(Stdio::null())
             .stdout(Stdio::null())
-            .stderr(Stdio::inherit());
+            .stderr(Stdio::piped());
         if let Some(checksum) = &config.model_sha256 {
             command.arg("--model-sha256").arg(checksum);
         }
-        let child = command.spawn().with_context(|| {
+        let mut child = command.spawn().with_context(|| {
             format!(
                 "start semantic sidecar with Python {}",
                 config.python.display()
             )
         })?;
+        // Empty-partition KMeans/cluster warnings from the LanceDB Rust core
+        // repeat on every IVF build (thousands of lines in producer logs).
+        // lancedb 0.39 does not honor RUST_LOG for the compiled tracing
+        // layer, so dedupe sidecar stderr here: the first occurrence of each
+        // normalized line still reaches the daemon log as a valid diagnostic,
+        // repeats are counted and summarized once when the sidecar exits.
+        if let Some(stderr) = child.stderr.take() {
+            std::thread::Builder::new()
+                .name("awi-semantic-stderr".into())
+                .spawn(move || {
+                    use std::io::BufRead;
+                    let reader = std::io::BufReader::new(stderr);
+                    let mut seen: std::collections::HashMap<String, u64> =
+                        std::collections::HashMap::new();
+                    for line in reader.lines().map_while(Result::ok) {
+                        let key = normalize_sidecar_line(&line);
+                        let entry = seen.entry(key.clone()).or_insert(0);
+                        if *entry == 0 {
+                            eprintln!("{line}");
+                        }
+                        *entry += 1;
+                    }
+                    for (line, count) in seen {
+                        if count > 1 {
+                            eprintln!("awi-semantic: suppressed {count} repeats of: {line}");
+                        }
+                    }
+                })
+                .ok();
+        }
         let runtime = Self {
             child: Mutex::new(child),
             socket,
@@ -657,6 +734,15 @@ impl SemanticRuntime {
                     .request(&json!({"op": "ping"}), config.query_timeout)
                     .context("ping semantic sidecar during startup")?;
                 if ready["ready"].as_bool().unwrap_or(false) {
+                    eprintln!(
+                        "awi-semantic: sidecar ready pid={} startup_ms={:.2}",
+                        runtime
+                            .child
+                            .lock()
+                            .expect("semantic child mutex poisoned")
+                            .id(),
+                        started.elapsed().as_secs_f64() * 1_000.0
+                    );
                     return Ok(runtime);
                 }
             }
@@ -976,7 +1062,13 @@ mod tests {
         let fixture = tempfile::tempdir().unwrap();
         let index = SemanticIndex::disabled(fixture.path());
         assert!(!index.enabled());
-        assert!(index.search("query", 1, &[], &[], &[]).unwrap().is_empty());
+        assert!(
+            index
+                .search("query", 1, &[], &[], &[])
+                .unwrap()
+                .0
+                .is_empty()
+        );
     }
 
     #[test]
@@ -992,6 +1084,22 @@ mod tests {
                 "/workspace/empty.rs",
                 "/workspace/image.png"
             ]
+        );
+    }
+
+    #[test]
+    fn sidecar_stderr_dedupe_normalizes_partition_numbers() {
+        assert_eq!(
+            normalize_sidecar_line("partition 3 is empty, skipping"),
+            normalize_sidecar_line("partition 7 is empty, skipping")
+        );
+        assert_ne!(
+            normalize_sidecar_line("partition 3 is empty, skipping"),
+            normalize_sidecar_line("index build failed")
+        );
+        assert_eq!(
+            normalize_sidecar_line("12 of 20 clusters are empty: 12"),
+            normalize_sidecar_line("11 of 20 clusters are empty: 11")
         );
     }
 }

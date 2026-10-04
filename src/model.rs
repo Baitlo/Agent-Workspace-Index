@@ -495,6 +495,13 @@ pub struct IndexStatus {
     /// so an all-zero response never masquerades as a healthy index.
     #[serde(default)]
     pub status_state: String,
+    /// Machine-readable reason when `status_state == "error"`; absent otherwise.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub status_error: Option<String>,
+    /// Wall-clock (unix ms) when the background refresher last computed this body,
+    /// so a client can tell a fresh populated snapshot from a stale cached one.
+    #[serde(default)]
+    pub status_sampled_ms: u64,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub shards: Vec<ShardStatus>,
     pub completed_generation: Option<i64>,
@@ -597,6 +604,12 @@ pub struct SemanticMetrics {
     pub serialization: LatencySummary,
     pub vector_search: LatencySummary,
     pub total: LatencySummary,
+    /// Real LanceDB snapshot-open events (connect + open_table) counted across
+    /// the process. The `snapshot_open` window holds exactly these samples;
+    /// cached-handle queries do not contribute. This is the semantic sub-stage;
+    /// the reader-level snapshot open stage is reported by the daemon layer.
+    #[serde(default)]
+    pub snapshot_opened: u64,
 }
 
 /// Structured index freshness.
@@ -615,9 +628,36 @@ pub struct FreshnessStatus {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub age_ms: Option<u64>,
     /// Per-shard last-published timestamps, so the fast/nfs aggregation is
-    /// auditable rather than a single opaque number.
+    /// auditable rather than a single opaque number. Source: the authoritative
+    /// `created_at_ms` recorded in each shard's published `manifest.json` at
+    /// publish time — never the index dir or semantic-manifest mtime.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub shard_last_published_ms: std::collections::BTreeMap<String, u64>,
+    /// Per-shard authoritative publication generation being served, keyed by shard
+    /// name. Generations from different shards are NOT comparable numbers, so this
+    /// map is the only auditable per-shard generation; the system-level field below
+    /// is derived from publication TIME, not by min/max-ing generation counters.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub shard_published_generation: std::collections::BTreeMap<String, i64>,
+    /// System-level publication generation: the generation of the shard whose
+    /// publication time is the OLDEST currently being served (the system is only
+    /// as fresh as its stalest publish). `published_generation_shard` names it.
+    /// Null when no shard publication metadata is available.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub published_generation: Option<i64>,
+    /// Which shard `published_generation` was taken from.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub published_generation_shard: Option<String>,
+    /// Producer's last completed scan time (`scans.last_completed_ms`) from the
+    /// bundled producer-state.sqlite3. This is a SCAN completion timestamp, NOT a
+    /// liveness heartbeat; it cannot by itself prove the producer is alive.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub scan_completed_ms: Option<u64>,
+    /// Real producer liveness heartbeat from the producer's health endpoint/JSON,
+    /// when one is published. Null (default) when absent — never synthesized from
+    /// scan timestamps.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub heartbeat_ms: Option<u64>,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -644,4 +684,14 @@ pub struct ServingStatus {
     pub active: u64,
     pub queued: u64,
     pub queue_wait: LatencySummary,
+    /// Real reader snapshot-open events (worker startup + rotation). Warm
+    /// reused readers contribute no samples; this comes from the shared worker
+    /// metrics, never from a fresh ad-hoc ReaderIndex.
+    #[serde(default)]
+    pub reader_snapshot_open: LatencySummary,
+    /// Real on-wire response serialization cost (the single `serde_json::to_vec`
+    /// whose bytes are written to the socket). Recorded post-write to the shared
+    /// worker metrics; aggregate, not per-query.
+    #[serde(default)]
+    pub response_serialization: LatencySummary,
 }

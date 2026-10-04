@@ -201,23 +201,43 @@ impl WorkspaceIndex {
         &self.index_dir
     }
 
-    /// Most recent publish/materialization time for this shard, in unix ms.
-    /// Prefers the semantic manifest mtime; falls back to the index directory
-    /// mtime (which the writer bumps on every completed generation).
-    fn published_mtime_ms(&self, now_ms: u64) -> Option<u64> {
-        let candidates = [
-            self.index_dir.join("semantic-manifest.json"),
-            self.index_dir.clone(),
-        ];
-        for path in candidates {
-            if let Ok(metadata) = fs::metadata(&path)
-                && let Ok(modified) = metadata.modified()
-                && let Ok(elapsed) = modified.elapsed()
-            {
-                return Some(now_ms.saturating_sub(elapsed.as_millis() as u64));
-            }
-        }
-        None
+    /// Authoritative publication metadata for this shard, read from the snapshot
+    /// `manifest.json` the producer wrote at publish time. Returns
+    /// `(created_at_ms, generation)`.
+    ///
+    /// This is the ONLY source for publication time/generation. We deliberately do
+    /// NOT use the index directory mtime or the semantic-manifest mtime: those move
+    /// for local reasons (materialization, sidecar touch) and would masquerade as a
+    /// fresh publish. Source-file mtime is kept separately for staleness detection.
+    fn publication_manifest(&self) -> Option<(u64, i64)> {
+        let text = fs::read(self.index_dir.join("manifest.json")).ok()?;
+        let value = serde_json::from_slice::<serde_json::Value>(&text).ok()?;
+        let created = value.get("created_at_ms")?.as_u64()?;
+        let generation = value
+            .get("generation")
+            .and_then(|g| g.as_i64())
+            .unwrap_or(-1);
+        Some((created, generation))
+    }
+
+    /// Producer's last completed scan timestamp (`scans.last_completed_ms`) from the
+    /// bundled producer-state.sqlite3. Read-only best-effort. This is a SCAN time,
+    /// not a liveness heartbeat.
+    fn scan_completed_ms(&self) -> Option<u64> {
+        let path = self.index_dir.join("producer-state.sqlite3");
+        let db = rusqlite::Connection::open_with_flags(
+            &path,
+            rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY,
+        )
+        .ok()?;
+        let ms: i64 = db
+            .query_row(
+                "SELECT COALESCE(MAX(last_completed_ms), 0) FROM scans",
+                [],
+                |row| row.get(0),
+            )
+            .ok()?;
+        u64::try_from(ms).ok()
     }
 
     pub fn index_root(
@@ -555,7 +575,23 @@ impl WorkspaceIndex {
         path_prefix: Option<&str>,
         context_path: Option<&Path>,
     ) -> Result<Vec<SearchHit>> {
-        self.search_in_scope(query, limit, roots, kinds, path_prefix, context_path, false)
+        Ok(self
+            .search_filtered_stages(query, limit, roots, kinds, path_prefix, context_path)?
+            .0)
+    }
+
+    /// Search plus the per-query stage bundle (sidecar sub-stages). The daemon
+    /// attaches this to the response envelope for the audit layer.
+    pub fn search_filtered_stages(
+        &self,
+        query: &str,
+        limit: usize,
+        roots: &[PathBuf],
+        kinds: &[String],
+        path_prefix: Option<&str>,
+        context_path: Option<&Path>,
+    ) -> Result<(Vec<SearchHit>, serde_json::Value)> {
+        self.search_in_scope_stages(query, limit, roots, kinds, path_prefix, context_path, false)
     }
 
     pub(crate) fn set_visibility(&mut self, visibility: &crate::collection::Visibility) {
@@ -593,7 +629,7 @@ impl WorkspaceIndex {
     /// A collection validates scopes against the union before dispatching to
     /// individual catalogs; applicable memory/instructions may live elsewhere.
     #[allow(clippy::too_many_arguments)]
-    pub(crate) fn search_in_scope(
+    pub(crate) fn search_in_scope_stages(
         &self,
         query: &str,
         limit: usize,
@@ -602,7 +638,7 @@ impl WorkspaceIndex {
         path_prefix: Option<&str>,
         context_path: Option<&Path>,
         collection_validated: bool,
-    ) -> Result<Vec<SearchHit>> {
+    ) -> Result<(Vec<SearchHit>, serde_json::Value)> {
         if query.trim().is_empty() {
             anyhow::bail!("search query must not be empty");
         }
@@ -705,7 +741,9 @@ impl WorkspaceIndex {
                 preview: Duration::ZERO,
                 semantic_fallback: false,
             });
-            return Ok(output);
+            // Retrieval cache hit: no sidecar call happened, so no per-stage
+            // sub-measurements are fabricable. Report the cache flag only.
+            return Ok((output, serde_json::json!({"retrieval_cache_hit": true})));
         }
         let semantic_index = &self.semantic;
         let semantic_path_prefixes = match path_prefix {
@@ -729,13 +767,13 @@ impl WorkspaceIndex {
                 .map(|generation| {
                     scope.spawn(move || {
                         let started_at = Instant::now();
-                        let result = semantic_index.search(
-                            query,
-                            generation,
-                            semantic_scopes,
-                            kinds,
-                            semantic_prefixes,
-                        );
+                        // search returns (candidates, diagnostics). The diagnostics
+                        // Value is the per-query stage contract for the audit layer;
+                        // it is threaded out so the daemon can attach it to the
+                        // response envelope stages.
+                        let result = semantic_index
+                            .search(query, generation, semantic_scopes, kinds, semantic_prefixes)
+                            .map(|(candidates, diagnostics)| (candidates, diagnostics));
                         (result, started_at.elapsed())
                     })
                 });
@@ -793,10 +831,12 @@ impl WorkspaceIndex {
         let fusion_started_at = Instant::now();
         let mut semantic_duration = None;
         let mut semantic_fallback = false;
+        let mut semantic_diagnostics: Option<serde_json::Value> = None;
         if let Some(semantic) = semantic {
             semantic_duration = Some(semantic.1);
             match semantic {
-                (Ok(semantic), _) => {
+                (Ok((semantic, diagnostics)), _) => {
+                    semantic_diagnostics = Some(diagnostics);
                     candidates = merge_semantic_candidates(
                         candidates,
                         semantic,
@@ -1044,7 +1084,18 @@ impl WorkspaceIndex {
             preview: preview_duration,
             semantic_fallback,
         });
-        Ok(output)
+        // Per-query stage bundle: the sidecar sub-stages (embedding /
+        // semantic_snapshot_open / sidecar serialization) when the semantic index
+        // ran. queue_wait and reader_snapshot_open are layered on by the daemon
+        // worker; final response serialization by the MCP layer.
+        let stages = match semantic_diagnostics {
+            Some(diagnostics) => diagnostics,
+            None => serde_json::json!({
+                "semantic_available": false,
+                "semantic_fallback": semantic_fallback,
+            }),
+        };
+        Ok((output, stages))
     }
 
     pub fn inspect(&self, path: impl AsRef<Path>) -> Result<InspectResult> {
@@ -1161,15 +1212,24 @@ impl WorkspaceIndex {
             .as_millis()
             .try_into()
             .unwrap_or(u64::MAX);
-        // Freshness: how long ago did the currently-served snapshot materialize.
-        // The semantic manifest mtime is the most precise per-index publish
-        // timestamp we have; collection readers aggregate the stalest shard.
-        let published_ms = self.published_mtime_ms(now_ms);
+        // Freshness: authoritative publication time/generation come from this shard's
+        // published `manifest.json` (created_at_ms / generation written by the
+        // producer). Never infer publish time from the index dir or semantic-manifest
+        // mtime. For a collection, the reader aggregates per-shard values below.
+        let (published_ms, published_generation) = match self.publication_manifest() {
+            Some((ms, generation)) => (Some(ms), Some(generation)),
+            None => (None, status.completed_generation),
+        };
         status.freshness = crate::model::FreshnessStatus {
             now_ms,
             last_published_ms: published_ms,
             age_ms: published_ms.map(|ms| now_ms.saturating_sub(ms)),
             shard_last_published_ms: Default::default(),
+            shard_published_generation: Default::default(),
+            published_generation,
+            published_generation_shard: Default::default(),
+            scan_completed_ms: self.scan_completed_ms(),
+            heartbeat_ms: None,
         };
         for (path, indexed_mtime_ns) in self.catalog.agent_memory_file_states()? {
             let Ok(metadata) = fs::metadata(&path) else {

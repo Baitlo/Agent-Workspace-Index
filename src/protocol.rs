@@ -71,6 +71,11 @@ pub struct ResponseEnvelope {
     pub result: Option<Value>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub error: Option<ApiError>,
+    /// Per-request stage diagnostics (queue wait, reader snapshot open, sidecar
+    /// sub-stages). Backward compatible: older clients ignore the field and
+    /// older servers omit it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub stages: Option<Value>,
 }
 
 impl ResponseEnvelope {
@@ -80,6 +85,17 @@ impl ResponseEnvelope {
             ok: true,
             result: Some(serde_json::to_value(value)?),
             error: None,
+            stages: None,
+        })
+    }
+
+    pub fn success_with_stages<T: Serialize>(value: T, stages: Value) -> serde_json::Result<Self> {
+        Ok(Self {
+            protocol_version: PROTOCOL_VERSION,
+            ok: true,
+            result: Some(serde_json::to_value(value)?),
+            error: None,
+            stages: Some(stages),
         })
     }
 
@@ -92,10 +108,12 @@ impl ResponseEnvelope {
                 code: code.into(),
                 message: message.into(),
             }),
+            stages: None,
         }
     }
 
-    pub fn into_result(self) -> anyhow::Result<Value> {
+    /// Split into the payload plus optional per-request stage diagnostics.
+    pub fn into_parts(self) -> anyhow::Result<(Value, Option<Value>)> {
         if self.protocol_version != PROTOCOL_VERSION {
             anyhow::bail!(
                 "AWI protocol mismatch: client={}, server={}",
@@ -104,7 +122,7 @@ impl ResponseEnvelope {
             );
         }
         if self.ok {
-            Ok(self.result.unwrap_or(Value::Null))
+            Ok((self.result.unwrap_or(Value::Null), self.stages))
         } else {
             let error = self.error.unwrap_or(ApiError {
                 code: "unknown".to_owned(),

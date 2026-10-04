@@ -356,6 +356,10 @@ pub(crate) fn verify_snapshot(path: &Path) -> Result<SnapshotManifest> {
 }
 
 fn publish_pointer(publish_dir: &Path, directory: &str, manifest: &SnapshotManifest) -> Result<()> {
+    // Publication commit guard: take the SAME caslock the supervisor uses to
+    // cas_bump the fence, re-check the generation under it, and hold it through
+    // the atomic current.json rename. Closes check->flip TOCTOU.
+    let _fence_guard = crate::fence::commit_guard_from_env()?;
     let manifest_bytes = serde_json::to_vec_pretty(manifest)?;
     let mut manifest_bytes = manifest_bytes;
     manifest_bytes.push(b'\n');

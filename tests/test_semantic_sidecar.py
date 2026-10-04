@@ -1,5 +1,6 @@
 import concurrent.futures
 import importlib.util
+import json
 import tempfile
 import threading
 import time
@@ -77,7 +78,9 @@ class QueryConcurrencyTest(unittest.TestCase):
             "failures": 0,
             "queue_wait_ms": 0.0,
             "embedding_ms": 0.0,
+            "semantic_snapshot_open_ms": 0.0,
             "vector_ms": 0.0,
+            "serialization_ms": 0.0,
             "total_ms": 0.0,
         }
         calls = 0
@@ -311,6 +314,243 @@ SELECT * FROM second;
         chunks = [{"value": index} for index in range(12)]
         selected = SIDECAR.representative_chunks(chunks, 4)
         self.assertEqual([chunk["value"] for chunk in selected], [0, 4, 7, 11])
+
+
+class OpenTableSemanticsTest(unittest.TestCase):
+    def test_real_open_is_reported_only_on_cache_miss(self) -> None:
+        opens: list[object] = []
+
+        class Database:
+            def list_tables(self) -> object:
+                class Tables:
+                    tables = ["chunks"]
+
+                return Tables()
+
+            def open_table(self, _name: str) -> object:
+                opens.append("open_table")
+                return object()
+
+        class LanceDb:
+            def connect(self, _path: Path) -> object:
+                opens.append("connect")
+                return Database()
+
+        sidecar = SIDECAR.Sidecar.__new__(SIDECAR.Sidecar)
+        sidecar.lancedb = LanceDb()
+        sidecar.tables = {}
+        sidecar.tables_lock = threading.Lock()
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory)
+            first, opened_first, ms_first = sidecar.open_table(path)
+            second, opened_second, ms_second = sidecar.open_table(path)
+        self.assertEqual(opens, ["connect", "open_table"])
+        self.assertTrue(opened_first)
+        self.assertIsNotNone(ms_first)
+        self.assertGreaterEqual(ms_first, 0.0)
+        self.assertFalse(opened_second)
+        self.assertIsNone(ms_second)
+        self.assertIs(first, second)
+
+
+class _FakeEmbedder:
+    def embed(self, _text: str) -> tuple[list[float], dict[str, object]]:
+        return [0.1, 0.2, 0.3], {
+            "embedding_cache_hit": False,
+            "coalesced": False,
+            "embedding_queue_ms": 1.5,
+            "embedding_ms": 2.5,
+        }
+
+    def clear(self) -> None:
+        pass
+
+
+class _RecordingSearch:
+    def __init__(self) -> None:
+        self.calls: list[tuple[object, ...]] = []
+
+    def metric(self, value: str) -> object:
+        self.calls.append(("metric", value))
+        return self
+
+    def where(self, clause: str, prefilter: bool) -> object:
+        self.calls.append(("where", clause, prefilter))
+        return self
+
+    def nprobes(self, value: int) -> object:
+        self.calls.append(("nprobes", value))
+        return self
+
+    def limit(self, value: int) -> object:
+        self.calls.append(("limit", value))
+        return self
+
+    def to_list(self) -> list[dict[str, object]]:
+        return [
+            {"file_id": 1, "path": "a.rs", "generation": 3, "_distance": 0.2}
+        ]
+
+
+class _FakeTable:
+    def __init__(self, search: _RecordingSearch) -> None:
+        self.search_obj = search
+
+    def search(self, vector: list[float], vector_column_name: str = "vector") -> _RecordingSearch:
+        self.seen_vector = vector
+        self.seen_column = vector_column_name
+        return self.search_obj
+
+
+class _FakeLanceDb:
+    def __init__(self, table: object) -> None:
+        self.table = table
+
+    def connect(self, _path: Path) -> object:
+        database = self
+
+        class _Db:
+            def list_tables(self) -> object:
+                class Tables:
+                    tables = ["chunks"]
+
+                return Tables()
+
+            def open_table(self, _name: str) -> object:
+                return database.table
+
+        return _Db()
+
+
+class StageDiagnosticsTest(unittest.TestCase):
+    def _build(self, index_type: str, partitions: int) -> tuple[object, _RecordingSearch]:
+        search = _RecordingSearch()
+        sidecar = SIDECAR.Sidecar.__new__(SIDECAR.Sidecar)
+        sidecar.lancedb = _FakeLanceDb(_FakeTable(search))
+        sidecar.tables = {}
+        sidecar.tables_lock = threading.Lock()
+        sidecar.query_embedder = _FakeEmbedder()
+        sidecar.model_sha256 = None
+        sidecar.max_chunks_per_file = 4
+        sidecar.max_sql_chunks_per_file = 8
+        return sidecar, search
+
+    def _write_manifest(self, directory: str, index_type: str, partitions: int) -> Path:
+        manifest = Path(directory) / "semantic.json"
+        manifest.write_text(
+            json.dumps(
+                {
+                    "generation": 3,
+                    "vector_index_type": index_type,
+                    "vector_index_partitions": partitions,
+                }
+            ),
+            encoding="utf-8",
+        )
+        return manifest
+
+    def test_nprobes_only_applied_on_sealed_ivf(self) -> None:
+        cases = [
+            ("IVF_FLAT", 16, True),
+            ("FLAT", 0, False),
+            ("IVF_FLAT", 0, False),
+        ]
+        for index_type, partitions, expect in cases:
+            sidecar, search = self._build(index_type, partitions)
+            with tempfile.TemporaryDirectory() as directory:
+                manifest = self._write_manifest(directory, index_type, partitions)
+                candidates, diagnostics = sidecar.query_uncached(
+                    Path(directory), manifest, 3, "query", 5, [], ["text"], []
+                )
+            self.assertEqual(len(candidates), 1)
+            self.assertEqual(diagnostics["index_type"], index_type)
+            self.assertEqual(diagnostics["nprobes_applied"], expect)
+            if expect:
+                self.assertIn(("nprobes", partitions), search.calls)
+            else:
+                self.assertNotIn(("nprobes", partitions), search.calls)
+
+    def test_snapshot_open_only_reports_real_open_events(self) -> None:
+        sidecar, _search = self._build("IVF_FLAT", 16)
+        with tempfile.TemporaryDirectory() as directory:
+            manifest = self._write_manifest(directory, "IVF_FLAT", 16)
+            _first, first_diag = sidecar.query_uncached(
+                Path(directory), manifest, 3, "query", 5, [], ["text"], []
+            )
+            _second, second_diag = sidecar.query_uncached(
+                Path(directory), manifest, 3, "other", 5, [], ["text"], []
+            )
+        self.assertTrue(first_diag["snapshot_opened"])
+        self.assertIsNotNone(first_diag["semantic_snapshot_open_ms"])
+        self.assertGreaterEqual(first_diag["semantic_snapshot_open_ms"], 0.0)
+        self.assertFalse(second_diag["snapshot_opened"])
+        self.assertIsNone(second_diag["semantic_snapshot_open_ms"])
+
+
+class _IndexCaptureTable:
+    def __init__(self, pairs: list[tuple[int, int]]) -> None:
+        self.pairs = pairs
+        self.created: dict[str, object] = {}
+
+    def search(self, *args: object, **kwargs: object) -> object:
+        return self
+
+    def select(self, _columns: list[str]) -> object:
+        return self
+
+    def to_arrow(self) -> dict[str, object]:
+        class Column:
+            def __init__(self, values: list[int]) -> None:
+                self.values = values
+
+            def to_pylist(self) -> list[int]:
+                return self.values
+
+        return {
+            "file_id": Column([pair[0] for pair in self.pairs]),
+            "generation": Column([pair[1] for pair in self.pairs]),
+        }
+
+    def count_rows(self) -> int:
+        return len(self.pairs)
+
+    def delete(self, _predicate: str) -> None:
+        pass
+
+    def optimize(self, *args: object, **kwargs: object) -> None:
+        pass
+
+    def create_index(self, *args: object, **kwargs: object) -> None:
+        self.created["args"] = args
+        self.created["kwargs"] = kwargs
+
+
+class IvfMigrationTest(unittest.TestCase):
+    def test_seal_migrates_to_unified_create_index_api(self) -> None:
+        pairs = [(index, 1) for index in range(300)]
+        table = _IndexCaptureTable(pairs)
+        sidecar = SIDECAR.Sidecar.__new__(SIDECAR.Sidecar)
+        sidecar.lancedb = _FakeLanceDb(table)
+        sidecar.tables = {}
+        sidecar.tables_lock = threading.Lock()
+        sidecar.model_sha256 = "test-sha"
+        sidecar.model_path = "/tmp/test-model"
+        sidecar.query_embedder = _FakeEmbedder()
+        sidecar.query_lock = threading.Lock()
+        sidecar.query_results = OrderedDict()
+        sidecar.query_inflight = {}
+        with tempfile.TemporaryDirectory() as directory:
+            sidecar.seal(
+                Path(directory),
+                Path(directory) / "semantic.json",
+                1,
+                [list(pair) for pair in pairs],
+            )
+        self.assertEqual(table.created.get("args"), ("vector",))
+        config = table.created.get("kwargs", {}).get("config")
+        self.assertIsNotNone(config)
+        self.assertEqual(config.distance_type, "cosine")
+        self.assertGreater(config.num_partitions, 0)
 
 
 if __name__ == "__main__":

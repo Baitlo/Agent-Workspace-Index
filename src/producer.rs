@@ -687,6 +687,8 @@ fn publish(workspace: &mut WorkspaceIndex, ledger: &Ledger, config: &ProducerCon
     if ledger.dirty()? || !config.publish_dir.join("current.json").exists() {
         workspace.prepare_checkpoint_generation()?;
         ledger.checkpoint(&workspace.index_dir().join("producer-state.sqlite3"))?;
+        // The fence commit guard is taken INSIDE snapshot::publish_pointer at the
+        // final current.json rename (not around this multi-GB build).
         let manifest = workspace.publish_snapshot(&config.publish_dir)?;
         ledger.set("dirty", "0")?;
         ledger.set("last_published_ms", &now_ms().to_string())?;
