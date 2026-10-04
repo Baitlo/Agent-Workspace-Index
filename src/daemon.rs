@@ -14,17 +14,25 @@ use fs4::fs_std::FileExt;
 use serde_json::{Value, json};
 
 use crate::metrics::LatencyWindow;
-use crate::model::ServingStatus;
+use crate::model::{IndexStatus, ServingStatus};
 use crate::protocol::{PROTOCOL_VERSION, Request, RequestEnvelope, ResponseEnvelope};
 use crate::reader::ReaderIndex;
 use crate::snapshot::ActivatedSnapshot;
 
 const MAX_REQUEST_BYTES: usize = 1024 * 1024;
 const MAX_RESPONSE_BYTES: usize = 16 * 1024 * 1024;
-const IO_TIMEOUT: Duration = Duration::from_secs(30);
+const IO_TIMEOUT: Duration = Duration::from_secs(90);
 const DEFAULT_QUERY_WORKERS: usize = 4;
 const DEFAULT_QUERY_QUEUE_CAPACITY: usize = 64;
 const ACCEPT_POLL_INTERVAL: Duration = Duration::from_millis(2);
+/// How often the background thread recomputes the heavy full-catalog status.
+const STATUS_REFRESH_INTERVAL: Duration = Duration::from_secs(5);
+
+/// Shared, asynchronously-refreshed status snapshot. The full-catalog scan can
+/// take tens of seconds over NFS; serving it synchronously on the request path
+/// trips the IO budget. Instead a background thread keeps this fresh and the
+/// `Status` request returns the last computed value immediately.
+type SharedStatusCache = Arc<RwLock<Option<IndexStatus>>>;
 
 struct DaemonMetrics {
     workers: u64,
@@ -129,7 +137,14 @@ pub fn serve_with_snapshots(
                 metrics.accepted.fetch_add(1, Ordering::Relaxed);
                 metrics.active.fetch_add(1, Ordering::Relaxed);
                 let active = ActiveRequest { metrics: &metrics };
-                let shutdown = handle_connection_resilient(stream, &mut workspace, false, &metrics);
+                let status_cache: SharedStatusCache = Arc::new(RwLock::new(None));
+                let shutdown = handle_connection_resilient(
+                    stream,
+                    &mut workspace,
+                    false,
+                    &metrics,
+                    &status_cache,
+                );
                 drop(active);
                 if shutdown {
                     break;
@@ -159,6 +174,8 @@ fn serve_snapshot_readers(
     )?;
     let active_path = Arc::new(RwLock::new(workspace.index_dir().to_owned()));
     let metrics = Arc::new(DaemonMetrics::new(worker_count, queue_capacity));
+    let status_cache: SharedStatusCache = Arc::new(RwLock::new(None));
+    spawn_status_refresher(Arc::clone(&active_path), Arc::clone(&status_cache));
     let (sender, receiver) = mpsc::sync_channel::<ConnectionWork>(queue_capacity);
     let receiver = Arc::new(Mutex::new(receiver));
     let (shutdown_sender, shutdown_receiver) = mpsc::channel();
@@ -168,6 +185,7 @@ fn serve_snapshot_readers(
         let receiver = Arc::clone(&receiver);
         let active_path = Arc::clone(&active_path);
         let metrics = Arc::clone(&metrics);
+        let status_cache = Arc::clone(&status_cache);
         let shutdown_sender = shutdown_sender.clone();
         workers.push(
             thread::Builder::new()
@@ -206,8 +224,13 @@ fn serve_snapshot_readers(
                                 }
                             }
                         }
-                        let shutdown =
-                            handle_connection_resilient(work.stream, &mut reader, true, &metrics);
+                        let shutdown = handle_connection_resilient(
+                            work.stream,
+                            &mut reader,
+                            true,
+                            &metrics,
+                            &status_cache,
+                        );
                         drop(active);
                         if shutdown {
                             let _ = shutdown_sender.send(());
@@ -308,8 +331,9 @@ fn handle_connection_resilient(
     workspace: &mut ReaderIndex,
     snapshot_read_only: bool,
     metrics: &DaemonMetrics,
+    status_cache: &SharedStatusCache,
 ) -> bool {
-    match handle_connection(stream, workspace, snapshot_read_only, metrics) {
+    match handle_connection(stream, workspace, snapshot_read_only, metrics, status_cache) {
         Ok(shutdown) => shutdown,
         Err(error) => {
             eprintln!("AWI daemon connection failed; continuing: {error:#}");
@@ -377,6 +401,7 @@ fn handle_connection(
     workspace: &mut ReaderIndex,
     snapshot_read_only: bool,
     metrics: &DaemonMetrics,
+    status_cache: &SharedStatusCache,
 ) -> Result<bool> {
     stream.set_read_timeout(Some(IO_TIMEOUT))?;
     stream.set_write_timeout(Some(IO_TIMEOUT))?;
@@ -392,7 +417,7 @@ fn handle_connection(
     } else {
         match serde_json::from_str::<RequestEnvelope>(&line) {
             Ok(envelope) if envelope.protocol_version == PROTOCOL_VERSION => {
-                dispatch(workspace, envelope.request, snapshot_read_only, metrics)
+                dispatch(workspace, envelope.request, snapshot_read_only, metrics, status_cache)
             }
             Ok(envelope) => ResponseEnvelope::failure(
                 "protocol_mismatch",
@@ -424,6 +449,7 @@ fn dispatch(
     request: Request,
     snapshot_read_only: bool,
     metrics: &DaemonMetrics,
+    status_cache: &SharedStatusCache,
 ) -> ResponseEnvelope {
     if snapshot_read_only && matches!(request, Request::Index { .. } | Request::Notify { .. }) {
         return ResponseEnvelope::failure(
@@ -484,16 +510,75 @@ fn dispatch(
         Request::Query { request } => workspace
             .query(&request)
             .and_then(|value| ResponseEnvelope::success(value).map_err(Into::into)),
-        Request::Status => workspace.status().and_then(|mut value| {
+        Request::Status => {
+            // Serve the asynchronously-computed status immediately so a slow
+            // NFS catalog scan never blocks the request path. Before the first
+            // background refresh lands, fall back to an inline computation so
+            // status is never empty on a fresh process.
+            let cached = status_cache
+                .read()
+                .expect("AWI status cache lock poisoned")
+                .clone();
+            let mut value = match cached {
+                Some(status) => status,
+                None => match workspace.status() {
+                    Ok(status) => status,
+                    Err(error) => {
+                        return ResponseEnvelope::failure(
+                            "request_failed",
+                            format!("{error:#}"),
+                        )
+                    }
+                },
+            };
             value.serving = metrics.snapshot();
             ResponseEnvelope::success(value).map_err(Into::into)
-        }),
+        }
         Request::Shutdown => {
             ResponseEnvelope::success(json!({"stopping": true})).map_err(anyhow::Error::from)
         }
     };
 
     result.unwrap_or_else(|error| ResponseEnvelope::failure("request_failed", format!("{error:#}")))
+}
+
+fn spawn_status_refresher(
+    active_path: Arc<RwLock<PathBuf>>,
+    status_cache: SharedStatusCache,
+) {
+    thread::Builder::new()
+        .name("awi-status-refresh".to_owned())
+        .spawn(move || {
+            let mut reader: Option<ReaderIndex> = None;
+            loop {
+                let path = active_path
+                    .read()
+                    .expect("AWI active snapshot lock poisoned")
+                    .clone();
+                let reopen = match &reader {
+                    None => true,
+                    Some(current) => current.index_dir() != path.as_path(),
+                };
+                if reopen {
+                    match ReaderIndex::open(&path) {
+                        Ok(opened) => reader = Some(opened),
+                        Err(error) => {
+                            eprintln!(
+                                "AWI status refresher could not open {}: {error:#}",
+                                path.display()
+                            );
+                        }
+                    }
+                }
+                if let Some(current) = &reader
+                    && let Ok(status) = current.status()
+                    && let Ok(mut guard) = status_cache.write() {
+                        *guard = Some(status);
+                    }
+                thread::sleep(STATUS_REFRESH_INTERVAL);
+            }
+        })
+        .ok();
 }
 
 struct SnapshotFollower {
