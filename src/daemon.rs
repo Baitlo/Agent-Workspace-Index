@@ -511,26 +511,15 @@ fn dispatch(
             .query(&request)
             .and_then(|value| ResponseEnvelope::success(value).map_err(Into::into)),
         Request::Status => {
-            // Serve the asynchronously-computed status immediately so a slow
-            // NFS catalog scan never blocks the request path. Before the first
-            // background refresh lands, fall back to an inline computation so
-            // status is never empty on a fresh process.
+            // Serve the shared cache instantly. The full NFS catalog scan behind
+            // status() is multi-minute and must never run on the request path.
+            // The background refresher populates this cache; on a cold process we
+            // return a minimal status rather than pinning a worker.
             let cached = status_cache
                 .read()
                 .expect("AWI status cache lock poisoned")
                 .clone();
-            let mut value = match cached {
-                Some(status) => status,
-                None => match workspace.status() {
-                    Ok(status) => status,
-                    Err(error) => {
-                        return ResponseEnvelope::failure(
-                            "request_failed",
-                            format!("{error:#}"),
-                        )
-                    }
-                },
-            };
+            let mut value = cached.unwrap_or_else(IndexStatus::default);
             value.serving = metrics.snapshot();
             ResponseEnvelope::success(value).map_err(Into::into)
         }
@@ -572,9 +561,11 @@ fn spawn_status_refresher(
                 }
                 if let Some(current) = &reader
                     && let Ok(status) = current.status()
-                    && let Ok(mut guard) = status_cache.write() {
+                {
+                    if let Ok(mut guard) = status_cache.write() {
                         *guard = Some(status);
                     }
+                }
                 thread::sleep(STATUS_REFRESH_INTERVAL);
             }
         })
