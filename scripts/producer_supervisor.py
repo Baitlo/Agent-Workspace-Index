@@ -11,16 +11,14 @@ Optional single-writer fencing (opt-in, backward compatible):
   fence_gen   : the generation this supervisor is allowed to write at.
   fence_owner : stable identity of this supervisor (e.g. "fast:worker-12").
 
-IMPORTANT SCOPE: this supervisor-side fence is failover *coordination*, not an
-atomic double-write mutex. The onus of not publishing is on the publisher: the
-real Rust producer (producer.rs) must itself validate the fence generation
-BEFORE each publish and refuse to write if it is no longer the holder. Without
-that publisher-side check, a partitioned old writer keeps publishing and this
-supervisor can only stop it best-effort (see the `test_gap_uncaged_publisher_*`
-regression marker). The fence CAS below uses an flock; on NFS this is advisory
-and must run on a POSIX filesystem where locks are honored, otherwise the
-failover fails closed (it refuses to launch a second writer) rather than risk
-a split brain.
+Single-writer safety has two layers. This supervisor-side fence coordinates
+failover and stops a fenced child best-effort. Independently, the Rust publisher
+validates the generation while holding the shared fence CAS lock and keeps that
+lock through the atomic `current.json` rename. A partitioned stale writer
+therefore fails closed even if it has not yet observed the supervisor's stop
+request. The fence CAS uses an flock; on NFS it is advisory and must run on a
+POSIX filesystem where locks are honored, otherwise the failover refuses to
+launch a second writer rather than risk a split brain.
 
 --monitor-only reads worker status paths and writes fleet health. Run this on
 the master host. With auto_recover enabled the master is the failover owner:
