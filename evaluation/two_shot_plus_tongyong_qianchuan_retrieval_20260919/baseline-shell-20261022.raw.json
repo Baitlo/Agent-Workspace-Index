@@ -1,0 +1,208 @@
+{
+  "runner_id": "baseline-shell-20261022",
+  "cases": [
+    {
+      "id": "code-001",
+      "relevant_path": "/home/tiger/Projects/Bona/Qianchuan102_data_process/build_two_shot_three_models_anchor_qwen_20260917.py",
+      "evidence": "Line 2 docstring: 'Finalize assets and build qwen_direct anchor tasks for three V4.8Bench models'. Line 10 sets BACKEND='ad.aigc.chengpian_gaobiao_reward_qwen_direct'. Line 38 points at the five-model qwen_direct anchor cache root; line 65 task_key template ends with '|qwen_direct'; line 79 writes qwen_direct_tasks_two_shot.jsonl.",
+      "commands": [
+        "rg -l 'qwen_direct' Qianchuan102_data_process qianchuan_distill -g '*.py'",
+        "sed -n '1,90p' build_two_shot_three_models_anchor_qwen_20260917.py",
+        "rg -n 'qwen_direct|BACKEND|task_key|V4.8' build_two_shot_three_models_anchor_qwen_20260917.py"
+      ],
+      "tool_call_count": 2,
+      "notes": "Chosen canonical file, not build_two_shot_three_models_anchor_qwen_20260917.py.bak.20260918001437. Per-case counts include shared discovery/verification calls; 53 unique exec invocations overall."
+    },
+    {
+      "id": "code-002",
+      "relevant_path": "/home/tiger/Projects/Bona/Qianchuan102_data_process/build_tongyong_v6_teacher_full.py",
+      "evidence": "Line 2 docstring exactly: 'Stream-build all tongyong V6 DeepSeek ranker teacher requests.' CLI at lines 168-173 takes --input/--output/--manifest and --split train|valid; line 172 defaults --model to deepseek-v4-flash-0731. It imports build_teacher_request/PROMPT_DIR from build_tongyong_v6_teacher_prompts.py.",
+      "commands": [
+        "rg -l 'tongyong.*v6|deepseek.*ranker|teacher_requests' -g '*.py' .",
+        "sed -n '1,45p' build_tongyong_v6_teacher_prompts.py",
+        "sed -n '1,30p' build_tongyong_v6_teacher_full.py",
+        "rg -n 'Stream-build|add_argument|deepseek-v4-flash' build_tongyong_v6_teacher_full.py"
+      ],
+      "tool_call_count": 3,
+      "notes": "build_tongyong_v6_teacher_prompts.py renders one request/prompt; the _full.py file is the streaming batch builder matching 'stream build'."
+    },
+    {
+      "id": "code-003",
+      "relevant_path": "/home/tiger/Projects/Bona/Qianchuan102_data_process/analyze_tongyong_v3bench_delivered_pair_posterior_pool_v1.py",
+      "evidence": "Line 2 docstring: 'Validate the Tongyong V3Bench delivered-pair posterior pool v1.' read_pool() at lines 32-38 opens pyarrow HadoopFileSystem(host='default'), selects part-* files, and calls pq.read_table(parts, filesystem=hdfs).to_pandas(); hdfs_cat() uses 'hdfs dfs -cat'.",
+      "commands": [
+        "rg -l 'delivered_pair_posterior' Qianchuan102_data_process qianchuan_distill -g '*.py'",
+        "rg -l 'read_parquet|ParquetFile|hdfs://|to_parquet' Qianchuan102_data_process -g '*.py'",
+        "sed -n '1,70p' analyze_tongyong_v3bench_delivered_pair_posterior_pool_v1.py",
+        "rg -n 'parquet|hdfs|validate|delivered' analyze_tongyong_v3bench_delivered_pair_posterior_pool_v1.py"
+      ],
+      "tool_call_count": 7,
+      "notes": "scripts/run_tongyong_v3bench_combinations_tqs.py only submits the SQL; the analyze script is the validator that reads HDFS Parquet."
+    },
+    {
+      "id": "code-004",
+      "relevant_path": "/home/tiger/Projects/Bona/Qianchuan102_data_process/eval_two_shot_v48bench_three_models_anchor_qwen_ziti_20260918.py",
+      "evidence": "Lines 2-8 docstring: 'Rank five V4.8Bench models with qwen_direct Anchor-Elo and Davidson BT' and 'benchmark: V4.8Bench Ziti History (three-model anchor run, 2026-09-18)'. fit_davidson_counts/fit_davidson are defined at lines 1634-1783; the davidson_bradley_terry report block starts at line 2027.",
+      "commands": [
+        "rg -l 'davidson' -g '*.py' Qianchuan102_data_process",
+        "rg -n 'Bradley|Davidson' -g '*.py' Qianchuan102_data_process",
+        "sed -n '1,80p' eval_two_shot_v48bench_three_models_anchor_qwen_ziti_20260918.py",
+        "sed -n '1,70p' eval_two_shot_v48bench_six_industry_qwen_arena.py"
+      ],
+      "tool_call_count": 4,
+      "notes": "Ziti-history anchor script, distinct from eval_two_shot_v48bench_six_industry_qwen_arena.py, which ranks empty-history models."
+    },
+    {
+      "id": "sql-001",
+      "relevant_path": "/home/tiger/Projects/Bona/Qianchuan102_data_process/sql/qianchuan_sql_koujing4/two_shot_v48_posterior_refresh_20260917/qc102_aigc.sql",
+      "evidence": "Header line 2: 'SPU semi-join on product_id (scene=qc102) + new output dir; tpl/threshold/window untouched'. Lines 198-200: left semi join two_shot_v48_spus s on s.scene='qc102' and s.spu_key=cast(f.product_id as string). Output dir is .../two_shot_v48_posterior_refresh_20260917/raw/qc102_aigc.",
+      "commands": [
+        "fd -t f 'v48|posterior_refresh' sql",
+        "rg -l -i 'semi join|left semi' sql",
+        "rg -n 'product_id|semi|stid|qc102' qc102_aigc.sql",
+        "nl -ba qc102_aigc.sql | sed -n '1,4p;195,201p'"
+      ],
+      "tool_call_count": 3,
+      "notes": "qc102_ziti.sql is an equally matching sibling (line 71 left semi join; line 73 product_id). qc102_aigc.sql chosen as the primary larger refresh query."
+    },
+    {
+      "id": "sql-002",
+      "relevant_path": "/home/tiger/Projects/Bona/Qianchuan102_data_process/sql/qianchuan_sql_koujing4/two_shot_v48_posterior_refresh_20260917/ubx_aigc.sql",
+      "evidence": "Header line 2: 'SPU semi-join on stid_v2 (scene=ubx) + new output dir'. Lines 190-192: left semi join two_shot_v48_spus s on s.scene='ubx' and s.spu_key=cast(f.stid_v2 as string). Output dir is .../two_shot_v48_posterior_refresh_20260917/raw/ubx_aigc.",
+      "commands": [
+        "rg -n 'stid_v2|semi|ubx' ubx_aigc.sql",
+        "nl -ba ubx_aigc.sql | sed -n '1,4p;187,193p'",
+        "rg -n 'left semi join|spu_key' ubx_ziti.sql"
+      ],
+      "tool_call_count": 2,
+      "notes": "ubx_ziti.sql is an equally matching sibling (line 101 left semi join; line 103 stid_v2). ubx_aigc.sql chosen as the primary larger refresh query."
+    },
+    {
+      "id": "sql-003",
+      "relevant_path": "/home/tiger/Projects/Bona/Qianchuan102_data_process/sql/tongyong/tongyong_v3bench_delivered_pair_posterior_pool_v1.sql",
+      "evidence": "Header lines 4-10 define the chain front_origin_mid + back_origin_mid -> wukong_generated_material_refs.generated_mid -> dwa_adengine_derive_creative_delivery_stats_daily and output grain (scene,xid,front_material_id,back_material_id). Line 196 casts r.generated_mid AS STRING; candidate_generated_mids CTE begins at line 266 and joins delivery stats on generated_mid at lines 331-332.",
+      "commands": [
+        "rg -l --no-ignore-vcs 'delivered_pair_posterior' Qianchuan102_data_process -g '!*.jsonl' -g '!*.parquet'",
+        "rg -n 'generated_mid|posterior|semi' sql/tongyong/tongyong_v3bench_delivered_pair_posterior_pool_v1.sql",
+        "nl -ba sql/tongyong/tongyong_v3bench_delivered_pair_posterior_pool_v1.sql | sed -n '1,12p;190,200p'"
+      ],
+      "tool_call_count": 3,
+      "notes": "Machine prefix tongyong_v3bench_delivered_pair_posterior_pool_v1 is on line 2; generated_mid is the pair-to-delivery join key."
+    },
+    {
+      "id": "sql-004",
+      "relevant_path": "/home/tiger/Projects/Bona/Qianchuan102_data_process/sql/tongyong/tongyong_train_v2_show500_play500_28d_optimized.sql",
+      "evidence": "Header lines 1-8: 'Tongyong training data v2 OPTIMIZED: lower thresholds ... + SEMI-JOIN PRE-FILTER'; change 1 is show_count>=500 AND play_count>=500, change 2 is 28-day posterior window, change 4 is the semi-join. Lines 183-186 filter p_date BETWEEN '${date_28}' AND '${date}' and use having show_count >= 500 and play_count >= 500.",
+      "commands": [
+        "rg -n 'show_count|play_count|28|semi' tongyong_train_v2_show500_play500_28d.sql",
+        "rg -n -i 'semi|show_count >= 500|play_count >= 500|date_28' tongyong_train_v2_show500_play500_28d_optimized.sql",
+        "nl -ba tongyong_train_v2_show500_play500_28d_optimized.sql | sed -n '1,15p;169,188p'"
+      ],
+      "tool_call_count": 2,
+      "notes": "The optimized file is the one with explicit semi-join pre-filter; tongyong_train_v2_show500_play500_28d.sql has the same thresholds/window but no semi join."
+    },
+    {
+      "id": "result-001",
+      "relevant_path": "/home/tiger/Projects/Bona/Qianchuan102_data_process/logs/v47_multi_output_audit.json",
+      "evidence": "Top-level keys include capped, uncapped, retention, final, errors, observed_scene_rows. errors length is 0. There are 12 scene:date keys (qc102/qc303/ubx x 20260614/21/28/0705). Example qc102:20260705: capped rows=247646, uncapped rows=731690; retention P_t 2469/2500=0.9876 and N_t 4824/4905=0.9835.",
+      "commands": [
+        "sed -n '1,40p' audit_v47_multi_outputs.py",
+        "rg -n 'capped|uncapped|retention|multi' audit_v47_multi_outputs.py",
+        "ls -la logs",
+        "jq 'keys' logs/v47_multi_output_audit.json",
+        "jq '{capped,uncapped,retention}' logs/v47_multi_output_audit.json"
+      ],
+      "tool_call_count": 3,
+      "notes": "JSON is the audit result artifact; audit_v47_multi_outputs.py is the producer."
+    },
+    {
+      "id": "result-002",
+      "relevant_path": "/home/tiger/Projects/Bona/Qianchuan102_data_process/merlin_deploy/ezreal_smoke_5services_20260914/three_scene_results.corrected.json",
+      "evidence": "Corrected matrix has 24 rows = 4 reachable services x 3 scenes (qc102/qc303/ubx) x 2 modes (parity/strict). Every row has service, scene, mode, json_closed, schema_valid, business_valid; 21/24 schema_valid true and 10/24 business_valid true.",
+      "commands": [
+        "rg -l -i 'ezreal' -g '*.py' .",
+        "sed -n '1,35p' run_three_scene_matrix.py",
+        "ls -la merlin_deploy/ezreal_smoke_5services_20260914",
+        "jq '{n:length, schema_true:([.[]|select(.schema_valid)]|length), business_true:([.[]|select(.business_valid)]|length)}' three_scene_results.corrected.json",
+        "jq -r '.[] | [.service,.scene] | @tsv' three_scene_results.corrected.json | uniq -c"
+      ],
+      "tool_call_count": 9,
+      "notes": "Suite directory is named ezreal_smoke_5services_20260914; the corrected matrix contains 4 reachable services because the exact ads.creative.two_shots_v4_8_dapo service was absent/failed. three_scene_summary.corrected.json is the compact sibling."
+    },
+    {
+      "id": "result-003",
+      "relevant_path": "/mnt/bn/baiweikang/qianchuan_distill/workspace_assets/evaluation/tongyong_v3bench_delivered_pair_posterior_pool_v1_20260817/tongyong_v3bench_delivered_pair_posterior_pool_v1_summary.json",
+      "evidence": "Summary reports covered_spus=1818, pair_rows=750634, generated_mid_count=930996, old_v3_pairs=14472, old_v3_overlap=13068 (old_v3_overlap_ratio=0.902985), and new_vs_old_ratio=51.868021. Windows contain 14d and 60d delivery/positive ratios.",
+      "commands": [
+        "jq 'keys' tongyong_v3bench_delivered_pair_posterior_pool_v1_summary.json",
+        "jq '.. | objects | with_entries(select(.key|test(\"covered|new_vs_old|ratio\"))) | select(length>0)' tongyong_v3bench_delivered_pair_posterior_pool_v1_summary.json",
+        "cat tongyong_v3bench_delivered_pair_posterior_pool_v1_summary.json"
+      ],
+      "tool_call_count": 2,
+      "notes": "Compact summary chosen over the 750k-row by-SPU TSV."
+    },
+    {
+      "id": "result-004",
+      "relevant_path": "/mnt/bn/baiweikang/qianchuan_distill/workspace_assets/evaluation/tongyong_v3bench_delivered_pair_posterior_pool_v1_20260817/koujing34_strict_positive/tongyong_v3bench_strict_positive_koujing34_sparse_graph_scene_summary.tsv",
+      "evidence": "TSV columns: window, scene, spu_count, front_median, back_median, valid_pair_median, density_median, whole_spu_full_coverage, method3_qualified, method4_qualified. 14d density_median: qc102=0.3333333333 (929 SPUs), qc303=0.125 (848), ubx=0.0 (54). 60d: qc102=0.3269230769, qc303=0.0697749554, ubx=1.0.",
+      "commands": [
+        "ls -la koujing34_strict_positive",
+        "cat tongyong_v3bench_strict_positive_koujing34_sparse_graph_scene_summary.tsv",
+        "jq '.. | objects | with_entries(select(.key|test(\"density|median\"))) | select(length>0)' tongyong_v3bench_strict_positive_koujing34_sparse_graph_summary.json"
+      ],
+      "tool_call_count": 2,
+      "notes": "TSV gives per-scene density median directly; summary JSON overall edge_density median is 0.3."
+    },
+    {
+      "id": "dataset-001",
+      "relevant_path": "/home/tiger/Projects/Bona/qianchuan_distill/human_annotation_sample_v2/human_annotation_sample_250_enriched_flat.jsonl",
+      "evidence": "3053 rows. Every row has label_type=consensus, selected_by (for example deepseek-v4-pro, doubao-seed-2.1-pro, kimi-k2.5), pool_rank with pvr_percentile_in_pool and cost_percentile_in_pool, and sample_bucket such as 'qc102|ind=文体娱乐|votes=2+3|src=aigc+ziti'.",
+      "commands": [
+        "rg -l '\"label_type\"|label_type' -g '*.jsonl' -g '*.py' -g '*.json' Qianchuan102_data_process qianchuan_distill /mnt/bn/baiweikang/qianchuan_distill/workspace_assets/datasets/legacy_four_model_inputs",
+        "wc -l human_annotation_sample_250_enriched_flat.jsonl",
+        "jq -r '.label_type' human_annotation_sample_250_enriched_flat.jsonl | uniq -c",
+        "jq -r '.pool_rank|keys[]' human_annotation_sample_250_enriched_flat.jsonl | uniq -c"
+      ],
+      "tool_call_count": 2,
+      "notes": "human_annotation_sample_v1 contains scripts only and no JSONL, so v2 flat file is the only match."
+    },
+    {
+      "id": "dataset-002",
+      "relevant_path": "/mnt/bn/baiweikang/qianchuan_distill/workspace_assets/datasets/legacy_four_model_inputs/judge300_qc102.jsonl",
+      "evidence": "100 rows. Top-level keys are sample_id, spu_key, advertiser_id, second_industry_id, source_type, front_sample, composition_performance, back_sample. composition_performance is an array of per-material stat objects (avg 12.45 entries, min 2, max 20); front_sample avg 10.69 and back_sample avg 11.12 entries.",
+      "commands": [
+        "head -c 900 judge300_qc102.jsonl",
+        "jq -r 'keys[]' judge300_qc102.jsonl | uniq -c",
+        "jq -s '{rows:length, cp_type:(.[0].composition_performance|type), cp_keys:(.[0].composition_performance[0]|keys), front_n:(.[0].front_sample|length), back_n:(.[0].back_sample|length)}' judge300_qc102.jsonl",
+        "jq -s '{rows:length, cp_len_avg:([.[].composition_performance|length]|add/length), front_len_avg:([.[].front_sample|length]|add/length), back_len_avg:([.[].back_sample|length]|add/length)}' judge300_qc102.jsonl"
+      ],
+      "tool_call_count": 2,
+      "notes": "100 SPU-level entries; composition_performance is an array, not a scalar object."
+    },
+    {
+      "id": "dataset-003",
+      "relevant_path": "/mnt/bn/baiweikang/qianchuan_distill/workspace_assets/datasets/legacy_four_model_inputs/judge300_ubx.jsonl",
+      "evidence": "100 rows with the same top-level schema as judge300_qc102.jsonl. composition_performance array averages 17.77 entries (min 4, max 20); front_sample averages 13.49 and back_sample averages 13.72 entries.",
+      "commands": [
+        "head -c 900 judge300_ubx.jsonl",
+        "jq -s '{rows:length, cp_type:(.[0].composition_performance|type), cp_keys:(.[0].composition_performance[0]|keys), front_n:(.[0].front_sample|length), back_n:(.[0].back_sample|length)}' judge300_ubx.jsonl",
+        "jq -s '{rows:length, cp_len_avg:([.[].composition_performance|length]|add/length), cp_len_min:([.[].composition_performance|length]|min), cp_len_max:([.[].composition_performance|length]|max), front_len_avg:([.[].front_sample|length]|add/length), back_len_avg:([.[].back_sample|length]|add/length)}' judge300_ubx.jsonl"
+      ],
+      "tool_call_count": 2,
+      "notes": "UBX judge300 file; same field contract as the QC102 file."
+    },
+    {
+      "id": "dataset-004",
+      "relevant_path": "/home/tiger/Projects/Bona/Qianchuan102_data_process/merlin_deploy/ezreal_smoke_5services_20260914/two_shot_v48bench_ezreal_psm_c128_retry_full2983_20260915/raw_results_two_shot.jsonl",
+      "evidence": "Attempt rows contain service, scene, warmup, completion_tokens, json_closed, schema_valid, business_valid. DuckDB over the file: 5966 attempts, 2 services, warmup_rows=0, json_closed=5395, avg completion_tokens=308.91. Sibling manifest summary for the deduped run: rows=2983, concurrency=128, warmup=0, json_closed=2983, schema_valid=2980, business_valid=2792.",
+      "commands": [
+        "ls -1 two_shot_v48bench_ezreal_psm_*",
+        "head -c 1200 two_shot_v48bench_ezreal_psm_c128_retry_full2983_20260915/raw_results_two_shot.jsonl",
+        "duckdb -c \"SELECT count(*) n, count(DISTINCT service) svc, sum(CASE WHEN warmup THEN 1 ELSE 0 END) warm, sum(CASE WHEN json_closed THEN 1 ELSE 0 END) closed, avg(completion_tokens) ct FROM read_json_auto('two_shot_v48bench_ezreal_psm_c128_retry_full2983_20260915/raw_results_two_shot.jsonl')\"",
+        "jq '.summary[1] | {rows,warmup,counts,completion_tokens}' two_shot_v48bench_ezreal_psm_c128_retry_full2983_20260915/manifest.json"
+      ],
+      "tool_call_count": 7,
+      "notes": "Raw attempts file chosen because the query says raw results; the manifest supplies the deduped 2983-request summary with warmup=0. The c128_full2983 directory is empty, so the retry directory is the effective c128 full run."
+    }
+  ]
+}

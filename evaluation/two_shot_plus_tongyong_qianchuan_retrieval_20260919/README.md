@@ -1,6 +1,7 @@
 # Qianchuan Retrieval Evaluation (2026-09-19)
 
-This directory contains a development-only retrieval candidate for AWI. It covers:
+This directory contains an independently reviewed development-only retrieval
+set for AWI. It covers:
 
 - Python implementation and analysis code for `two_shot` and `tongyong`.
 - Hive SQL for targeted posterior refresh and Tongyong dataset construction.
@@ -9,12 +10,14 @@ This directory contains a development-only retrieval candidate for AWI. It cover
 
 ## Safety state
 
-`dev.json` is marked `candidate_pending_dual_review`. It may only be evaluated with `awi benchmark --allow-draft`. It is not a frozen test set and cannot open the release gate. The evaluator rejects every `split=frozen` file and requires two distinct reviewers before an approved development set can open the review sub-gate.
+`dev.json` is marked `review_status=approved` with two distinct reviewers. It
+remains `split=dev`; no frozen split was created. The evaluator rejects every
+`split=frozen` file, and an approved set without two distinct reviewers fails
+closed.
 
-Do not create or consume a frozen split, or report formal precision/recall,
-Inspect@K, or MRR, until the independent reviews are complete, disagreements
-are adjudicated, and the development metrics satisfy all gates. Metrics from a
-candidate set must be labeled development-only diagnostics.
+The independent reviews and adjudication are complete. Metrics from this
+development set are release-gate evidence only when the full server objective
+also passes on a completed collection.
 
 ## Gates
 
@@ -24,17 +27,26 @@ candidate set must be labeled development-only diagnostics.
 - Agent tool-call reduction: at least 50% against reviewed no-AWI baselines.
 - Review: two distinct reviewers and `review_status=approved`.
 
-The current `baseline_tool_calls` values are candidate estimates. Reviewers must replace or confirm them from equivalent no-AWI traces before approval.
+The `baseline_tool_calls` values come from the independent read-only shell run
+stored in `baseline-shell-20261022.json`. Its `runner_id` is
+`baseline-shell-20261022`. The reviewed count is exactly one tool call per
+command listed for the matching case; those 16 counts (59 total) are copied
+into `dev.json`. The normalized JSON SHA256 is
+`65c90cce37f7f0a31df44b30cbbf4f24e89815db1a01e5925d89fdb1cbea1eb0`.
+The runner's original output is preserved as
+`baseline-shell-20261022.raw.json` with SHA256
+`67160105f0a05a8991cfff6121d7e7cc336ea9cc770e92559024df7161315690`.
+Reviewer F and Reviewer G independently verified the normalized counts,
+commands, selected paths, and evidence before approval.
 
-## Candidate run
+## Reviewed run
 
 Build all four corpus roots into one index, then run:
 
 ```bash
 awi --index-dir <index> benchmark \
   --gold evaluation/two_shot_plus_tongyong_qianchuan_retrieval_20260919/dev.json \
-  --output evaluation/two_shot_plus_tongyong_qianchuan_retrieval_20260919/candidate_report.json \
-  --allow-draft
+  --output evaluation/two_shot_plus_tongyong_qianchuan_retrieval_20260919/benchmark-approved.json
 ```
 
 For structured-query acceptance, query an explicit file under one of the allowlisted roots. Example:

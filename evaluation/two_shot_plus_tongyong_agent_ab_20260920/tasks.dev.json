@@ -13,7 +13,7 @@
     {
       "id": "code-backend",
       "category": "code",
-      "question": "Locate the implementation that builds qwen_direct anchor tasks for three V4.8Bench models. What exact backend constant does it require?",
+      "question": "Locate the implementation that builds anchor tasks for three V4.8Bench models. What exact backend constant does it require?",
       "expected_paths": [
         "Qianchuan102_data_process/build_two_shot_three_models_anchor_qwen_20260917.py"
       ],
@@ -29,147 +29,136 @@
         "Qianchuan102_data_process/build_tongyong_v6_teacher_full.py"
       ],
       "required_answer_tokens": [
-        "tongyong_v6_asr_ranker_v1_teacher_requests_",
-        "split"
+        "tongyong_v6_asr_ranker_v1_teacher_requests_{split}"
       ]
     },
     {
       "id": "code-pair-key",
       "category": "code",
-      "question": "Locate the validator for the Tongyong V3Bench delivered-pair posterior pool. List the four fields in its PAIR_KEY in order.",
+      "question": "Locate the validator for the Tongyong V3Bench delivered-pair posterior pool. Report its PAIR_KEY fields in order using the form PAIR_KEY=<comma-separated fields>.",
       "expected_paths": [
         "Qianchuan102_data_process/analyze_tongyong_v3bench_delivered_pair_posterior_pool_v1.py"
       ],
       "required_answer_tokens": [
-        "scene",
-        "xid",
-        "front_material_id",
-        "back_material_id"
+        "PAIR_KEY=scene,xid,front_material_id,back_material_id"
       ]
     },
     {
       "id": "code-ziti-root",
       "category": "code",
-      "question": "Locate the Ziti History evaluator that ranks five V4.8Bench models with Davidson BT. What is the final directory name in DEFAULT_ROOT?",
+      "question": "Locate the Ziti History evaluator that ranks three V4.8Bench models with Davidson BT. Report exactly MODEL_SPECS_KEYS=<the three model keys in order>; DEFAULT_ROOT_LAST=<the final path component of DEFAULT_ROOT>.",
       "expected_paths": [
         "Qianchuan102_data_process/eval_two_shot_v48bench_three_models_anchor_qwen_ziti_20260918.py"
       ],
       "required_answer_tokens": [
-        "two_shot_v48bench_three_models_anchor_qwen_ziti_20260918"
+        "MODEL_SPECS_KEYS=v48_dpo,v62,v7_opsd_ckpt162",
+        "DEFAULT_ROOT_LAST=two_shot_v48bench_three_models_anchor_qwen_ziti_20260918"
       ]
     },
     {
       "id": "sql-pair-chain",
       "category": "sql",
-      "question": "Find the authoritative Tongyong V3Bench delivered-pair posterior SQL. State the two origin IDs, the generated-material join key, the delivery table, and the four-field output grain.",
+      "question": "Find the authoritative Tongyong V3Bench delivered-pair posterior SQL. Report exactly origin_ids=<the two executable origin material IDs from the pair chain>; generated_mid_key=<the qualified table.column generated-material join key>; delivery_table=<delivery table>; output_grain=<four output fields in order>.",
       "expected_paths": [
         "Qianchuan102_data_process/sql/tongyong/tongyong_v3bench_delivered_pair_posterior_pool_v1.sql"
       ],
       "required_answer_tokens": [
-        "front_origin_mid",
-        "back_origin_mid",
-        "generated_mid",
-        "dwa_adengine_derive_creative_delivery_stats_daily",
-        "scene",
-        "xid",
-        "front_material_id",
-        "back_material_id"
+        "origin_ids=front_material_id,back_material_id",
+        "generated_mid_key=ad_creative.wukong_generated_material_refs.generated_mid|generated_mid_key=wukong_generated_material_refs.generated_mid",
+        "delivery_table=ad_dwa.dwa_adengine_derive_creative_delivery_stats_daily",
+        "output_grain=scene,xid,front_material_id,back_material_id"
       ]
     },
     {
       "id": "sql-training-optimization",
       "category": "sql",
-      "question": "Find the optimized Tongyong training SQL with 500/500 thresholds. Summarize its threshold, posterior window, corrected row_number partition key, and scan reduction.",
+      "question": "Find the optimized Tongyong training SQL with the lower thresholds. Report exactly threshold=<the two threshold predicates>; window_days=<posterior window in days>; partition_key=<the corrected row_number partition key in order>; scan_reduction=<the optimization name>.",
       "expected_paths": [
         "Qianchuan102_data_process/sql/tongyong/tongyong_train_v2_show500_play500_28d_optimized.sql"
       ],
       "required_answer_tokens": [
-        "500",
-        "28",
-        "scene",
-        "xid",
-        "material_id",
-        "semi",
-        "join"
+        "threshold=show_count>=500",
+        "play_count>=500",
+        "window_days=28",
+        "partition_key=scene,xid,material_id",
+        "scan_reduction=SEMI-JOIN PRE-FILTER"
       ]
     },
     {
       "id": "sql-qc102-refresh",
       "category": "sql",
-      "question": "Find the QC102 AIGC SQL for the targeted two-shot V4.8 posterior refresh. Which SPU field is used for the semi-join and which template_id is selected?",
+      "question": "Find the QC102 AIGC SQL for the targeted two-shot V4.8 posterior refresh. Report exactly spu_field=<the semi-join SPU field>; template_id=<the selected template ID>.",
       "expected_paths": [
         "Qianchuan102_data_process/sql/qianchuan_sql_koujing4/two_shot_v48_posterior_refresh_20260917/qc102_aigc.sql"
       ],
       "required_answer_tokens": [
-        "product_id",
-        "100095"
+        "spu_field=product_id",
+        "template_id=100095"
       ]
     },
     {
       "id": "result-v47-audit",
       "category": "experiment_result",
-      "question": "Find the current V4.7 multi-output audit JSON. Report its top-level status, number of errors, and number of complete entries in final.",
+      "question": "Find the V4.7 multi-output audit JSON. Report exactly: status=<top-level status>; errors=<number of errors>; final_date_entries=<number of top-level date entries in final>.",
       "expected_paths": [
-        "Qianchuan102_data_process/logs/v47_multi_output_audit_current.json"
+        "Qianchuan102_data_process/logs/v47_multi_output_audit.json"
       ],
       "required_answer_tokens": [
-        "incomplete",
-        "30",
-        "0"
+        "status=complete",
+        "errors=0",
+        "final_date_entries=4"
       ]
     },
     {
       "id": "result-v61-strict",
       "category": "experiment_result",
-      "question": "In the corrected five-service three-scene summary, report requests, schema_valid, and business_valid for ads.creative.two_shots_v6_1 in strict mode.",
+      "question": "In the corrected summary for the smoke suite, report exactly requests=<requests>; schema_valid=<schema-valid count>; business_valid=<business-valid count> for ads.creative.two_shots_v6_1 in strict mode.",
       "expected_paths": [
         "Qianchuan102_data_process/merlin_deploy/ezreal_smoke_5services_20260914/three_scene_summary.corrected.json"
       ],
       "required_answer_tokens": [
-        "3",
-        "2"
+        "requests=3",
+        "schema_valid=3",
+        "business_valid=2"
       ]
     },
     {
       "id": "result-posterior-summary",
       "category": "experiment_result",
-      "question": "Find the canonical Tongyong delivered-pair posterior summary. Report pair_rows, covered_spus, generated_mid_count, and tqs_job_id.",
+      "question": "Find the canonical Tongyong delivered-pair posterior summary. Report exactly pair_rows=<pair rows>; covered_spus=<covered SPUs>; generated_mid_count=<generated mid count>; tqs_job_id=<TQS job ID>.",
       "expected_paths": [
         "workspace_assets/evaluation/tongyong_v3bench_delivered_pair_posterior_pool_v1_20260817/tongyong_v3bench_delivered_pair_posterior_pool_v1_summary.json"
       ],
       "required_answer_tokens": [
-        "750634",
-        "1818",
-        "930996",
-        "1563310802"
+        "pair_rows=750634",
+        "covered_spus=1818",
+        "generated_mid_count=930996",
+        "tqs_job_id=1563310802"
       ]
     },
     {
       "id": "dataset-scene-counts",
       "category": "dataset_query",
-      "question": "Find the flattened human annotation JSONL and calculate row counts grouped by scene. Report all three scene counts.",
+      "question": "Find the flattened human annotation JSONL and calculate row counts grouped by scene. Report exactly qc102=<qc102 count>; qc303=<qc303 count>; ubx=<ubx count>.",
       "expected_paths": [
         "qianchuan_distill/human_annotation_sample_v2/human_annotation_sample_250_enriched_flat.jsonl"
       ],
       "required_answer_tokens": [
-        "qc102",
-        "1161",
-        "qc303",
-        "1012",
-        "ubx",
-        "880"
+        "qc102=1161",
+        "qc303=1012",
+        "ubx=880"
       ]
     },
     {
       "id": "dataset-sparse-graph",
       "category": "dataset_query",
-      "question": "Find the canonical strict-positive sparse-graph scene summary TSV. For the 14d qc102 row, report method3_qualified and method4_qualified.",
+      "question": "Find the canonical strict-positive sparse-graph scene summary TSV. Report exactly method3_qualified=<method3 count>; method4_qualified=<method4 count> for the 14d qc102 row.",
       "expected_paths": [
         "workspace_assets/evaluation/tongyong_v3bench_delivered_pair_posterior_pool_v1_20260817/koujing34_strict_positive/tongyong_v3bench_strict_positive_koujing34_sparse_graph_scene_summary.tsv"
       ],
       "required_answer_tokens": [
-        "444",
-        "505"
+        "method3_qualified=444",
+        "method4_qualified=505"
       ]
     }
   ]

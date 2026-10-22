@@ -40,6 +40,11 @@ def parse_args() -> argparse.Namespace:
         "--codex-bin", type=Path, default=Path("/home/tiger/.local/bin/codex")
     )
     parser.add_argument(
+        "--model-catalog",
+        type=Path,
+        default=Path("/home/tiger/.codex/model-catalogs/multi-provider-catalog.json"),
+    )
+    parser.add_argument(
         "--awi-bin", type=Path, default=Path("/tmp/awi-target/release/awi")
     )
     parser.add_argument(
@@ -63,6 +68,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--task-id", action="append")
     parser.add_argument("--timeout-seconds", type=int, default=240)
     parser.add_argument("--seed", type=int, default=20260920)
+    parser.add_argument("--allow-draft", action="store_true")
     parser.add_argument("--resume", action="store_true")
     return parser.parse_args()
 
@@ -71,6 +77,7 @@ def main() -> None:
     args = parse_args()
     validate_args(args)
     tasks_document = json.loads(args.tasks.read_text())
+    validate_tasks_document(tasks_document, args.allow_draft)
     tasks = tasks_document["tasks"]
     if args.task_id:
         requested = set(args.task_id)
@@ -119,11 +126,22 @@ def validate_args(args: argparse.Namespace) -> None:
         raise SystemExit("--repetitions must be positive")
     if args.limit_tasks is not None and args.limit_tasks < 1:
         raise SystemExit("--limit-tasks must be positive")
-    for path in (args.tasks, args.schema, args.codex_bin, args.awi_bin):
+    for path in (
+        args.tasks,
+        args.schema,
+        args.codex_bin,
+        args.model_catalog,
+        args.awi_bin,
+    ):
         if not path.exists():
             raise SystemExit(f"required path does not exist: {path}")
-    if not args.awi_index.joinpath("catalog.sqlite3").is_file():
-        raise SystemExit(f"AWI index is missing catalog.sqlite3: {args.awi_index}")
+    local_catalog = args.awi_index / "catalog.sqlite3"
+    snapshot_cache = args.awi_index / "snapshot-cache"
+    if not local_catalog.is_file() and not snapshot_cache.is_dir():
+        raise SystemExit(
+            "AWI index has neither catalog.sqlite3 nor snapshot-cache: "
+            f"{args.awi_index}"
+        )
     if not args.sandbox_root.resolve().is_relative_to("/tmp"):
         raise SystemExit(
             f"sandbox root must be under worker-local /tmp: {args.sandbox_root}"
@@ -156,6 +174,27 @@ def validate_args(args: argparse.Namespace) -> None:
     )
     if daemon.returncode != 0:
         raise SystemExit(f"AWI daemon preflight failed: {daemon.stderr.strip()}")
+
+
+def validate_tasks_document(tasks_document: dict[str, Any], allow_draft: bool) -> None:
+    split = tasks_document.get("split")
+    if split == "frozen":
+        raise SystemExit("frozen evaluation splits are not allowed for Agent A/B")
+    if split != "dev":
+        raise SystemExit(f"Agent A/B tasks must use the dev split, got: {split!r}")
+
+    review_status = tasks_document.get("review_status")
+    if review_status == "approved":
+        return
+    if review_status != "candidate_pending_dual_review":
+        raise SystemExit(
+            f"Agent A/B tasks have unsupported review_status: {review_status!r}"
+        )
+    if not allow_draft:
+        raise SystemExit(
+            "candidate Agent A/B tasks require --allow-draft; "
+            "use it only for pilots, not release evidence"
+        )
 
 
 def prepare_sandbox(args: argparse.Namespace) -> None:
@@ -254,12 +293,26 @@ def run_trial(
     events = parse_events(stdout)
     final = load_final(final_path, events)
     metrics = tool_metrics(events)
-    path_correct, answer_correct = score_answer(task, final)
+    path_correct, answer_correct = score_answer(
+        task, final, tasks_document["corpus_roots"]
+    )
+    scope_violations = sorted(
+        set(
+            find_shell_scope_violations(
+                metrics["shell_commands"], tasks_document["corpus_roots"]
+            )
+        )
+        | set(
+            find_awi_scope_violations(
+                metrics["mcp_tools"], tasks_document["corpus_roots"]
+            )
+        )
+    )
     policy_violation = (
         metrics["shell_tool_calls"] > 0
         if arm == "awi"
         else metrics["awi_mcp_calls"] > 0 or metrics["awi_cli_calls"] > 0
-    )
+    ) or bool(scope_violations)
     usage = next(
         (
             event.get("usage", {})
@@ -298,6 +351,7 @@ def run_trial(
         "awi_cli_calls": metrics["awi_cli_calls"],
         "mcp_tools": metrics["mcp_tools"],
         "shell_commands": metrics["shell_commands"],
+        "scope_violations": scope_violations,
         "usage": usage,
         "answer": final,
         "stderr_tail": stderr[-2_000:],
@@ -327,12 +381,18 @@ def build_prompt(roots: list[str], question: str, arm: str) -> str:
             "into the query text. Treat non-empty previews as direct evidence. Once an "
             "authoritative path is selected, do not search again: use one inspect (up to "
             "500 lines) for missing text details or workspace_query for structured "
-            "aggregation. Keep workspace_search limit at 10 or less."
+            "aggregation. For a JSON object or audit/result file, prefer one "
+            "workspace_inspect after selecting the path; do not apply array functions "
+            "unless the value is known to be an array. If workspace_query fails, do not "
+            "retry the same query; switch to inspect or use the exact error to make one "
+            "corrected query. Keep workspace_search limit at 10 or less."
         )
     else:
         retrieval_rules = (
             "Use ordinary read-only shell retrieval commands such as rg, fd, sed, "
-            "head, jq, and awk. Do not invoke AWI, its CLI, or any MCP tool."
+            "head, jq, and awk. Use only absolute paths beneath the allowed corpus "
+            "roots; never use a relative search root such as `.` or `..`. Do not "
+            "invoke AWI, its CLI, or any MCP tool."
         )
     return f"""You are in a controlled read-only retrieval benchmark.
 
@@ -360,7 +420,7 @@ def codex_command(args: argparse.Namespace, arm: str, final_path: Path) -> list[
         'base_url="http://127.0.0.1:15800/v1", wire_api="responses", '
         'env_key="CODEX_ROUTER_API_KEY"}'
     )
-    return [
+    command = [
         str(args.codex_bin),
         "exec",
         "--ephemeral",
@@ -372,7 +432,7 @@ def codex_command(args: argparse.Namespace, arm: str, final_path: Path) -> list[
         "--config",
         'model_provider="local-router"',
         "--config",
-        'model_catalog_json="/home/tiger/.codex/model-catalogs/multi-provider-catalog.json"',
+        f'model_catalog_json="{toml_string(args.model_catalog)}"',
         "--config",
         provider,
         "--config",
@@ -398,6 +458,18 @@ def codex_command(args: argparse.Namespace, arm: str, final_path: Path) -> list[
         str(args.sandbox_root / f"cwd-{arm}"),
         "-",
     ]
+    if arm == "baseline":
+        command.insert(command.index("--ephemeral") + 1, "--ignore-user-config")
+    insert_at = command.index("--output-schema")
+    command[insert_at:insert_at] = [
+        "--disable",
+        "skill_search",
+        "--disable",
+        "plugins",
+        "--disable",
+        "apps",
+    ]
+    return command
 
 
 def parse_events(stdout: str) -> list[dict[str, Any]]:
@@ -442,11 +514,23 @@ def tool_metrics(events: list[dict[str, Any]]) -> dict[str, Any]:
         if item.get("type") == "command_execution":
             shell_commands.append(str(item.get("command", "")))
         elif item.get("type") == "mcp_tool_call":
+            result = item.get("result")
+            structured = (
+                result.get("structured_content") if isinstance(result, dict) else None
+            )
+            raw_hits = structured.get("hits") if isinstance(structured, dict) else None
+            hits = raw_hits if isinstance(raw_hits, list) else []
             mcp_tools.append(
                 {
                     "server": item.get("server"),
                     "tool": item.get("tool"),
                     "status": item.get("status"),
+                    "arguments": item.get("arguments", {}),
+                    "hit_paths": [
+                        str(hit["path"])
+                        for hit in hits
+                        if isinstance(hit, dict) and hit.get("path")
+                    ],
                 }
             )
 
@@ -482,8 +566,89 @@ def tool_metrics(events: list[dict[str, Any]]) -> dict[str, Any]:
     }
 
 
+def path_is_within_root(path: str, root: str) -> bool:
+    try:
+        Path(path).resolve().relative_to(Path(root).resolve())
+        return True
+    except ValueError:
+        return False
+
+
+def find_shell_scope_violations(commands: list[str], roots: list[str]) -> list[str]:
+    violations = set()
+    for command in commands:
+        absolute_paths = re.findall(r"(?<![\w:])/(?:home|mnt)/[^\s\"'`]+", command)
+        if re.search(r"(?<![\w-])(rg|fd|find)(?![\w-])", command) and not any(
+            path_is_within_root(path.rstrip(".,;:)]}"), root)
+            for path in absolute_paths
+            for root in roots
+        ):
+            violations.add("relative-search-root")
+        for raw_path in re.findall(r"(?<![\w:])/(?:home|mnt)/[^\s\"'`]+", command):
+            path = raw_path.rstrip(".,;:)]}")
+            if not any(path_is_within_root(path, root) for root in roots):
+                violations.add(path)
+    return sorted(violations)
+
+
+def find_awi_scope_violations(
+    mcp_tools: list[dict[str, Any]], roots: list[str]
+) -> list[str]:
+    violations = set()
+    for call in mcp_tools:
+        if call.get("server") != "awi":
+            continue
+        tool = call.get("tool")
+        arguments = call.get("arguments", {})
+        if not isinstance(arguments, dict):
+            violations.add(f"awi-invalid-arguments:{tool}")
+            continue
+
+        if tool == "workspace_search":
+            requested_roots = arguments.get("roots")
+            if not isinstance(requested_roots, list) or not requested_roots:
+                violations.add("awi-search-missing-roots")
+            else:
+                for requested_root in requested_roots:
+                    if not any(
+                        path_is_within_root(str(requested_root), root) for root in roots
+                    ):
+                        violations.add(f"awi-search-root:{requested_root}")
+        elif tool == "workspace_inspect":
+            path = arguments.get("path")
+            if not isinstance(path, str) or not any(
+                path_is_within_root(path, root) for root in roots
+            ):
+                violations.add(f"awi-inspect-path:{path}")
+        elif tool == "workspace_query":
+            requested_roots = arguments.get("roots")
+            if not isinstance(requested_roots, list) or not requested_roots:
+                violations.add("awi-query-missing-roots")
+                requested_roots = []
+            for requested_root in requested_roots:
+                if not any(
+                    path_is_within_root(str(requested_root), root) for root in roots
+                ):
+                    violations.add(f"awi-query-root:{requested_root}")
+            inputs = arguments.get("inputs")
+            if not isinstance(inputs, list):
+                violations.add("awi-query-invalid-inputs")
+                inputs = []
+            for input_file in inputs:
+                path = input_file.get("path") if isinstance(input_file, dict) else None
+                if not isinstance(path, str) or not any(
+                    path_is_within_root(path, root) for root in roots
+                ):
+                    violations.add(f"awi-query-input:{path}")
+
+        for hit_path in call.get("hit_paths", []):
+            if not any(path_is_within_root(hit_path, root) for root in roots):
+                violations.add(f"awi-result-path:{hit_path}")
+    return sorted(violations)
+
+
 def score_answer(
-    task: dict[str, Any], final: dict[str, Any] | None
+    task: dict[str, Any], final: dict[str, Any] | None, roots: list[str]
 ) -> tuple[bool, bool]:
     if final is None:
         return False, False
@@ -492,12 +657,19 @@ def score_answer(
     if not isinstance(evidence_paths, list) or not isinstance(answer, str):
         return False, False
     path_correct = all(
-        any(str(path).endswith(expected) for path in evidence_paths)
+        any(
+            str(path).endswith(expected) and path_is_within_root(str(path), root)
+            for path in evidence_paths
+            for root in roots
+        )
         for expected in task["expected_paths"]
     )
     normalized_answer = normalize(answer)
     answer_correct = all(
-        normalize(token) in normalized_answer
+        any(
+            normalize(alternative) in normalized_answer
+            for alternative in token.split("|")
+        )
         for token in task["required_answer_tokens"]
     )
     return path_correct, answer_correct

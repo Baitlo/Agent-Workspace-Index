@@ -88,9 +88,7 @@ def audit_summary(rows):
         "by_day": dict(
             sorted(
                 collections.Counter(
-                    dt.datetime.fromtimestamp(
-                        row["timestamp_unix_ms"] / 1000, dt.timezone.utc
-                    )
+                    dt.datetime.fromtimestamp(row["timestamp_unix_ms"] / 1000, dt.UTC)
                     .date()
                     .isoformat()
                     for row in rows
@@ -291,7 +289,7 @@ def main():
     parser.add_argument("--reviews", type=Path, action="append", default=[])
     parser.add_argument("--review-template", type=Path)
     args = parser.parse_args()
-    since = dt.datetime.fromisoformat(args.since).replace(tzinfo=dt.timezone.utc)
+    since = dt.datetime.fromisoformat(args.since).replace(tzinfo=dt.UTC)
     rows = [
         row
         for path in args.audit
