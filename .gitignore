@@ -1,4 +1,6 @@
 /target/
+/target
+/.worktrees/
 /.awi-index/
 .ruff_cache/
 __pycache__/

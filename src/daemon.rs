@@ -223,8 +223,7 @@ fn serve_snapshot_readers(
     let active_path = Arc::new(RwLock::new(workspace.index_dir().to_owned()));
     let metrics = Arc::new(DaemonMetrics::new(worker_count, queue_capacity));
     let status_cache: SharedStatusCache = Arc::new(RwLock::new(None));
-    // 0=initial, 1=loading, 2=populated, 3=error. Exposed so a cold/failed
-    // status never masquerades as a healthy all-zero index.
+    // 0=initial, 1=loading, 2=populated, 3=error.
     let status_state = Arc::new(AtomicU8::new(0));
     // Chain off the warm served reader so the refresher shares the live semantic
     // sidecar Arc (readiness + metrics), not a cold duplicate that misreports
@@ -368,8 +367,6 @@ fn snapshot_accept_loop(
                 .write()
                 .expect("AWI active snapshot lock poisoned") = workspace.index_dir().to_owned();
         }
-        // The status scan runs in a dedicated thread (see spawn_status_refresher)
-        // so the accept loop never blocks on the multi-minute catalog scan.
         match listener.accept() {
             Ok((stream, _)) => {
                 metrics.accepted.fetch_add(1, Ordering::Relaxed);
@@ -682,7 +679,10 @@ fn dispatch(
                     .read()
                     .expect("AWI status cache lock poisoned")
                     .clone();
-                cached.unwrap_or_default()
+                cached.unwrap_or_else(|| IndexStatus {
+                    status_state: "initial".to_owned(),
+                    ..IndexStatus::default()
+                })
             } else {
                 match workspace.status() {
                     Ok(mut status) => {
