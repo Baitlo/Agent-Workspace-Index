@@ -26,9 +26,9 @@ Current code gates:
 - Ruff check and format checks for the full Python tree: passed.
 - The CI workflow now runs the same 43 Python tests instead of only the two
   original helper modules.
-- CI run `39786138133` passed on Linux x86_64, Linux aarch64, macOS x86_64 and
-  macOS aarch64 at commit `fcfb1e4`. The release workflow now runs the same 43
-  Python tests.
+- CI runs `39786138133` (`fcfb1e4`) and `39791347028` (`46ac3a9`) passed on
+  Linux x86_64, Linux aarch64, macOS x86_64 and macOS aarch64. The release
+  workflow now runs the same 43 Python tests.
 
 ## Runtime topology
 
