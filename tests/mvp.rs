@@ -152,7 +152,29 @@ fn indexes_code_text_and_tabular_metadata_incrementally() {
             .any(|hit| hit.path.ends_with("report.sql"))
     );
 
-    fs::remove_file(&csv).unwrap();
+    let renamed = root.join("experiment_v1/metrics_renamed.csv");
+    fs::rename(&csv, &renamed).unwrap();
+    let rename = workspace
+        .notify_paths(&[csv.clone(), renamed.clone()], &IndexOptions::default())
+        .unwrap();
+    assert_eq!(rename.requested, 2);
+    assert!(rename.roots.iter().map(|root| root.deleted).sum::<u64>() >= 1);
+    assert!(
+        !workspace
+            .search("quality_score", 10)
+            .unwrap()
+            .iter()
+            .any(|hit| hit.path.ends_with("metrics.csv"))
+    );
+    assert!(
+        workspace
+            .search("quality_score", 10)
+            .unwrap()
+            .iter()
+            .any(|hit| hit.path.ends_with("metrics_renamed.csv"))
+    );
+
+    fs::remove_file(&renamed).unwrap();
     let fourth = workspace
         .index_root(&root, &IndexOptions::default())
         .unwrap();
@@ -162,7 +184,7 @@ fn indexes_code_text_and_tabular_metadata_incrementally() {
             .search("quality_score", 10)
             .unwrap()
             .iter()
-            .any(|hit| hit.path.ends_with("metrics.csv"))
+            .any(|hit| hit.path.ends_with("metrics_renamed.csv"))
     );
 }
 
