@@ -708,6 +708,12 @@ impl Catalog {
         Ok(())
     }
 
+    pub(crate) fn clear_failures_for_path(&self, path: &str) -> Result<()> {
+        self.connection
+            .execute("DELETE FROM index_failures WHERE path = ?1", [path])?;
+        Ok(())
+    }
+
     pub(crate) fn mark_missing_deleted(
         &mut self,
         root_id: i64,
@@ -1295,4 +1301,33 @@ fn now_ms() -> i64 {
         .as_millis()
         .try_into()
         .unwrap_or(i64::MAX)
+}
+
+#[cfg(test)]
+mod tests {
+    use tempfile::tempdir;
+
+    use super::*;
+
+    #[test]
+    fn clears_resolved_failures_for_one_path() {
+        let fixture = tempdir().unwrap();
+        let catalog = Catalog::open(&fixture.path().join("catalog.sqlite3")).unwrap();
+        catalog
+            .record_failure(1, "<semantic>", "semantic_index", "cold start")
+            .unwrap();
+        catalog
+            .record_failure(1, "/repo/file.rs", "extract", "parse")
+            .unwrap();
+        catalog.clear_failures_for_path("<semantic>").unwrap();
+        let remaining: Vec<String> = catalog
+            .connection
+            .prepare("SELECT path FROM index_failures ORDER BY path")
+            .unwrap()
+            .query_map([], |row| row.get(0))
+            .unwrap()
+            .collect::<rusqlite::Result<_>>()
+            .unwrap();
+        assert_eq!(remaining, vec!["/repo/file.rs"]);
+    }
 }

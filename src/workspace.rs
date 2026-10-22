@@ -1413,6 +1413,7 @@ impl WorkspaceIndex {
         match result {
             Ok(report) => {
                 self.catalog.complete_generation(root_id, generation)?;
+                self.catalog.clear_failures_for_path("<semantic>")?;
                 Ok(report)
             }
             Err(error) => {
@@ -1442,7 +1443,9 @@ impl WorkspaceIndex {
             .into_iter()
             .map(|file| (file.id, file.generation))
             .collect::<Vec<_>>();
-        self.semantic.seal(generation, &expected)
+        self.semantic.seal(generation, &expected)?;
+        self.catalog.clear_failures_for_path("<semantic>")?;
+        Ok(())
     }
 
     pub(crate) fn prepare_checkpoint_generation(&mut self) -> Result<()> {
@@ -1472,6 +1475,7 @@ impl WorkspaceIndex {
             .map(|file| (file.id, file.generation))
             .collect::<Vec<_>>();
         self.semantic.seal(generation, &expected)?;
+        self.catalog.clear_failures_for_path("<semantic>")?;
         self.search.collect_obsolete_files()?;
         self.memory_search.collect_obsolete_files()?;
         self.catalog.prune_generation_rows(generation)?;
@@ -1512,7 +1516,10 @@ impl WorkspaceIndex {
         deleted_paths: &[String],
     ) -> Result<(u64, u64)> {
         match self.semantic.apply_changes(documents, deleted_paths) {
-            Ok(report) => Ok(report),
+            Ok(report) => {
+                self.catalog.clear_failures_for_path("<semantic>")?;
+                Ok(report)
+            }
             Err(error) => {
                 self.catalog.record_failure(
                     generation,
