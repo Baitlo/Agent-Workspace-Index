@@ -127,6 +127,10 @@ awi --index-dir /tmp/my-awi-index inspect /path/to/file --json
 awi --index-dir /tmp/my-awi-index inspect /path/to/file \
   --symbol exact_function_name --json
 
+# Keep the active generation plus one rollback generation and remove stale staging.
+awi snapshot-prune --publish-dir /shared/awi-publication \
+  --retain 2 --staging-older-hours 24 --json
+
 # Resolve instructions applicable to a concrete workspace path.
 awi --index-dir /tmp/my-awi-index search "build and test rules" \
   --kind agent_instructions --context-path /path/to/workspace/src/lib.rs --json

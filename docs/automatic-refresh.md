@@ -179,6 +179,12 @@ single-snapshot publication. Rollback restores that wrapper/source, stops the
 exact new reader and restarts the compatible previous reader. Do not overwrite
 or prune the retained rollback publication during validation.
 
+For an operator-driven cleanup before or after a producer restart, run
+`awi snapshot-prune --publish-dir <shard> --retain 2
+--staging-older-hours 24 --json`. The command always preserves the generation
+referenced by `current.json`, retains the newest rollback generation and
+removes only staging directories older than the supplied threshold.
+
 ## Bona deployment
 
 See [2026-09-30 deployment record](automatic-refresh-deployment-20260930.md) for active workers, configuration, evidence, benchmark limits and rollback.
