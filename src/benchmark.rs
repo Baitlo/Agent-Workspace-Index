@@ -234,7 +234,8 @@ fn evaluate_search(
         release_passed: false,
     };
     let gate = RetrievalGate {
-        release_passed: gate.review_approved
+        release_passed: !gold.split.eq_ignore_ascii_case("dev")
+            && gate.review_approved
             && gate.recall_at_10_passed
             && gate.p95_passed
             && gate.stale_rate_passed
@@ -433,6 +434,34 @@ mod tests {
         assert_eq!(report.stale_result_rate, 0.0);
         assert_eq!(report.tool_call_reduction, 0.5);
         assert!(!report.gate.review_approved);
+        assert!(!report.gate.release_passed);
+    }
+
+    #[test]
+    fn approved_dev_gold_cannot_open_release_gate() {
+        let directory = tempdir().unwrap();
+        let root = directory.path().join("workspace");
+        let index_dir = directory.path().join("index");
+        let source = root.join("Qianchuan102_data_process/build.py");
+        fs::create_dir_all(source.parent().unwrap()).unwrap();
+        fs::write(
+            &source,
+            "def build_qianchuan_dataset():\n    return 'retrieval fixture'\n",
+        )
+        .unwrap();
+        fs::write(
+            root.join("second_relevant.py"),
+            "SECOND_ONLY_TOKEN = True\n",
+        )
+        .unwrap();
+
+        let mut index = WorkspaceIndex::open(&index_dir).unwrap();
+        index.index_root(&root, &IndexOptions::default()).unwrap();
+        let mut gold = fixture_gold("approved", "dev");
+        gold.reviewers = vec!["reviewer-a".to_owned(), "reviewer-b".to_owned()];
+        let report = evaluate(&index, &gold).unwrap();
+
+        assert!(report.gate.review_approved);
         assert!(!report.gate.release_passed);
     }
 
