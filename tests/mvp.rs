@@ -930,6 +930,67 @@ fn daemon_atomically_switches_published_snapshots() {
 }
 
 #[test]
+fn stale_fenced_writer_cannot_flip_the_current_pointer() {
+    let fixture = tempdir().unwrap();
+    let root = fixture.path().join("workspace");
+    let writer_index = fixture.path().join("writer-index");
+    let publish_dir = fixture.path().join("published");
+    let fence = fixture.path().join("fence.json");
+    let source = root.join("service.rs");
+    fs::create_dir_all(&root).unwrap();
+    fs::write(&source, "pub fn fenced_version_one() {}\n").unwrap();
+
+    {
+        let mut workspace = WorkspaceIndex::open(&writer_index).unwrap();
+        workspace
+            .index_root(&root, &IndexOptions::default())
+            .unwrap();
+        let manifest = workspace.publish_snapshot(&publish_dir).unwrap();
+        assert_eq!(manifest.generation, 1);
+    }
+    let pointer_before: Value =
+        serde_json::from_slice(&fs::read(publish_dir.join("current.json")).unwrap()).unwrap();
+    fs::write(&source, "pub fn fenced_version_two() {}\n").unwrap();
+    fs::write(
+        &fence,
+        "{\"generation\":2,\"owner\":\"worker:new\",\"updated_ms\":1}\n",
+    )
+    .unwrap();
+
+    let output = Command::new(env!("CARGO_BIN_EXE_awi"))
+        .args([
+            "--index-dir",
+            path(&writer_index),
+            "reconcile",
+            path(&root),
+            "--publish-dir",
+            path(&publish_dir),
+            "--json",
+        ])
+        .env("AWI_FENCE_PATH", &fence)
+        .env("AWI_FENCE_GEN", "1")
+        .env("AWI_FENCE_OWNER", "worker:old")
+        .env("AWI_FENCE_TIMEOUT_SECS", "1")
+        .output()
+        .unwrap();
+    assert!(
+        !output.status.success(),
+        "stale writer unexpectedly published: stdout={}, stderr={}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(
+        String::from_utf8_lossy(&output.stderr).contains("another writer owns"),
+        "missing fail-closed fence error: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let pointer_after: Value =
+        serde_json::from_slice(&fs::read(publish_dir.join("current.json")).unwrap()).unwrap();
+    assert_eq!(pointer_after["generation"], pointer_before["generation"]);
+}
+
+#[test]
 fn snapshot_daemon_serves_around_a_stalled_connection() {
     let fixture = tempdir().unwrap();
     let root = fixture.path().join("workspace");

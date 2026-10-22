@@ -371,8 +371,7 @@ def monitor(config, stopping):
                 )
                 if has_fallback:
                     why = (
-                        "fence gen %s > fallback gen %s"
-                        % (current_gen, rec.get("gen"))
+                        f"fence gen {current_gen} > fallback gen {rec.get('gen')}"
                         if leadership_lost
                         else "worker shared status fresh"
                     )
@@ -561,7 +560,8 @@ def main():
     for signum in (signal.SIGTERM, signal.SIGINT):
         signal.signal(signum, lambda *_: stopping.set())
     try:
-        lease = open(lock_path, "a")
+        # The descriptor intentionally lives for the supervisor process lifetime.
+        lease = open(lock_path, "a")  # noqa: SIM115
     except OSError as exc:
         raise SystemExit(f"cannot open supervisor lock {lock_path}: {exc}")
     try:

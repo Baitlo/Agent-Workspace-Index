@@ -402,7 +402,9 @@ impl AwiMcpServer {
         // We never fabricate coverage: a path_prefix request is applied when the
         // parameter was accepted into the search; roots coverage reports the
         // number of requested roots.
-        let scope_coverage = if let Some(prefix) = req_path_prefix.as_deref().filter(|p| !p.is_empty()) {
+        let scope_coverage = if let Some(prefix) =
+            req_path_prefix.as_deref().filter(|p| !p.is_empty())
+        {
             json!({
                 "scope": "path_prefix",
                 "requested": {"path_prefix": prefix},

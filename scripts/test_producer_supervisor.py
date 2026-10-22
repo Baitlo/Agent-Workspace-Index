@@ -190,7 +190,7 @@ class FailoverTests(unittest.TestCase):
                 if p.poll() is None:
                     os.killpg(p.pid, signal.SIGKILL)
                     p.wait(timeout=5)
-            except Exception:
+            except (ProcessLookupError, PermissionError, subprocess.TimeoutExpired):
                 pass
         # The master launches the fallback in its OWN detached session
         # (start_new_session), so it is not a child of any process we track.
@@ -203,14 +203,17 @@ class FailoverTests(unittest.TestCase):
         needle = str(self.root)
         try:
             out = subprocess.run(
-                ["pgrep", "-f", needle], capture_output=True, text=True
+                ["pgrep", "-f", needle],
+                check=False,
+                capture_output=True,
+                text=True,
             ).stdout.split()
-        except Exception:
+        except (OSError, subprocess.SubprocessError):
             out = []
         for pid in out:
             try:
                 os.kill(int(pid), signal.SIGKILL)
-            except Exception:
+            except (ProcessLookupError, PermissionError, ValueError):
                 pass
 
     def _spawn(self, argv, extra_env=None):
@@ -292,7 +295,7 @@ class FailoverTests(unittest.TestCase):
         try:
             os.killpg(proc.pid, signal.SIGKILL)
             proc.wait(timeout=5)
-        except Exception:
+        except (ProcessLookupError, PermissionError, subprocess.TimeoutExpired):
             pass
 
     # -- T1: takeover after worker+supervisor disconnect --------------------- #
@@ -474,7 +477,10 @@ class FailoverTests(unittest.TestCase):
         wait_for(lambda: self.root.joinpath("status2").exists(), timeout=3)
         second = subprocess.run(
             [sys.executable, str(SUP), str(cp)],
-            capture_output=True, text=True, timeout=10,
+            check=False,
+            capture_output=True,
+            text=True,
+            timeout=10,
         )
         self.assertNotEqual(second.returncode, 0,
                             "second supervisor must refuse to start")

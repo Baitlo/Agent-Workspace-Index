@@ -450,11 +450,11 @@ impl ReaderIndex {
             if let Some(ms) = entry.status.freshness.scan_completed_ms {
                 scan_completed = Some(scan_completed.map_or(ms, |acc| acc.max(ms)));
             }
-            if let Some(age) = entry.status.freshness.age_ms {
-                if oldest_age.map_or(true, |acc| age > acc) {
-                    oldest_age = Some(age);
-                    oldest_shard = Some(entry.name.clone());
-                }
+            if let Some(age) = entry.status.freshness.age_ms
+                && oldest_age.is_none_or(|acc| age > acc)
+            {
+                oldest_age = Some(age);
+                oldest_shard = Some(entry.name.clone());
             }
         }
         result.freshness.shard_last_published_ms = shard_last;

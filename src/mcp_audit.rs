@@ -451,10 +451,18 @@ fn response_metrics(
                     })
                     .flatten(),
                 literal_match: (tool == "workspace_search")
-                    .then(|| content.and_then(|value| value.get("literal_match")).cloned())
+                    .then(|| {
+                        content
+                            .and_then(|value| value.get("literal_match"))
+                            .cloned()
+                    })
                     .flatten(),
                 scope_coverage: (tool == "workspace_search")
-                    .then(|| content.and_then(|value| value.get("scope_coverage")).cloned())
+                    .then(|| {
+                        content
+                            .and_then(|value| value.get("scope_coverage"))
+                            .cloned()
+                    })
                     .flatten(),
                 search_id: (tool == "workspace_search")
                     .then(|| {

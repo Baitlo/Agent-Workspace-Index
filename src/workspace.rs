@@ -771,9 +771,13 @@ impl WorkspaceIndex {
                         // Value is the per-query stage contract for the audit layer;
                         // it is threaded out so the daemon can attach it to the
                         // response envelope stages.
-                        let result = semantic_index
-                            .search(query, generation, semantic_scopes, kinds, semantic_prefixes)
-                            .map(|(candidates, diagnostics)| (candidates, diagnostics));
+                        let result = semantic_index.search(
+                            query,
+                            generation,
+                            semantic_scopes,
+                            kinds,
+                            semantic_prefixes,
+                        );
                         (result, started_at.elapsed())
                     })
                 });

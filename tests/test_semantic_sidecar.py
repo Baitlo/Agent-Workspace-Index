@@ -1,12 +1,16 @@
 import concurrent.futures
 import importlib.util
 import json
+import sys
 import tempfile
 import threading
 import time
+import types
 import unittest
 from collections import OrderedDict
 from pathlib import Path
+from typing import ClassVar
+from unittest import mock
 
 SCRIPT = Path(__file__).parents[1] / "scripts" / "semantic_sidecar.py"
 SPEC = importlib.util.spec_from_file_location("awi_semantic_sidecar", SCRIPT)
@@ -323,7 +327,7 @@ class OpenTableSemanticsTest(unittest.TestCase):
         class Database:
             def list_tables(self) -> object:
                 class Tables:
-                    tables = ["chunks"]
+                    tables: ClassVar[list[str]] = ["chunks"]
 
                 return Tables()
 
@@ -412,7 +416,7 @@ class _FakeLanceDb:
         class _Db:
             def list_tables(self) -> object:
                 class Tables:
-                    tables = ["chunks"]
+                    tables: ClassVar[list[str]] = ["chunks"]
 
                 return Tables()
 
@@ -539,7 +543,21 @@ class IvfMigrationTest(unittest.TestCase):
         sidecar.query_lock = threading.Lock()
         sidecar.query_results = OrderedDict()
         sidecar.query_inflight = {}
-        with tempfile.TemporaryDirectory() as directory:
+        class FakeIvfFlat:
+            def __init__(self, **kwargs: object) -> None:
+                self.__dict__.update(kwargs)
+
+        fake_package = types.ModuleType("lancedb")
+        fake_package.__path__ = []
+        fake_index = types.ModuleType("lancedb.index")
+        fake_index.IvfFlat = FakeIvfFlat
+        with (
+            mock.patch.dict(
+                sys.modules,
+                {"lancedb": fake_package, "lancedb.index": fake_index},
+            ),
+            tempfile.TemporaryDirectory() as directory,
+        ):
             sidecar.seal(
                 Path(directory),
                 Path(directory) / "semantic.json",

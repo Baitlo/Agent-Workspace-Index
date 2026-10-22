@@ -77,10 +77,11 @@ pub fn check(fence_path: &Path, expected: i64, expected_owner: Option<&str>) -> 
             expected
         );
     }
-    if let (Some(want), Some(actual)) = (expected_owner, fence.owner.as_ref()) {
-        if !want.is_empty() && actual != want {
-            bail!("fence owner {actual:?} != holder {want:?}");
-        }
+    if let (Some(want), Some(actual)) = (expected_owner, fence.owner.as_ref())
+        && !want.is_empty()
+        && actual != want
+    {
+        bail!("fence owner {actual:?} != holder {want:?}");
     }
     Ok(())
 }

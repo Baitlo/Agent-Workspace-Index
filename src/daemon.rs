@@ -682,7 +682,7 @@ fn dispatch(
                     .read()
                     .expect("AWI status cache lock poisoned")
                     .clone();
-                cached.unwrap_or_else(IndexStatus::default)
+                cached.unwrap_or_default()
             } else {
                 match workspace.status() {
                     Ok(mut status) => {
@@ -695,12 +695,11 @@ fn dispatch(
                             .unwrap_or_default();
                         status
                     }
-                    Err(error) => {
-                        let mut fallback = IndexStatus::default();
-                        fallback.status_state = "error".to_owned();
-                        fallback.status_error = Some(format!("{error:#}"));
-                        fallback
-                    }
+                    Err(error) => IndexStatus {
+                        status_state: "error".to_owned(),
+                        status_error: Some(format!("{error:#}")),
+                        ..IndexStatus::default()
+                    },
                 }
             };
             value.serving = metrics.snapshot();
@@ -734,10 +733,9 @@ fn spawn_status_refresher(
             // sees loading (not an empty status_state string) while the first scan
             // runs. It shares the warm semantic sidecar Arc with the serving path.
             let mut reader: Option<ReaderIndex> = Some(initial_reader);
-            let seed = || {
-                let mut seed = IndexStatus::default();
-                seed.status_state = "loading".to_owned();
-                seed
+            let seed = || IndexStatus {
+                status_state: "loading".to_owned(),
+                ..IndexStatus::default()
             };
             if let Ok(mut guard) = status_cache.write() {
                 *guard = Some(seed());
@@ -789,10 +787,12 @@ fn spawn_status_refresher(
                             status_state.store(3, Ordering::Relaxed);
                             eprintln!("AWI status refresher status compute failed: {error:#}");
                             if let Ok(mut guard) = status_cache.write() {
-                                let mut fallback = IndexStatus::default();
-                                fallback.status_state = "error".to_owned();
-                                fallback.status_error = Some(format!("{error:#}"));
-                                fallback.status_sampled_ms = sampled_ms;
+                                let fallback = IndexStatus {
+                                    status_state: "error".to_owned(),
+                                    status_error: Some(format!("{error:#}")),
+                                    status_sampled_ms: sampled_ms,
+                                    ..IndexStatus::default()
+                                };
                                 *guard = Some(fallback);
                             }
                         }
