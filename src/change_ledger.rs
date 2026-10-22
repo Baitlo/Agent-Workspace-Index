@@ -23,6 +23,7 @@ pub(crate) struct Change {
     pub path: PathBuf,
     pub revision: i64,
     pub attempts: u32,
+    pub priority: i32,
 }
 
 #[derive(Serialize)]
@@ -81,7 +82,7 @@ impl Ledger {
 
     pub fn batch(&self, limit: usize) -> Result<Vec<Change>> {
         let mut query = self.db.prepare(
-            "SELECT path,revision,attempts FROM changes WHERE retry_ms<=?1
+            "SELECT path,revision,attempts,priority FROM changes WHERE retry_ms<=?1
              ORDER BY priority DESC,received_ms,path LIMIT ?2",
         )?;
         Ok(query
@@ -90,6 +91,7 @@ impl Ledger {
                     path: PathBuf::from(row.get::<_, String>(0)?),
                     revision: row.get(1)?,
                     attempts: row.get(2)?,
+                    priority: row.get(3)?,
                 })
             })?
             .collect::<rusqlite::Result<_>>()?)
@@ -238,6 +240,7 @@ mod tests {
         let ledger = Ledger::open(&path).unwrap();
         ledger.enqueue(file).unwrap();
         let old = ledger.batch(1).unwrap().remove(0);
+        assert_eq!(old.priority, 1);
         ledger.enqueue(file).unwrap();
         ledger.ack(&old).unwrap();
         assert_eq!(ledger.pending().unwrap().0, 1);

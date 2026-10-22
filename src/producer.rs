@@ -13,7 +13,7 @@ use rusqlite::{OptionalExtension, params};
 use serde::{Deserialize, Serialize};
 
 use crate::WorkspaceIndex;
-use crate::change_ledger::{Ledger, now_ms};
+use crate::change_ledger::{Change, Ledger, now_ms};
 use crate::extract::{is_default_excluded, is_sensitive};
 use crate::model::IndexOptions;
 use crate::publisher::partition_roots;
@@ -387,7 +387,7 @@ fn apply_batch(
     let deadline = Instant::now() + config.batch_budget;
     let changes = ledger.batch(config.batch_files)?;
     let mut files = Vec::new();
-    for change in &changes {
+    for change in changes {
         let result = (|| -> Result<bool> {
             let path = notification_path(&change.path)?;
             let root = roots
@@ -419,41 +419,62 @@ fn apply_batch(
         })();
         match result {
             Ok(true) => files.push(change),
-            Ok(false) => ledger.ack(change)?,
-            Err(error) => ledger.retry(change, &format!("{error:#}"))?,
+            Ok(false) => ledger.ack(&change)?,
+            Err(error) => ledger.retry(&change, &format!("{error:#}"))?,
         }
         if Instant::now() >= deadline {
             break;
         }
     }
-    if files.is_empty() {
+    let mut priority_files = Vec::new();
+    let mut regular_files = Vec::new();
+    for change in files {
+        if change.priority > 0 {
+            priority_files.push(change);
+        } else {
+            regular_files.push(change);
+        }
+    }
+    for group in [priority_files, regular_files] {
+        apply_change_group(workspace, ledger, group, &config.options, deadline)?;
+    }
+    Ok(())
+}
+
+fn apply_change_group(
+    workspace: &mut WorkspaceIndex,
+    ledger: &Ledger,
+    changes: Vec<Change>,
+    options: &IndexOptions,
+    deadline: Instant,
+) -> Result<()> {
+    if changes.is_empty() {
         return Ok(());
     }
-    // Mark dirty BEFORE writing either derived index; interrupted commits replay.
+    // Mark dirty before writing either derived index; interrupted commits replay.
     ledger.set("dirty", "1")?;
-    let paths = files.iter().map(|e| e.path.clone()).collect::<Vec<_>>();
+    let paths = changes
+        .iter()
+        .map(|change| change.path.clone())
+        .collect::<Vec<_>>();
     let result = workspace
-        .notify_paths_budgeted(
-            &paths,
-            &config.options,
-            Some(Instant::now() + config.batch_budget),
-        )
+        .notify_paths_budgeted(&paths, options, Some(deadline))
         .and_then(|(report, attempted)| {
-            if report.roots.iter().any(|r| r.failed > 0) {
+            if report.roots.iter().any(|root| root.failed > 0) {
                 bail!("one or more notified files failed");
             }
             Ok(attempted)
         });
     match result {
         Ok(attempted) => {
-            for change in files {
-                if notification_path(&change.path).is_ok_and(|p| attempted.contains(&p)) {
-                    ledger.ack(change)?;
+            for change in changes {
+                if notification_path(&change.path).is_ok_and(|path| attempted.contains(&path)) {
+                    ledger.ack(&change)?;
                 }
             }
         }
         Err(error) => {
-            for change in files {
+            for change in &changes {
                 ledger.retry(change, &format!("{error:#}"))?;
             }
             return Err(error);

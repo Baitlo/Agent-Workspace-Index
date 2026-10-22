@@ -545,8 +545,10 @@ impl WorkspaceIndex {
             if deadline.is_some_and(|d| Instant::now() >= d) {
                 break;
             }
-            paths.sort();
-            paths.dedup();
+            // Keep the caller's ordering so producer priority events cannot be
+            // starved by lexicographically earlier background-scan paths.
+            let mut seen = HashSet::new();
+            paths.retain(|path| seen.insert(path.clone()));
             let (_, generation) = self.catalog.start_generation(&root)?;
             let result =
                 self.notify_root_inner(&root, root_id, generation, &paths, options, deadline);
@@ -2450,6 +2452,28 @@ mod tests {
         let files = workspace.catalog.current_semantic_files().unwrap();
         let names = files.into_iter().map(|file| file.name).collect::<Vec<_>>();
         assert_eq!(names, vec!["present.rs"]);
+    }
+
+    #[test]
+    fn notify_preserves_priority_input_order() {
+        let fixture = tempfile::tempdir().unwrap();
+        let root = fixture.path().join("workspace");
+        fs::create_dir_all(&root).unwrap();
+        let later = root.join("z_priority.rs");
+        let earlier = root.join("a_background.rs");
+        fs::write(&later, "pub fn priority_v1() {}\n").unwrap();
+        fs::write(&earlier, "pub fn background_v1() {}\n").unwrap();
+
+        let mut workspace = WorkspaceIndex::open(fixture.path().join("index")).unwrap();
+        let options = IndexOptions::default();
+        workspace.index_root(&root, &options).unwrap();
+        fs::write(&later, "pub fn priority_v2() {}\n").unwrap();
+        fs::write(&earlier, "pub fn background_v2() {}\n").unwrap();
+
+        let (_, attempted) = workspace
+            .notify_paths_budgeted(&[later.clone(), earlier.clone()], &options, None)
+            .unwrap();
+        assert_eq!(attempted, vec![later, earlier]);
     }
 
     #[test]
