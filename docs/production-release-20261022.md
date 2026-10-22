@@ -24,6 +24,8 @@ Current code gates:
   1 wire-protocol = 123 passed.
 - Python tests after the 2026-10-22 A/B harness hardening: 43 passed.
 - Ruff check and format checks for the full Python tree: passed.
+- The CI workflow now runs the same 43 Python tests instead of only the two
+  original helper modules.
 
 ## Runtime topology
 
