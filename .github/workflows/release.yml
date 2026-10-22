@@ -70,8 +70,12 @@ jobs:
 
       - name: Test Python helpers
         run: |
-          python3 -m unittest tests/test_semantic_sidecar.py
-          python3 tests/test_audit_session_adoption.py
+          PYTHONPATH=scripts python3 -m unittest \
+            tests/test_semantic_sidecar.py \
+            tests/test_audit_session_adoption.py \
+            scripts/test_producer_supervisor.py \
+            scripts/test_task_outcomes.py \
+            evaluation/two_shot_plus_tongyong_agent_ab_20260920/test_run_agent_ab.py
 
       - name: Build release binary
         run: cargo build --locked --release
