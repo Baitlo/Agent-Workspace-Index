@@ -32,9 +32,9 @@ const DEFAULT_QUERY_BATCH_WAIT_MS: u64 = 2;
 const DEFAULT_QUERY_CACHE_SIZE: usize = 256;
 const DEFAULT_MAX_INFLIGHT: usize = 32;
 const DEFAULT_QUERY_TIMEOUT_MS: u64 = 2_000;
+const DEFAULT_START_TIMEOUT_MS: u64 = 60_000;
 const CHUNKING_VERSION: u64 = 2;
 const UPDATE_TIMEOUT: Duration = Duration::from_secs(600);
-const START_TIMEOUT: Duration = Duration::from_secs(60);
 const MAX_BATCH_DOCUMENTS: usize = 32;
 const MAX_BATCH_BYTES: usize = 8 * 1024 * 1024;
 const MAX_SEMANTIC_CONTENT_BYTES: usize = 64 * 1024;
@@ -58,6 +58,7 @@ pub struct SemanticConfig {
     pub vector_limit: usize,
     pub vector_weight: f32,
     pub query_timeout: Duration,
+    pub start_timeout: Duration,
 }
 
 impl SemanticConfig {
@@ -98,6 +99,10 @@ impl SemanticConfig {
             query_timeout: Duration::from_millis(env_u64(
                 "AWI_SEMANTIC_QUERY_TIMEOUT_MS",
                 DEFAULT_QUERY_TIMEOUT_MS,
+            )?),
+            start_timeout: Duration::from_millis(env_u64(
+                "AWI_SEMANTIC_START_TIMEOUT_MS",
+                DEFAULT_START_TIMEOUT_MS,
             )?),
         }))
     }
@@ -719,7 +724,7 @@ impl SemanticRuntime {
             child: Mutex::new(child),
             socket,
         };
-        let deadline = Instant::now() + START_TIMEOUT;
+        let deadline = Instant::now() + config.start_timeout;
         loop {
             if let Some(status) = runtime
                 .child
@@ -747,7 +752,10 @@ impl SemanticRuntime {
                 }
             }
             if Instant::now() >= deadline {
-                anyhow::bail!("semantic sidecar did not start within {START_TIMEOUT:?}");
+                anyhow::bail!(
+                    "semantic sidecar did not start within {:?}",
+                    config.start_timeout
+                );
             }
             thread::sleep(Duration::from_millis(25));
         }

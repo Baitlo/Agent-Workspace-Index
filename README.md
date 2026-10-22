@@ -192,6 +192,7 @@ export AWI_SEMANTIC_MODEL_SHA256=fe12f3583dbbb832def4cffeb46c0d0ab49a3288542d5cd
 export AWI_SEMANTIC_PYTHON="$HOME/.cache/awi/semantic-venv/bin/python"
 export AWI_SEMANTIC_THREADS=16
 export AWI_SEMANTIC_EMBED_WORKERS=1
+export AWI_SEMANTIC_START_TIMEOUT_MS=600000
 ```
 
 For an existing catalog, precompute every eligible file once:
