@@ -77,11 +77,13 @@ pub fn check(fence_path: &Path, expected: i64, expected_owner: Option<&str>) -> 
             expected
         );
     }
-    if let (Some(want), Some(actual)) = (expected_owner, fence.owner.as_ref())
-        && !want.is_empty()
-        && actual != want
-    {
-        bail!("fence owner {actual:?} != holder {want:?}");
+    if let Some(want) = expected_owner.filter(|owner| !owner.is_empty()) {
+        let Some(actual) = fence.owner.as_deref() else {
+            bail!("fence owner missing; holder {want:?} cannot be verified");
+        };
+        if actual != want {
+            bail!("fence owner {actual:?} != holder {want:?}");
+        }
     }
     Ok(())
 }
@@ -174,6 +176,15 @@ mod tests {
         std::fs::create_dir_all(&dir).unwrap();
         write_fence(&dir, 99, "other");
         assert!(check(&dir.join("fence.json"), 7, None).is_err());
+    }
+
+    #[test]
+    fn fails_closed_when_expected_owner_is_missing() {
+        let dir =
+            std::env::temp_dir().join(format!("awi-fence-owner-missing-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("fence.json"), "{\"generation\":7}\n").unwrap();
+        assert!(check(&dir.join("fence.json"), 7, Some("a:fb")).is_err());
     }
 
     #[test]
