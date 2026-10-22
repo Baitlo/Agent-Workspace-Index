@@ -1190,10 +1190,7 @@ impl WorkspaceIndex {
     }
 
     pub fn status(&self) -> Result<IndexStatus> {
-        let _t = std::time::Instant::now();
-        eprintln!("AWI ws-status: enter");
         let mut status = self.catalog.status()?;
-        eprintln!("AWI ws-status: catalog.status took {:.1?}", _t.elapsed());
         status.semantic = self.semantic.status();
         status.retrieval = self.metrics.snapshot();
         status.semantic.generation_lag =
