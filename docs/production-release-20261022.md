@@ -21,11 +21,14 @@ Current code gates:
 - `cargo fmt --check`: passed.
 - `cargo clippy --locked --all-targets --all-features -- -D warnings`: passed.
 - Rust tests: 97 unit + 6 CLI + 2 MCP + 14 MVP + 3 search-intent +
-  1 wire-protocol = 123 passed.
+  1 wire-protocol = 125 passed after the release-gate and fence regressions.
 - Python tests after the 2026-10-22 A/B harness hardening: 43 passed.
 - Ruff check and format checks for the full Python tree: passed.
 - The CI workflow now runs the same 43 Python tests instead of only the two
   original helper modules.
+- CI run `39786138133` passed on Linux x86_64, Linux aarch64, macOS x86_64 and
+  macOS aarch64 at commit `fcfb1e4`. The release workflow now runs the same 43
+  Python tests.
 
 ## Runtime topology
 
@@ -201,6 +204,8 @@ benchmark will be rerun and recorded after they complete.
   datasets and failures.
 - Re-run the reviewed benchmark against the completed collection and require
   Recall@10 >= 0.95, P95 <= 200 ms and stale rate 0.
+- Keep `split=dev` gold sets out of the release gate; the benchmark code now
+  enforces this independently of review status.
 - Run targeted `sql-pair-chain` and `result-v47-audit` pilots, then a fresh
   72-run A/B. Require at least 50% fewer tool calls and at least 30% lower
   aggregate wall time without weakening the gate. Investigate the
