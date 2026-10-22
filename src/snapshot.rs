@@ -257,7 +257,7 @@ fn remove_stale_materializations(generations_dir: &Path) -> Result<()> {
     Ok(())
 }
 
-pub(crate) fn read_pointer(publish_dir: &Path) -> Result<SnapshotPointer> {
+pub fn read_pointer(publish_dir: &Path) -> Result<SnapshotPointer> {
     let path = publish_dir.join("current.json");
     serde_json::from_slice(
         &fs::read(&path).with_context(|| format!("read snapshot pointer {}", path.display()))?,
@@ -269,7 +269,7 @@ pub(crate) fn read_pointer(publish_dir: &Path) -> Result<SnapshotPointer> {
 /// generation the pointer currently references. Returns the removed generation
 /// numbers. `keep` is clamped to at least one so an active snapshot is never
 /// deleted.
-pub(crate) fn prune_generations(publish_dir: &Path, keep: usize) -> Result<Vec<i64>> {
+pub fn prune_generations(publish_dir: &Path, keep: usize) -> Result<Vec<i64>> {
     let keep = keep.max(1);
     let active = read_pointer(publish_dir)?.generation;
     let generations_dir = publish_dir.join("generations");
@@ -313,6 +313,50 @@ pub(crate) fn prune_generations(publish_dir: &Path, keep: usize) -> Result<Vec<i
         fs::remove_dir_all(&path)
             .with_context(|| format!("remove stale snapshot generation {}", path.display()))?;
         removed.push(generation);
+    }
+    if !removed.is_empty() {
+        sync_directory(&generations_dir)?;
+    }
+    Ok(removed)
+}
+
+/// Remove abandoned snapshot materialization directories older than `cutoff`.
+///
+/// These directories are staging copies left by a producer or reader that
+/// terminated before publishing. They are never referenced by `current.json`.
+pub fn prune_staging(publish_dir: &Path, cutoff: SystemTime) -> Result<Vec<PathBuf>> {
+    let generations_dir = publish_dir.join("generations");
+    let entries = match fs::read_dir(&generations_dir) {
+        Ok(entries) => entries,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
+        Err(error) => {
+            return Err(error).with_context(|| {
+                format!("list snapshot generations {}", generations_dir.display())
+            });
+        }
+    };
+    let mut removed = Vec::new();
+    for entry in entries {
+        let entry = entry?;
+        if !entry.file_type()?.is_dir() {
+            continue;
+        }
+        let name = entry.file_name();
+        let Some(name) = name.to_str() else {
+            continue;
+        };
+        if !name.starts_with(".generation-") || !name.contains(".tmp-") {
+            continue;
+        }
+        let metadata = entry.metadata()?;
+        if metadata.modified().unwrap_or(SystemTime::UNIX_EPOCH) > cutoff {
+            continue;
+        }
+        let path = entry.path();
+        make_writable(&path)?;
+        fs::remove_dir_all(&path)
+            .with_context(|| format!("remove stale snapshot staging {}", path.display()))?;
+        removed.push(path);
     }
     if !removed.is_empty() {
         sync_directory(&generations_dir)?;
@@ -523,6 +567,7 @@ fn now_ms() -> i64 {
 #[cfg(test)]
 mod tests {
     use std::fs;
+    use std::time::Duration;
 
     use tempfile::tempdir;
 
@@ -626,6 +671,35 @@ mod tests {
 
         // Pruning is idempotent once the retention target is met.
         assert!(prune_generations(&publish_dir, 2).unwrap().is_empty());
+    }
+
+    #[test]
+    fn prune_staging_removes_only_old_staging_directories() {
+        let fixture = tempdir().unwrap();
+        let publish_dir = fixture.path().join("publish");
+        let generations = publish_dir.join("generations");
+        fs::create_dir_all(&generations).unwrap();
+        let stale = generations.join(".generation-00000000000000000001.tmp-1");
+        let fresh = generations.join(".generation-00000000000000000002.tmp-2");
+        let published = generations.join("generation-00000000000000000003");
+        for path in [&stale, &fresh, &published] {
+            fs::create_dir_all(path).unwrap();
+            fs::write(path.join("marker"), b"value").unwrap();
+        }
+        fs::File::open(&stale)
+            .unwrap()
+            .set_modified(SystemTime::UNIX_EPOCH)
+            .unwrap();
+        fs::File::open(&fresh)
+            .unwrap()
+            .set_modified(SystemTime::now() + Duration::from_secs(3_600))
+            .unwrap();
+
+        let removed = prune_staging(&publish_dir, SystemTime::now()).unwrap();
+        assert_eq!(removed, vec![stale.clone()]);
+        assert!(!stale.exists());
+        assert!(fresh.exists());
+        assert!(published.exists());
     }
 
     #[test]

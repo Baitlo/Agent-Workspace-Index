@@ -167,6 +167,20 @@ enum Command {
         paths: Vec<PathBuf>,
     },
 
+    /// Prune old immutable generations and abandoned staging directories.
+    SnapshotPrune {
+        #[arg(long)]
+        publish_dir: PathBuf,
+        /// Number of newest generations to retain, plus the active generation.
+        #[arg(long, default_value_t = 2)]
+        retain: usize,
+        /// Remove abandoned staging directories older than this many hours.
+        #[arg(long, default_value_t = 24)]
+        staging_older_hours: u64,
+        #[arg(long)]
+        json: bool,
+    },
+
     /// Index explicitly changed or deleted files beneath known roots.
     Notify {
         #[arg(required = true)]
@@ -554,6 +568,32 @@ fn main() -> Result<()> {
         }
         Command::Enqueue { inbox, paths } => {
             print_json(&serde_json::json!({"event": awi::producer::enqueue(&inbox, &paths)?}))?;
+        }
+        Command::SnapshotPrune {
+            publish_dir,
+            retain,
+            staging_older_hours,
+            json,
+        } => {
+            let active = awi::snapshot::read_pointer(&publish_dir)?.generation;
+            let removed_generations = awi::snapshot::prune_generations(&publish_dir, retain)?;
+            let cutoff = std::time::SystemTime::now()
+                .checked_sub(Duration::from_secs(
+                    staging_older_hours.saturating_mul(3_600),
+                ))
+                .unwrap_or(std::time::SystemTime::UNIX_EPOCH);
+            let removed_staging = awi::snapshot::prune_staging(&publish_dir, cutoff)?;
+            let report = serde_json::json!({
+                "active_generation": active,
+                "retain": retain,
+                "removed_generations": removed_generations,
+                "removed_staging": removed_staging,
+            });
+            if json {
+                print_json(&report)?;
+            } else {
+                println!("{report}");
+            }
         }
         Command::Notify {
             paths,
