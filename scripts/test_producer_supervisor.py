@@ -107,7 +107,7 @@ class SupervisorTests(unittest.TestCase):
 # A fake producer. It enforces fencing itself: it appends one line to
 # publication.log ONLY while the shared fence generation equals the generation
 # it was launched at. This is the single-writer invariant under test.
-FAKE_PRODUCER = r'''
+FAKE_PRODUCER = r"""
 import json, os, time, pathlib, sys
 root = pathlib.Path(os.environ["AWI_TEST_ROOT"])
 gen = int(os.environ.get("AWI_FENCE_GEN", "0"))
@@ -142,7 +142,7 @@ while True:
     except Exception:
         pass
     time.sleep(0.05)
-'''
+"""
 
 
 def wait_for(pred, timeout=5.0, step=0.03):
@@ -163,8 +163,12 @@ def read_pub_log(path):
         m = re.match(r"^([\d.]+) pid=(\d+) gen=(\d+) owner=(\S+)$", line.strip())
         if m:
             rows.append(
-                {"t": float(m.group(1)), "pid": int(m.group(2)),
-                 "gen": int(m.group(3)), "owner": m.group(4)}
+                {
+                    "t": float(m.group(1)),
+                    "pid": int(m.group(2)),
+                    "gen": int(m.group(3)),
+                    "owner": m.group(4),
+                }
             )
     return rows
 
@@ -221,14 +225,18 @@ class FailoverTests(unittest.TestCase):
         if extra_env:
             env.update(extra_env)
         p = subprocess.Popen(
-            argv, env=env, start_new_session=True,
-            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+            argv,
+            env=env,
+            start_new_session=True,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
         )
         self.procs.append(p)
         return p
 
     def _seed_fence(self, gen, owner="worker:1"):
         import producer_supervisor as ps
+
         # advance the fence to exactly `gen` owned by the worker
         while True:
             cur = read_json(self.fence).get("generation", 0)
@@ -309,19 +317,23 @@ class FailoverTests(unittest.TestCase):
         # Shared worker status freezes -> master sees unreachable.
         wait_for(lambda: None, timeout=1.0)
         self._master()
+
         # After grace, master bumps fence to gen=2 and starts the fallback.
         def recovered():
             f = json.loads(self.fence.read_text())
             rows = read_pub_log(self.pub)
             return f["generation"] == 2 and rows and rows[-1]["gen"] == 2
+
         ok = wait_for(recovered, timeout=8)
         self.assertTrue(ok, "master should take over at fence gen=2")
         # Single-writer: after the first gen=2 write, NO gen=1 write appears.
         rows = read_pub_log(self.pub)
         first_g2 = next(i for i, r in enumerate(rows) if r["gen"] == 2)
         after = rows[first_g2:]
-        self.assertTrue(all(r["gen"] == 2 for r in after),
-                        "old gen=1 writer must not publish after takeover")
+        self.assertTrue(
+            all(r["gen"] == 2 for r in after),
+            "old gen=1 writer must not publish after takeover",
+        )
 
     # -- T2: fencing stops a partitioned (still-alive) old writer ----------- #
     def test_fencing_stops_partitioned_old_worker(self):
@@ -338,15 +350,19 @@ class FailoverTests(unittest.TestCase):
         )
         # write fence at gen=1 first (old worker's leadership)
         import producer_supervisor as ps
+
         self.assertEqual(ps.cas_bump_fence(self.fence, "worker:1"), 1)
-        rows = wait_for(lambda: [r for r in read_pub_log(self.pub) if r["gen"] == 1],
-                        timeout=5)
+        rows = wait_for(
+            lambda: [r for r in read_pub_log(self.pub) if r["gen"] == 1], timeout=5
+        )
         self.assertTrue(rows, "partitioned old worker should publish gen=1")
         old_pid = rows[-1]["pid"]
         # Master detects stale status and fails over.
         self._master()
-        wait_for(lambda: json.loads(self.fence.read_text())["generation"] == 2,
-                 timeout=8)
+        wait_for(
+            lambda: json.loads(self.fence.read_text())["generation"] == 2, timeout=8
+        )
+
         # The partitioned old writer must self-stop the moment it sees gen=2.
         def old_stopped():
             rows = read_pub_log(self.pub)
@@ -356,6 +372,7 @@ class FailoverTests(unittest.TestCase):
             cutoff = g2[0]["t"]
             tail = [r for r in rows if r["t"] > cutoff + 0.4 and r["gen"] == 1]
             return len(tail) == 0
+
         ok = wait_for(old_stopped, timeout=6)
         self.assertTrue(ok, "partitioned gen=1 writer must stop after fence bump")
         # and the old process actually exits (it checks the fence each loop).
@@ -372,26 +389,36 @@ class FailoverTests(unittest.TestCase):
     def test_handback_drains_fallback_and_worker_reclaims(self):
         # worker dies -> master takes over (gen=2 fallback publishing)
         self._worker_supervisor(gen=1, owner="worker:1")
-        wait_for(lambda: [r for r in read_pub_log(self.pub) if r["gen"] == 1],
-                 timeout=5)
+        wait_for(
+            lambda: [r for r in read_pub_log(self.pub) if r["gen"] == 1], timeout=5
+        )
         self._stop(self.procs[-1])
         wait_for(lambda: None, timeout=1.0)
         self._master()
-        wait_for(lambda: json.loads(self.fence.read_text())["generation"] == 2,
-                 timeout=8)
-        fb_rows = wait_for(lambda: [r for r in read_pub_log(self.pub) if r["gen"] == 2],
-                           timeout=8)
+        wait_for(
+            lambda: json.loads(self.fence.read_text())["generation"] == 2, timeout=8
+        )
+        fb_rows = wait_for(
+            lambda: [r for r in read_pub_log(self.pub) if r["gen"] == 2], timeout=8
+        )
         self.assertTrue(fb_rows, "fallback should publish gen=2")
         fb_pid = fb_rows[-1]["pid"]
         # Worker returns: a NEW on-worker supervisor claims fence -> gen=3 and
         # starts refreshing the SHARED worker status.
         self._worker_supervisor(claim=True, owner="worker:1")
-        wait_for(lambda: json.loads(self.fence.read_text())["generation"] == 3,
-                 timeout=8)
+        wait_for(
+            lambda: json.loads(self.fence.read_text())["generation"] == 3, timeout=8
+        )
         # Master sees fresh shared status -> drains the fallback.
-        wait_for(lambda: (self.fleet_status.exists() and
-                          json.loads(self.fleet_status.read_text())["producers"][0]
-                          ["state"] != "auto_recovering_local"), timeout=8)
+        wait_for(
+            lambda: (
+                self.fleet_status.exists()
+                and json.loads(self.fleet_status.read_text())["producers"][0]["state"]
+                != "auto_recovering_local"
+            ),
+            timeout=8,
+        )
+
         # Fallback process must be dead after drain.
         def fb_dead():
             try:
@@ -399,6 +426,7 @@ class FailoverTests(unittest.TestCase):
                 return False
             except ProcessLookupError:
                 return True
+
         ok = wait_for(fb_dead, timeout=6)
         self.assertTrue(ok, "master must drain (kill) the local fallback")
         # gen=3 worker is the sole writer; no gen=2 after worker reclaim.
@@ -417,15 +445,18 @@ class FailoverTests(unittest.TestCase):
     # -- T4: monitor restart reattaches, no double launch ------------------- #
     def test_monitor_restart_reattaches_no_double_launch(self):
         self._worker_supervisor(gen=1, owner="worker:1")
-        wait_for(lambda: [r for r in read_pub_log(self.pub) if r["gen"] == 1],
-                 timeout=5)
+        wait_for(
+            lambda: [r for r in read_pub_log(self.pub) if r["gen"] == 1], timeout=5
+        )
         self._stop(self.procs[-1])
         wait_for(lambda: None, timeout=1.0)
         m = self._master()
-        wait_for(lambda: json.loads(self.fence.read_text())["generation"] == 2,
-                 timeout=8)
-        fb_rows = wait_for(lambda: [r for r in read_pub_log(self.pub) if r["gen"] == 2],
-                           timeout=8)
+        wait_for(
+            lambda: json.loads(self.fence.read_text())["generation"] == 2, timeout=8
+        )
+        fb_rows = wait_for(
+            lambda: [r for r in read_pub_log(self.pub) if r["gen"] == 2], timeout=8
+        )
         fb_pid = fb_rows[-1]["pid"]
         # Restart the monitor (same state dir).
         self._stop(m)
@@ -441,13 +472,15 @@ class FailoverTests(unittest.TestCase):
     # -- T5: fallback's own heartbeat must NOT look like worker recovery ---- #
     def test_no_self_heartbeat_oscillation(self):
         self._worker_supervisor(gen=1, owner="worker:1")
-        wait_for(lambda: [r for r in read_pub_log(self.pub) if r["gen"] == 1],
-                 timeout=5)
+        wait_for(
+            lambda: [r for r in read_pub_log(self.pub) if r["gen"] == 1], timeout=5
+        )
         self._stop(self.procs[-1])
         wait_for(lambda: None, timeout=1.0)
         self._master()
-        rows = wait_for(lambda: [r for r in read_pub_log(self.pub) if r["gen"] == 2],
-                        timeout=8)
+        rows = wait_for(
+            lambda: [r for r in read_pub_log(self.pub) if r["gen"] == 2], timeout=8
+        )
         fb_pid = rows[-1]["pid"]
         # Watch for ~2.5s: the fallback pid must remain stable (no relaunch
         # oscillation) and fleet state stays auto_recovering_local.
@@ -455,12 +488,17 @@ class FailoverTests(unittest.TestCase):
         last_pid = fb_pid
         while time.monotonic() - stable_since < 2.5:
             tail = [r["pid"] for r in read_pub_log(self.pub) if r["gen"] == 2][-10:]
-            self.assertTrue(all(p == last_pid for p in tail),
-                            "fallback must not be relaunched by its own heartbeat")
+            self.assertTrue(
+                all(p == last_pid for p in tail),
+                "fallback must not be relaunched by its own heartbeat",
+            )
             time.sleep(0.1)
         state = json.loads(self.fleet_status.read_text())["producers"][0]["state"]
-        self.assertEqual(state, "auto_recovering_local",
-                         "fallback must keep running; no false recovery")
+        self.assertEqual(
+            state,
+            "auto_recovering_local",
+            "fallback must keep running; no false recovery",
+        )
 
     # -- T6: second supervisor on the same lock refuses --------------------- #
     def test_second_supervisor_refuses_lock(self):
@@ -482,14 +520,16 @@ class FailoverTests(unittest.TestCase):
             text=True,
             timeout=10,
         )
-        self.assertNotEqual(second.returncode, 0,
-                            "second supervisor must refuse to start")
+        self.assertNotEqual(
+            second.returncode, 0, "second supervisor must refuse to start"
+        )
         self.assertIn("holds the lease", second.stderr)
         self._stop(first)
 
     # -- T7: CAS contention fails closed (exactly one winner) --------------- #
     def test_cas_bump_fail_closed_on_contention(self):
         import producer_supervisor as ps
+
         # seed gen=1 owned by worker
         self.assertEqual(ps.cas_bump_fence(self.fence, "worker:1"), 1)
         # caller believes current gen is 1 -> bump to 2 (wins)
@@ -511,6 +551,7 @@ class FailoverTests(unittest.TestCase):
     # token pre-publish. Kept as a regression marker, not a green check.
     def test_gap_uncaged_publisher_keeps_writing_after_takeover(self):
         import producer_supervisor as ps
+
         uncaged = (
             "import os,time,pathlib\n"
             f"root=pathlib.Path({str(self.root)!r})\n"
@@ -528,11 +569,13 @@ class FailoverTests(unittest.TestCase):
         time.sleep(0.5)
         # The uncaged old process is STILL writing -> double-write would occur.
         lines_after = (self.root / "uncaged.log").read_text().count("W")
-        self.assertGreater(lines_after, 0,
-                           "uncaged publisher keeps writing: publisher-side "
-                           "token check is REQUIRED (documented gap)")
+        self.assertGreater(
+            lines_after,
+            0,
+            "uncaged publisher keeps writing: publisher-side "
+            "token check is REQUIRED (documented gap)",
+        )
         self._stop(old)
-
 
     # -- T9: primary worker must receive AWI_FENCE_PATH (guard armed) -------- #
     def test_primary_worker_env_carries_fence_path(self):
@@ -555,13 +598,19 @@ class FailoverTests(unittest.TestCase):
         p.write_text(json.dumps(cfg))
         proc = self._spawn([sys.executable, str(SUP), str(p)])
         probe = wait_for(
-            lambda: json.loads((self.root / "env_probe.json").read_text())
-            if (self.root / "env_probe.json").exists() else None,
+            lambda: (
+                json.loads((self.root / "env_probe.json").read_text())
+                if (self.root / "env_probe.json").exists()
+                else None
+            ),
             timeout=5,
         )
         self.assertIsNotNone(probe, "fake producer never probed its env")
-        self.assertEqual(probe["AWI_FENCE_PATH"], str(self.fence),
-                         "supervisor must forward AWI_FENCE_PATH to primary child")
+        self.assertEqual(
+            probe["AWI_FENCE_PATH"],
+            str(self.fence),
+            "supervisor must forward AWI_FENCE_PATH to primary child",
+        )
         self.assertEqual(probe["AWI_FENCE_GEN"], "1")
         self._stop(proc)
 

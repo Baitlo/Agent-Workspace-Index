@@ -1128,9 +1128,7 @@ def handle_connection(
                 )
             )
             return
-        diagnostics = (
-            result.get("diagnostics") if isinstance(result, dict) else None
-        )
+        diagnostics = result.get("diagnostics") if isinstance(result, dict) else None
         if diagnostics is not None:
             diagnostics["queue_wait_ms"] = pipeline_queue_ms
         envelope = {"ok": True, "result": result}
@@ -1139,9 +1137,7 @@ def handle_connection(
         # value is injected back into the body for the query that produced it.
         serialization_started_at = time.perf_counter()
         body = response_bytes(envelope)
-        serialization_ms = (
-            time.perf_counter() - serialization_started_at
-        ) * 1_000
+        serialization_ms = (time.perf_counter() - serialization_started_at) * 1_000
         if diagnostics is not None:
             diagnostics["serialization_ms"] = serialization_ms
             body = response_bytes(envelope)

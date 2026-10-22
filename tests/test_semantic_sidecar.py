@@ -391,16 +391,16 @@ class _RecordingSearch:
         return self
 
     def to_list(self) -> list[dict[str, object]]:
-        return [
-            {"file_id": 1, "path": "a.rs", "generation": 3, "_distance": 0.2}
-        ]
+        return [{"file_id": 1, "path": "a.rs", "generation": 3, "_distance": 0.2}]
 
 
 class _FakeTable:
     def __init__(self, search: _RecordingSearch) -> None:
         self.search_obj = search
 
-    def search(self, vector: list[float], vector_column_name: str = "vector") -> _RecordingSearch:
+    def search(
+        self, vector: list[float], vector_column_name: str = "vector"
+    ) -> _RecordingSearch:
         self.seen_vector = vector
         self.seen_column = vector_column_name
         return self.search_obj
@@ -427,7 +427,9 @@ class _FakeLanceDb:
 
 
 class StageDiagnosticsTest(unittest.TestCase):
-    def _build(self, index_type: str, partitions: int) -> tuple[object, _RecordingSearch]:
+    def _build(
+        self, index_type: str, partitions: int
+    ) -> tuple[object, _RecordingSearch]:
         search = _RecordingSearch()
         sidecar = SIDECAR.Sidecar.__new__(SIDECAR.Sidecar)
         sidecar.lancedb = _FakeLanceDb(_FakeTable(search))
@@ -543,6 +545,7 @@ class IvfMigrationTest(unittest.TestCase):
         sidecar.query_lock = threading.Lock()
         sidecar.query_results = OrderedDict()
         sidecar.query_inflight = {}
+
         class FakeIvfFlat:
             def __init__(self, **kwargs: object) -> None:
                 self.__dict__.update(kwargs)

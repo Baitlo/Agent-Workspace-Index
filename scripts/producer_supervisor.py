@@ -167,10 +167,7 @@ def fence_lost(config, fence_gen, fence_owner):
     fence = read_json(fence_path)
     gen = int(fence.get("generation", 0))
     if gen > int(fence_gen):
-        return (
-            f"fenced away by owner={fence.get('owner')} "
-            f"gen={gen}>{fence_gen}"
-        )
+        return f"fenced away by owner={fence.get('owner')} gen={gen}>{fence_gen}"
     return None
 
 
@@ -221,9 +218,7 @@ def monitor(config, stopping):
     auto_recover = config.get("auto_recover", False)
     grace_ms = config.get("auto_recover_grace_seconds", 240) * 1000
     drain_ms = config.get("auto_recover_drain_seconds", 15) * 1000
-    state_dir = Path(
-        config.get("failover_state_dir", str(config["status"]) + ".state")
-    )
+    state_dir = Path(config.get("failover_state_dir", str(config["status"]) + ".state"))
     state_dir.mkdir(parents=True, exist_ok=True)
     state_path = state_dir / "failover_state.json"
     master_owner = config.get("owner", "master:unknown")
@@ -246,7 +241,9 @@ def monitor(config, stopping):
             local_proc[name] = _Reattach(pid)
             log.warning(
                 "FAILOVER_REATTACH producer=%s fallback pid=%d gen=%s",
-                name, pid, rec.get("gen"),
+                name,
+                pid,
+                rec.get("gen"),
             )
         else:
             persisted.pop(name, None)
@@ -341,7 +338,9 @@ def monitor(config, stopping):
                         log.warning(
                             "FAILOVER_RECOVER launching LOCAL fenced fallback "
                             "producer=%s gen=%s cmd=%s",
-                            name, gen, fallback_cmd,
+                            name,
+                            gen,
+                            fallback_cmd,
                         )
                         proc = subprocess.Popen(
                             fallback_cmd,
@@ -377,7 +376,8 @@ def monitor(config, stopping):
                     )
                     log.warning(
                         "FAILOVER_RECOVERED producer=%s (%s); draining fallback",
-                        name, why,
+                        name,
+                        why,
                     )
                     target = proc.pid if proc is not None else None
                     if target is not None:
@@ -465,7 +465,9 @@ def supervise(config, stopping):
         reader.start()
         logger.info(
             "started pid=%d restart=%d fence_gen=%s",
-            child.pid, restarts, fence_gen,
+            child.pid,
+            restarts,
+            fence_gen,
         )
         started = time.monotonic()
         progress_at = started
