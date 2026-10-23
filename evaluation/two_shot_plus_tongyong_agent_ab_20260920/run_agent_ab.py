@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import datetime as dt
 import hashlib
 import json
 import math
@@ -354,6 +355,7 @@ def run_trial(
         }
     )
 
+    started_epoch = time.time()
     started = time.monotonic()
     process = subprocess.Popen(
         command,
@@ -377,6 +379,7 @@ def run_trial(
             os.killpg(process.pid, signal.SIGKILL)
             stdout, stderr = process.communicate()
     wall_seconds = time.monotonic() - started
+    finished_epoch = time.time()
 
     events = parse_events(stdout)
     final = load_final(final_path, events)
@@ -418,6 +421,10 @@ def run_trial(
         "arm": arm,
         "model": args.model,
         "wall_seconds": wall_seconds,
+        "started_at_utc": utc_iso(started_epoch),
+        "finished_at_utc": utc_iso(finished_epoch),
+        "started_at_unix_seconds": started_epoch,
+        "finished_at_unix_seconds": finished_epoch,
         "timed_out": timed_out,
         "exit_code": process.returncode,
         "path_correct": path_correct,
@@ -769,6 +776,10 @@ def normalize(value: str) -> str:
         for character in value
         if character.isalnum() or character == "_"
     )
+
+
+def utc_iso(epoch_seconds: float) -> str:
+    return dt.datetime.fromtimestamp(epoch_seconds, tz=dt.UTC).isoformat()
 
 
 def summarize(

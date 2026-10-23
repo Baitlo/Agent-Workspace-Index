@@ -166,6 +166,10 @@ class TaskBlindingTests(unittest.TestCase):
 
 
 class ProvenanceTests(unittest.TestCase):
+    def test_trial_timestamps_are_reconstructible(self):
+        timestamp = RUNNER.utc_iso(1_700_000_000.25)
+        self.assertEqual(timestamp, "2023-11-14T22:13:20.250000+00:00")
+
     def test_summary_includes_seed_and_captured_provenance(self):
         tasks = json.loads((HERE / "tasks.dev.json").read_text())
         args = types.SimpleNamespace(
