@@ -89,6 +89,7 @@ def main() -> None:
         tasks = tasks[: args.limit_tasks]
     tasks_document = {**tasks_document, "tasks": tasks}
 
+    args.provenance = capture_provenance(args)
     prepare_sandbox(args)
     results_path = args.output_dir / "results.jsonl"
     if results_path.exists() and not args.resume:
@@ -174,6 +175,93 @@ def validate_args(args: argparse.Namespace) -> None:
     )
     if daemon.returncode != 0:
         raise SystemExit(f"AWI daemon preflight failed: {daemon.stderr.strip()}")
+
+
+def capture_provenance(args: argparse.Namespace) -> dict[str, Any]:
+    """Capture immutable inputs and the exact reader status once per run."""
+    return {
+        "captured_at_unix_seconds": time.time(),
+        "seed": args.seed,
+        "tasks": file_identity(args.tasks),
+        "schema": file_identity(args.schema),
+        "model_catalog": file_identity(args.model_catalog),
+        "codex": executable_identity(args.codex_bin),
+        "awi": executable_identity(args.awi_bin),
+        "reader": reader_provenance(args),
+    }
+
+
+def file_identity(path: Path) -> dict[str, Any]:
+    return {
+        "path": str(path),
+        "sha256": sha256_file(path),
+        "size_bytes": path.stat().st_size,
+    }
+
+
+def executable_identity(path: Path) -> dict[str, Any]:
+    identity = file_identity(path)
+    try:
+        completed = subprocess.run(
+            [str(path), "--version"],
+            check=False,
+            capture_output=True,
+            text=True,
+            errors="replace",
+            timeout=20,
+        )
+    except (OSError, subprocess.TimeoutExpired) as error:
+        identity["version_error"] = str(error)
+        return identity
+    identity["version"] = (
+        completed.stdout.strip() if completed.returncode == 0 else None
+    )
+    if completed.returncode != 0:
+        identity["version_error"] = completed.stderr.strip()
+    return identity
+
+
+def reader_provenance(args: argparse.Namespace) -> dict[str, Any]:
+    command = [
+        str(args.awi_bin),
+        "--index-dir",
+        str(args.awi_index),
+        "--socket",
+        str(args.awi_socket),
+        "status",
+        "--json",
+    ]
+    try:
+        completed = subprocess.run(
+            command,
+            check=False,
+            capture_output=True,
+            text=True,
+            errors="replace",
+            timeout=120,
+        )
+    except (OSError, subprocess.TimeoutExpired) as error:
+        return {"command": command, "error": str(error)}
+    if completed.returncode != 0:
+        return {
+            "command": command,
+            "error": completed.stderr.strip(),
+            "exit_code": completed.returncode,
+        }
+    try:
+        status = json.loads(completed.stdout)
+    except json.JSONDecodeError as error:
+        return {
+            "command": command,
+            "error": f"invalid status JSON: {error}",
+            "exit_code": completed.returncode,
+        }
+    canonical = json.dumps(status, sort_keys=True, separators=(",", ":")).encode()
+    return {
+        "command": command,
+        "status_sha256": hashlib.sha256(canonical).hexdigest(),
+        "status": status,
+    }
 
 
 def validate_tasks_document(tasks_document: dict[str, Any], allow_draft: bool) -> None:
@@ -722,6 +810,7 @@ def summarize(
         "split": tasks_document["split"],
         "review_status": tasks_document["review_status"],
         "model": args.model,
+        "seed": args.seed,
         "repetitions": args.repetitions,
         "task_count": len(tasks_document["tasks"])
         if args.limit_tasks is None
@@ -764,6 +853,7 @@ def summarize(
             "sandbox_bytes": directory_size(args.sandbox_root),
         },
         "tasks_sha256": sha256_file(args.tasks),
+        "provenance": getattr(args, "provenance", None),
         "generated_at_unix_seconds": time.time(),
     }
 

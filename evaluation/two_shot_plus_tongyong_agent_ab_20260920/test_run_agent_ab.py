@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import tempfile
+import types
 import unittest
 from pathlib import Path
 
@@ -161,6 +163,55 @@ class TaskBlindingTests(unittest.TestCase):
             "across three scenes",
             questions["result-v61-strict"].casefold(),
         )
+
+
+class ProvenanceTests(unittest.TestCase):
+    def test_summary_includes_seed_and_captured_provenance(self):
+        tasks = json.loads((HERE / "tasks.dev.json").read_text())
+        args = types.SimpleNamespace(
+            model="test-model",
+            seed=17,
+            repetitions=1,
+            limit_tasks=None,
+            sandbox_root=Path("/tmp/awi-ab-test"),
+            output_dir=Path("/tmp/awi-ab-output"),
+            tasks=HERE / "tasks.dev.json",
+            provenance={
+                "seed": 17,
+                "reader": {"status_sha256": "abc"},
+            },
+        )
+        summary = RUNNER.summarize([], args, tasks)
+        self.assertEqual(summary["seed"], 17)
+        self.assertEqual(summary["provenance"], args.provenance)
+
+    def test_reader_provenance_records_status_hash(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            binary = root / "fake-awi"
+            binary.write_text(
+                "#!/usr/bin/env python3\n"
+                "import json,sys\n"
+                "if sys.argv[1:] == ['--version']:\n"
+                "    print('awi 9.9.9')\n"
+                "else:\n"
+                "    print(json.dumps({'status_state':'populated','shards':"
+                "[{'name':'fast','status':{'freshness':"
+                "{'published_generation':42}}}]}))\n"
+            )
+            binary.chmod(binary.stat().st_mode | 0o111)
+            args = types.SimpleNamespace(
+                awi_bin=binary,
+                awi_index=root / "index",
+                awi_socket=root / "awi.sock",
+            )
+            result = RUNNER.reader_provenance(args)
+            self.assertEqual(result["status"]["status_state"], "populated")
+            self.assertEqual(len(result["status_sha256"]), 64)
+            self.assertEqual(
+                RUNNER.executable_identity(binary)["version"],
+                "awi 9.9.9",
+            )
 
 
 if __name__ == "__main__":
