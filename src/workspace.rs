@@ -10,21 +10,22 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use anyhow::{Context, Result};
 use fs4::fs_std::FileExt;
 use ignore::WalkBuilder;
+use rayon::prelude::*;
 
 use crate::catalog::Catalog;
 use crate::data::{DuckDbProfiler, execute_query};
 use crate::extract::{
-    classify, contains_sensitive_agent_content, extension, extract_agent_document, extract_symbols,
-    extract_text, index_preview, is_default_excluded, is_sensitive, mtime_ns,
+    TextExtraction, classify, contains_sensitive_agent_content, extension, extract_agent_document,
+    extract_symbols, extract_text, index_preview, is_default_excluded, is_sensitive, mtime_ns,
     normalize_agent_memory_content, should_extract_text,
 };
 use crate::memory::{discover_agent_memory_sources, memory_metadata};
 use crate::metrics::LatencyWindow;
 use crate::model::{
     AgentDocumentRole, AgentMemoryIndexReport, AgentMemoryRefreshReport, AgentMemorySource,
-    CatalogFileInput, ContentExcerpt, DatasetProfile, FileKind, IndexOptions, IndexReport,
-    IndexStatus, InspectResult, NotifyReport, QueryRequest, QueryResult, RetrievalStatus,
-    SearchDocument, SearchHit, SemanticBuildReport, SymbolRecord,
+    CatalogFileInput, ContentExcerpt, DatasetProfile, FileKind, FileRecord, IndexOptions,
+    IndexReport, IndexStatus, InspectResult, NotifyReport, QueryRequest, QueryResult,
+    RetrievalStatus, SearchDocument, SearchHit, SemanticBuildReport, SymbolRecord,
 };
 use crate::search::SearchIndex;
 use crate::semantic::{SemanticIndex, merge_semantic_candidates};
@@ -162,6 +163,29 @@ pub struct WorkspaceIndex {
     memory_search: SearchIndex,
     semantic: SemanticIndex,
     metrics: Arc<RetrievalMetricsState>,
+}
+
+struct SemanticSource {
+    text: TextExtraction,
+    is_sql: bool,
+}
+
+fn extract_semantic_source(file: &FileRecord, max_content_bytes: u64) -> Result<SemanticSource> {
+    let path = Path::new(&file.absolute_path);
+    let text = extract_text(path, max_content_bytes)
+        .with_context(|| format!("extract semantic source {}", path.display()))?;
+    if text.content_hash != file.content_hash {
+        anyhow::bail!(
+            "semantic source changed since catalog generation {}: {}; run reconcile first",
+            file.generation,
+            path.display()
+        );
+    }
+    let is_sql = path
+        .extension()
+        .and_then(OsStr::to_str)
+        .is_some_and(|extension| extension.eq_ignore_ascii_case("sql"));
+    Ok(SemanticSource { text, is_sql })
 }
 
 impl WorkspaceIndex {
@@ -1346,62 +1370,55 @@ impl WorkspaceIndex {
             };
             let mut batch = Vec::new();
             let mut expected = Vec::with_capacity(files.len());
-            for file in &files {
-                let path = Path::new(&file.absolute_path);
-                let text = extract_text(path, options.max_content_bytes)
-                    .with_context(|| format!("extract semantic source {}", path.display()))?;
-                if text.content_hash != file.content_hash {
-                    anyhow::bail!(
-                        "semantic source changed since catalog generation {}: {}; \
-                         run reconcile first",
-                        file.generation,
-                        path.display()
-                    );
-                }
-                let is_sql = path
-                    .extension()
-                    .and_then(OsStr::to_str)
-                    .is_some_and(|extension| extension.eq_ignore_ascii_case("sql"));
-                if existing.contains(&(file.id, file.generation)) && !(rebuild_sql && is_sql) {
+            for group in files.chunks(128) {
+                let sources = group
+                    .par_iter()
+                    .map(|file| extract_semantic_source(file, options.max_content_bytes))
+                    .collect::<Result<Vec<_>>>()?;
+                for (file, source) in group.iter().zip(sources) {
+                    if existing.contains(&(file.id, file.generation))
+                        && !(rebuild_sql && source.is_sql)
+                    {
+                        expected.push((file.id, file.generation));
+                        report.files += 1;
+                        report.reused_files += 1;
+                        continue;
+                    }
+                    let symbols = self
+                        .catalog
+                        .symbols_for(file.id)?
+                        .into_iter()
+                        .flat_map(|symbol| [symbol.name, symbol.signature.unwrap_or_default()])
+                        .collect::<Vec<_>>()
+                        .join(" ");
+                    let schema = self
+                        .catalog
+                        .dataset_profile_for(file.id)?
+                        .map(|profile| profile.schema_text())
+                        .unwrap_or_default();
                     expected.push((file.id, file.generation));
-                    report.files += 1;
-                    report.reused_files += 1;
-                    continue;
-                }
-                let symbols = self
-                    .catalog
-                    .symbols_for(file.id)?
-                    .into_iter()
-                    .flat_map(|symbol| [symbol.name, symbol.signature.unwrap_or_default()])
-                    .collect::<Vec<_>>()
-                    .join(" ");
-                let schema = self
-                    .catalog
-                    .dataset_profile_for(file.id)?
-                    .map(|profile| profile.schema_text())
-                    .unwrap_or_default();
-                expected.push((file.id, file.generation));
-                batch.push(SearchDocument {
-                    file_id: file.id,
-                    path: file.absolute_path.clone(),
-                    name: file.name.clone(),
-                    experiment: file.experiment.clone().unwrap_or_default(),
-                    kind: file.kind.as_str().to_owned(),
-                    content: text.content.unwrap_or_default(),
-                    symbols,
-                    schema,
-                    preview: String::new(),
-                    generation: file.generation,
-                });
-                if batch.len() >= 128 {
-                    let (indexed, chunks) = self.semantic.apply_changes(&batch, &[])?;
-                    report.files += indexed;
-                    report.chunks += chunks;
-                    eprintln!(
-                        "AWI semantic build progress: files={} reused={} chunks={}",
-                        report.files, report.reused_files, report.chunks
-                    );
-                    batch.clear();
+                    batch.push(SearchDocument {
+                        file_id: file.id,
+                        path: file.absolute_path.clone(),
+                        name: file.name.clone(),
+                        experiment: file.experiment.clone().unwrap_or_default(),
+                        kind: file.kind.as_str().to_owned(),
+                        content: source.text.content.unwrap_or_default(),
+                        symbols,
+                        schema,
+                        preview: String::new(),
+                        generation: file.generation,
+                    });
+                    if batch.len() >= 128 {
+                        let (indexed, chunks) = self.semantic.apply_changes(&batch, &[])?;
+                        report.files += indexed;
+                        report.chunks += chunks;
+                        eprintln!(
+                            "AWI semantic build progress: files={} reused={} chunks={}",
+                            report.files, report.reused_files, report.chunks
+                        );
+                        batch.clear();
+                    }
                 }
             }
             if !batch.is_empty() {
@@ -2452,6 +2469,49 @@ mod tests {
         let files = workspace.catalog.current_semantic_files().unwrap();
         let names = files.into_iter().map(|file| file.name).collect::<Vec<_>>();
         assert_eq!(names, vec!["present.rs"]);
+    }
+
+    #[test]
+    fn semantic_source_extraction_is_order_stable_and_rejects_changed_files() {
+        let fixture = tempfile::tempdir().unwrap();
+        let root = fixture.path().join("workspace");
+        fs::create_dir_all(&root).unwrap();
+        fs::write(root.join("a.rs"), "pub fn semantic_a() {}\n").unwrap();
+        fs::write(root.join("b.sql"), "select 1 as semantic_b;\n").unwrap();
+
+        let mut workspace = WorkspaceIndex::open(fixture.path().join("index")).unwrap();
+        workspace
+            .index_root(&root, &IndexOptions::default())
+            .unwrap();
+        let files = workspace.catalog.current_semantic_files().unwrap();
+        let sources = files
+            .par_iter()
+            .map(|file| extract_semantic_source(file, IndexOptions::default().max_content_bytes))
+            .collect::<Result<Vec<_>>>()
+            .unwrap();
+
+        assert_eq!(
+            files
+                .iter()
+                .map(|file| file.name.as_str())
+                .collect::<Vec<_>>(),
+            vec!["a.rs", "b.sql"]
+        );
+        assert_eq!(
+            sources
+                .iter()
+                .map(|source| source.is_sql)
+                .collect::<Vec<_>>(),
+            vec![false, true]
+        );
+
+        fs::write(root.join("a.rs"), "pub fn semantic_a_changed() {}\n").unwrap();
+        let error =
+            match extract_semantic_source(&files[0], IndexOptions::default().max_content_bytes) {
+                Ok(_) => panic!("changed semantic source was accepted"),
+                Err(error) => error,
+            };
+        assert!(format!("{error:#}").contains("semantic source changed"));
     }
 
     #[test]
